@@ -27,6 +27,9 @@ final class PRManager: ObservableObject {
     @Published var tokenInvalid: Bool = false
     @Published var isRefreshing: Bool = false
 
+    /// PRs the user has not yet looked at. Persisted across launches.
+    @Published var unreadPRIds: Set<String> = []
+
     // MARK: - Services (internal for Settings access)
 
     let store:          PRStateStore
@@ -36,6 +39,7 @@ final class PRManager: ObservableObject {
     let settings:       MainlineSettings
     let trustLedger:    TrustLedgerStore
     let snoozeStore:    SnoozeStore
+    let scopeStore:     ScopeStore
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -81,6 +85,7 @@ final class PRManager: ObservableObject {
         self.client        = GitHubClient(settings: settings)
         self.trustLedger   = TrustLedgerStore()
         self.snoozeStore   = SnoozeStore(settings: settings)
+        self.scopeStore    = ScopeStore()
         self.poller        = PRPoller(
             client:        GitHubClient(settings: settings),
             store:         store,
@@ -97,6 +102,29 @@ final class PRManager: ObservableObject {
         // in the header. Without this the header is stuck on the last start() value.
         poller.$statusMessage
             .assign(to: &$statusMessage)
+
+        // Load persisted unread IDs
+        unreadPRIds = Set(settings.unreadPRIdsList)
+
+        // Observe quiet transitions from the poller (all transition nodeIds)
+        NotificationCenter.default.addObserver(
+            forName: .mainlineQuietTransitions,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let nodeIds = notification.userInfo?["nodeIds"] as? [String] else { return }
+            self.unreadPRIds.formUnion(nodeIds)
+            self.settings.unreadPRIdsList = Array(self.unreadPRIds)
+        }
+
+        // Rebuild scope counts after every PR update
+        store.$snapshots
+            .map { dict in Array(dict.values) }
+            .sink { [weak self] prs in
+                self?.scopeStore.rebuild(from: prs)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Token lifecycle
@@ -221,6 +249,20 @@ final class PRManager: ObservableObject {
         guard pr.totalLines < 50 else { return }
 
         await performAction(.approve(pr))
+    }
+
+    // MARK: - Unread management
+
+    /// Marks a single PR as seen (removes from unread).
+    func markSeen(_ pr: PRSnapshot) {
+        unreadPRIds.remove(pr.nodeId)
+        settings.unreadPRIdsList = Array(unreadPRIds)
+    }
+
+    /// Marks all currently visible PRs as seen.
+    func markAllSeen() {
+        unreadPRIds.removeAll()
+        settings.unreadPRIdsList = []
     }
 
     // MARK: - Fetch username after token save

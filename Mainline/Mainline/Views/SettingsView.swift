@@ -101,6 +101,44 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            // MARK: - Attention Policy
+            Section("Attention Policy") {
+                Text("Control how interrupting each event is.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(PREvent.allCases, id: \.rawValue) { event in
+                    HStack {
+                        Text(event.displayName)
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { settings.level(for: event) },
+                            set: { newLevel in
+                                var policy = settings.attentionPolicy
+                                policy[event.rawValue] = newLevel.rawValue
+                                settings.attentionPolicy = policy
+                            }
+                        )) {
+                            Text("Notify").tag(AttentionLevel.notify)
+                            Text("Quiet").tag(AttentionLevel.quiet)
+                            Text("Off").tag(AttentionLevel.off)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 200)
+                    }
+                }
+            }
+
+            // MARK: - Panel
+            Section("Panel") {
+                Picker("Panel height", selection: $settings.panelHeight) {
+                    Text("400 pt").tag(400)
+                    Text("480 pt").tag(480)
+                    Text("560 pt (default)").tag(560)
+                    Text("640 pt").tag(640)
+                }
+                .pickerStyle(.segmented)
+            }
         }
         .formStyle(.grouped)
         .padding()

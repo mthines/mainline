@@ -24,6 +24,9 @@ final class MainlineSettings: ObservableObject {
         static let autopilotEnabled     = "autopilotEnabled"
         static let collapsedSectionsRaw = "collapsedSectionsRaw"
         static let snoozeMapData        = "snoozeMapData"
+        static let attentionPolicy      = "attentionPolicy"
+        static let unreadPRIds          = "unreadPRIds"
+        static let panelHeight          = "panelHeight"
     }
 
     // MARK: - Persisted properties
@@ -88,6 +91,22 @@ final class MainlineSettings: ObservableObject {
         set { collapsedSectionsRaw = newValue.map { $0.rawValue } }
     }
 
+    /// Per-event attention policy: [PREvent.rawValue: AttentionLevel.rawValue].
+    /// Defaults to `PREvent.defaults` when a key is absent.
+    @Published var attentionPolicy: [String: String] {
+        didSet { defaults.set(attentionPolicy, forKey: Keys.attentionPolicy) }
+    }
+
+    /// PRs the user hasn't looked at yet (persisted nodeIds).
+    @Published var unreadPRIdsList: [String] {
+        didSet { defaults.set(unreadPRIdsList, forKey: Keys.unreadPRIds) }
+    }
+
+    /// Preferred panel content height. Options: 400/480/560/640. Default 560.
+    @Published var panelHeight: Int {
+        didSet { defaults.set(panelHeight, forKey: Keys.panelHeight) }
+    }
+
     /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
     @Published var snoozeMap: [String: Date] {
         didSet {
@@ -97,6 +116,17 @@ final class MainlineSettings: ObservableObject {
                 defaults.set(data, forKey: Keys.snoozeMapData)
             }
         }
+    }
+
+    // MARK: - Attention policy helper
+
+    /// Returns the attention level for a given event, falling back to the default.
+    func level(for event: PREvent) -> AttentionLevel {
+        if let raw = attentionPolicy[event.rawValue],
+           let level = AttentionLevel(rawValue: raw) {
+            return level
+        }
+        return PREvent.defaults[event] ?? .notify
     }
 
     // MARK: - ETag helpers
@@ -147,6 +177,11 @@ final class MainlineSettings: ObservableObject {
 
         // Collapsed sections — default: none collapsed
         collapsedSectionsRaw = defaults.stringArray(forKey: Keys.collapsedSectionsRaw) ?? []
+
+        // Attention policy — defaults are baked into PREvent.defaults
+        attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
+        unreadPRIdsList = defaults.stringArray(forKey: Keys.unreadPRIds) ?? []
+        panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 560 : defaults.integer(forKey: Keys.panelHeight)
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {

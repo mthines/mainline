@@ -102,8 +102,29 @@ final class PRPoller {
 
         let myLogin = settings.githubUsername
         let transitions = store.update(new: unique, myLogin: myLogin)
-        notifications.fireTransitions(transitions, settings: settings)
+        notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
+
+        // ALL transitions (notify + quiet) mark the PR as unread
+        let allTransitionNodeIds: [String] = transitions.compactMap { transition in
+            switch transition {
+            case .newPR(let pr), .readyForReview(let pr),
+                 .ciStatusChanged(let pr, _, _), .newReviewOrComment(let pr):
+                return pr.nodeId
+            }
+        }
+        let unreadCandidates = Array(Set(allTransitionNodeIds))
+        if !unreadCandidates.isEmpty {
+            NotificationCenter.default.post(
+                name: .mainlineQuietTransitions,
+                object: nil,
+                userInfo: ["nodeIds": unreadCandidates]
+            )
+        }
 
         statusMessage = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
     }
+}
+
+extension Notification.Name {
+    static let mainlineQuietTransitions = Notification.Name("MainlineQuietTransitions")
 }

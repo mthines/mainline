@@ -73,6 +73,7 @@ struct NeedsHumanView: View {
                 NSWorkspace.shared.open(url)
             }
         } label: {
+            let trustTier: TrustTier = trustLedger.tier(for: pr.author)
             HStack(alignment: .top, spacing: 8) {
                 triggerIcon(for: pr)
                     .frame(width: 20, height: 20)
@@ -86,7 +87,7 @@ struct NeedsHumanView: View {
                         Text("\(pr.repoFullName) #\(pr.number)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TrustBadgeView(tier: trustLedger.tier(for: pr.author))
+                        TrustBadgeView(tier: trustTier)
                         triggerLabels(for: pr)
                     }
                 }

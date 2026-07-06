@@ -18,6 +18,8 @@ struct MenuBarView: View {
 
             tabPicker
 
+            scopeFilter
+
             Divider()
 
             content
@@ -26,18 +28,41 @@ struct MenuBarView: View {
 
             footer
         }
-        .frame(width: 340)
+        .frame(width: 360)
         .padding(.vertical, 4)
         .onAppear {
             manager.snoozeStore.clearExpired()
+            // Delay slightly so user can glance at unread indicators before they clear
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                manager.markAllSeen()
+            }
+        }
+        .overlay(alignment: .bottom) {
+            HStack(spacing: 0) {
+                Button("") { cycleScopeBackward() }
+                    .keyboardShortcut(KeyEquivalent("["), modifiers: [])
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                Button("") { cycleScopeForward() }
+                    .keyboardShortcut(KeyEquivalent("]"), modifiers: [])
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+            }
         }
     }
 
     // MARK: - Derived data
 
-    /// PRs belonging to the currently selected tab.
+    /// PRs belonging to the currently selected tab, filtered by scope.
     private var visiblePRs: [PRSnapshot] {
-        manager.prs.filter { $0.tabs.contains(settings.selectedTab) }
+        let tabFiltered = manager.prs.filter { $0.tabs.contains(settings.selectedTab) }
+        guard let scope = manager.scopeStore.selectedScope else { return tabFiltered }
+        return tabFiltered.filter { pr in
+            switch scope {
+            case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
+            case .repo(let r): return pr.repoFullName == r
+            }
+        }
     }
 
     /// Count for the For-me tab label.
@@ -59,6 +84,14 @@ struct MenuBarView: View {
                 guard let prs = grouped[state], !prs.isEmpty else { return nil }
                 return (state, prs.sorted { $0.updatedAt > $1.updatedAt })
             }
+    }
+
+    /// Dynamic panel content height — generous default, capped to screen.
+    private var panelContentHeight: CGFloat {
+        let preferred = CGFloat(settings.panelHeight)
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
+        let maxAllowed = screenHeight * 0.80 - 120
+        return min(preferred, maxAllowed)
     }
 
     // MARK: - Header
@@ -111,6 +144,69 @@ struct MenuBarView: View {
         }
     }
 
+    // MARK: - Scope filter
+
+    @ViewBuilder
+    private var scopeFilter: some View {
+        if !manager.scopeStore.availableScopes.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    scopeChip(label: "All", scope: nil)
+                    ForEach(manager.scopeStore.availableScopes, id: \.rawValue) { scope in
+                        let count = manager.scopeStore.scopeCounts[scope] ?? 0
+                        scopeChip(label: "\(scope.displayName) \(count)", scope: scope)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+            .frame(height: 36)
+        }
+    }
+
+    private func scopeChip(label: String, scope: PRScope?) -> some View {
+        let isSelected = manager.scopeStore.selectedScope == scope
+        return Button {
+            manager.scopeStore.selectedScope = scope
+        } label: {
+            Text(label)
+                .font(.caption)
+                .fontWeight(isSelected ? .semibold : .regular)
+                .foregroundStyle(isSelected ? .primary : .secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    isSelected ? AnyShapeStyle(.blue.opacity(0.15)) : AnyShapeStyle(.quaternary),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Scope cycling
+
+    private func cycleScopeForward() {
+        let all: [PRScope?] = [nil] + manager.scopeStore.availableScopes
+        let current = manager.scopeStore.selectedScope
+        if let idx = all.firstIndex(where: { $0 == current }) {
+            let next = all[(idx + 1) % all.count]
+            manager.scopeStore.selectedScope = next
+        } else {
+            manager.scopeStore.selectedScope = nil
+        }
+    }
+
+    private func cycleScopeBackward() {
+        let all: [PRScope?] = [nil] + manager.scopeStore.availableScopes
+        let current = manager.scopeStore.selectedScope
+        if let idx = all.firstIndex(where: { $0 == current }) {
+            let prev = all[(idx - 1 + all.count) % all.count]
+            manager.scopeStore.selectedScope = prev
+        } else {
+            manager.scopeStore.selectedScope = nil
+        }
+    }
+
     // MARK: - Content
 
     @ViewBuilder
@@ -142,7 +238,7 @@ struct MenuBarView: View {
                     }
                 }
             }
-            .frame(maxHeight: 380)
+            .frame(maxHeight: panelContentHeight)
         }
     }
 
@@ -259,6 +355,13 @@ struct MenuBarView: View {
             }
         } label: {
             HStack(alignment: .top, spacing: 8) {
+                if manager.unreadPRIds.contains(pr.nodeId) {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 7, height: 7)
+                        .padding(.top, 6)
+                        .accessibilityLabel("Unread")
+                }
                 ciIcon(for: pr.ciStatus)
                     .frame(width: 20, height: 20)
 
