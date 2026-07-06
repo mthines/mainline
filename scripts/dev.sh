@@ -1,0 +1,156 @@
+#!/bin/bash
+# Perch Development Script
+# Watches for file changes and rebuilds/relaunches the app.
+#
+# Usage: ./scripts/dev.sh   (or: pnpm dev / nx run perch:dev)
+#
+# Requirements:
+#   - fswatch (install with: brew install fswatch)
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+SCHEME="Perch"
+BUILD_DIR="$PROJECT_DIR/build/Build/Products/Debug"
+APP_NAME="Perch.app"
+APP_PATH="$BUILD_DIR/$APP_NAME"
+WATCH_DIR="$PROJECT_DIR/Perch"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log_info()    { echo -e "${BLUE}[DEV]${NC} $1"; }
+log_success() { echo -e "${GREEN}[DEV]${NC} $1"; }
+log_warning() { echo -e "${YELLOW}[DEV]${NC} $1"; }
+log_error()   { echo -e "${RED}[DEV]${NC} $1"; }
+
+# Check for fswatch
+if ! command -v fswatch &> /dev/null; then
+    log_error "fswatch is required but not installed."
+    echo "Install with: brew install fswatch"
+    exit 1
+fi
+
+# Kill any existing Perch processes
+kill_app() {
+    pkill -x "Perch" 2>/dev/null || true
+}
+
+# Build the app (incremental — only recompiles changed files)
+build_app() {
+    log_info "Building $SCHEME..."
+
+    if xcodebuild \
+        -scheme "$SCHEME" \
+        -configuration Debug \
+        -derivedDataPath "$PROJECT_DIR/build" \
+        -destination "platform=macOS" \
+        ONLY_ACTIVE_ARCH=YES \
+        build 2>&1 | grep -E "(error:|warning:|BUILD SUCCEEDED|BUILD FAILED)"; then
+
+        if [ -d "$APP_PATH" ]; then
+            log_success "Build succeeded"
+            return 0
+        fi
+    fi
+
+    log_error "Build failed"
+    return 1
+}
+
+# Launch the app
+launch_app() {
+    if [ -d "$APP_PATH" ]; then
+        log_info "Launching $APP_NAME..."
+        open "$APP_PATH"
+        log_success "App launched"
+    else
+        log_error "App not found at $APP_PATH"
+    fi
+}
+
+# Debounce: track last build time to avoid rapid rebuilds
+LAST_BUILD_TIME=0
+DEBOUNCE_SECONDS=2
+
+# Handle file changes
+on_change() {
+    local changed_file="$1"
+
+    # Skip non-source files
+    case "$changed_file" in
+        *.swift|*.xib|*.storyboard|*.xcassets|*.plist|*.entitlements)
+            ;;
+        *)
+            return
+            ;;
+    esac
+
+    # Debounce: skip if last build was less than DEBOUNCE_SECONDS ago
+    local now
+    now=$(date +%s)
+    if (( now - LAST_BUILD_TIME < DEBOUNCE_SECONDS )); then
+        return
+    fi
+    LAST_BUILD_TIME=$now
+
+    echo ""
+    log_info "File changed: $(basename "$changed_file")"
+
+    kill_app
+
+    if build_app; then
+        launch_app
+    fi
+}
+
+# Cleanup on exit
+cleanup() {
+    log_info "Stopping dev server..."
+    kill_app
+    pkill -P $$ 2>/dev/null || true
+    exit 0
+}
+
+trap cleanup SIGINT SIGTERM
+
+# Main
+echo ""
+echo "╔════════════════════════════════════════╗"
+echo "║          Perch Development Mode         ║"
+echo "╠════════════════════════════════════════╣"
+echo "║  Watching for changes...               ║"
+echo "║  Press Ctrl+C to stop                  ║"
+echo "╚════════════════════════════════════════╝"
+echo ""
+
+cd "$PROJECT_DIR"
+
+# Initial build and launch
+if build_app; then
+    launch_app
+else
+    log_warning "Initial build failed, waiting for changes..."
+fi
+
+echo ""
+log_info "Watching for file changes in Perch/..."
+
+# Watch for changes (--latency debounces at the fswatch level too)
+fswatch -0 -r \
+    --latency 1.5 \
+    --include='\.swift$' \
+    --include='\.xib$' \
+    --include='\.storyboard$' \
+    --include='\.xcassets$' \
+    --include='\.plist$' \
+    --include='\.entitlements$' \
+    --exclude='.*' \
+    "$WATCH_DIR" | while read -d "" file; do
+    on_change "$file"
+done

@@ -1,6 +1,11 @@
 # Autonomous workflow artifacts
 .agent/
 
+# Node / Nx
+node_modules/
+.nx/cache
+.nx/workspace-data
+
 # macOS
 .DS_Store
 .AppleDouble

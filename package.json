@@ -1,0 +1,20 @@
+{
+  "name": "perch",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm dlx nx run perch:build",
+    "build:release": "pnpm dlx nx run perch:build:release",
+    "test": "pnpm dlx nx run perch:test",
+    "clean": "pnpm dlx nx run perch:clean",
+    "install:app": "pnpm dlx nx run perch:install",
+    "install:launch": "pnpm dlx nx run perch:install:launch",
+    "install:full": "pnpm dlx nx run perch:install:full",
+    "install:full:launch": "pnpm dlx nx run perch:install:full:launch",
+    "dev": "pnpm dlx nx run perch:dev",
+    "reset": "nx reset"
+  },
+  "devDependencies": {
+    "nx": "^21.0.0"
+  }
+}
