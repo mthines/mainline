@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Non-sandboxed app: outbound network + Keychain + gh subprocess all require
+	     the absence of the sandbox entitlement. See plan.md Out of Scope item #5. -->
+</dict>
+</plist>
