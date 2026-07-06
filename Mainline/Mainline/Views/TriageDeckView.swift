@@ -69,7 +69,8 @@ struct TriageDeckView: View {
                         onAction: { action in
                             handleTriageAction(action, on: pr)
                         },
-                        isPresented: $showCommandPalette
+                        isPresented: $showCommandPalette,
+                        manager: manager
                     )
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
                     .zIndex(10)

@@ -62,6 +62,7 @@ struct CommandPaletteView: View {
     let writeActionsEnabled: Bool
     let onAction: (TriageAction) -> Void
     @Binding var isPresented: Bool
+    var manager: PRManager? = nil
 
     @State private var filterText: String = ""
     @State private var selectedIndex: Int = 0
@@ -72,6 +73,19 @@ struct CommandPaletteView: View {
         if filterText.isEmpty { return all }
         let lower = filterText.lowercased()
         return all.filter { $0.label.lowercased().contains(lower) }
+    }
+
+    private var filteredScopes: [PRScope] {
+        guard let mgr = manager else { return [] }
+        if filterText.isEmpty { return mgr.scopeStore.availableScopes }
+        let lower = filterText.lowercased()
+        return mgr.scopeStore.availableScopes.filter {
+            $0.displayName.lowercased().contains(lower)
+        }
+    }
+
+    private var showAllScopeEntry: Bool {
+        filterText.isEmpty || "all".contains(filterText.lowercased())
     }
 
     var body: some View {
@@ -102,7 +116,7 @@ struct CommandPaletteView: View {
             Divider()
 
             // Action list
-            if filteredActions.isEmpty {
+            if filteredActions.isEmpty && filteredScopes.isEmpty && !showAllScopeEntry {
                 Text("No matching actions")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -112,6 +126,24 @@ struct CommandPaletteView: View {
                     VStack(spacing: 0) {
                         ForEach(Array(filteredActions.enumerated()), id: \.element.id) { index, action in
                             actionRow(action: action, index: index)
+                        }
+
+                        if let mgr = manager, (!filteredScopes.isEmpty || showAllScopeEntry) {
+                            Divider().padding(.vertical, 4)
+                            HStack {
+                                Text("Switch Scope")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 12)
+                                Spacer()
+                            }
+                            if showAllScopeEntry {
+                                scopeRow(label: "All scopes", scope: nil, mgr: mgr)
+                            }
+                            ForEach(filteredScopes, id: \.rawValue) { scope in
+                                let count = mgr.scopeStore.scopeCounts[scope] ?? 0
+                                scopeRow(label: "\(scope.displayName) (\(count))", scope: scope, mgr: mgr)
+                            }
                         }
                     }
                 }
@@ -191,6 +223,26 @@ struct CommandPaletteView: View {
             onAction(action)
             isPresented = false
         }
+    }
+
+    private func scopeRow(label: String, scope: PRScope?, mgr: PRManager) -> some View {
+        Button {
+            mgr.scopeStore.selectedScope = scope
+            isPresented = false
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "building.2")
+                    .frame(width: 16)
+                    .foregroundStyle(.primary)
+                Text(label)
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
