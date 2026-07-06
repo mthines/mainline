@@ -45,6 +45,13 @@ final class PRPoller {
         pollingTask = nil
     }
 
+    // MARK: - Public one-shot poll (used by Refresh button)
+
+    /// Runs a single poll without interfering with the scheduled loop.
+    func pollOnce(token: String) async {
+        await poll(token: token)
+    }
+
     // MARK: - Single poll
 
     private func poll(token: String) async {

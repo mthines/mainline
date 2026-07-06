@@ -65,6 +65,31 @@ private struct GraphQLNode: Decodable {
     let comments: GraphQLCount?
     let reviews: GraphQLCount?
     let commits: GraphQLCommits?
+    // Triage Cockpit additions
+    let mergeable: String?       // MERGEABLE | CONFLICTING | UNKNOWN
+    let headRefName: String?
+    let additions: Int?
+    let deletions: Int?
+    let reviewRequests: GraphQLReviewRequests?
+}
+
+private struct GraphQLReviewRequests: Decodable {
+    let nodes: [GraphQLReviewRequestNode]
+}
+
+private struct GraphQLReviewRequestNode: Decodable {
+    let requestedReviewer: GraphQLRequestedReviewer?
+}
+
+private struct GraphQLRequestedReviewer: Decodable {
+    let login: String?
+}
+
+/// Response model for REST `/repos/{owner}/{repo}/pulls/{number}/files`.
+struct PRFile: Decodable {
+    let filename: String
+    let additions: Int
+    let deletions: Int
 }
 
 private struct GraphQLActor: Decodable {
@@ -217,6 +242,19 @@ final class GitHubClient {
         default:                reviewState = reviewCount > 0 ? .changesRequested : .none
         }
 
+        // Map GraphQL mergeable enum to Bool?
+        let mergeableBool: Bool?
+        switch node.mergeable?.uppercased() {
+        case "MERGEABLE":   mergeableBool = true
+        case "CONFLICTING": mergeableBool = false
+        default:            mergeableBool = nil   // UNKNOWN or missing
+        }
+
+        // Extract requested reviewer logins
+        let requestedReviewers: [String] = node.reviewRequests?.nodes.compactMap {
+            $0.requestedReviewer?.login
+        } ?? []
+
         return PRSnapshot(
             nodeId:             nodeId,
             number:             number,
@@ -233,8 +271,12 @@ final class GitHubClient {
             commentCount:       node.comments?.totalCount ?? 0,
             updatedAt:          node.updatedAt ?? "",
             author:             node.author?.login ?? "",
-            requestedReviewers: [],
-            tabs:               [tab]
+            requestedReviewers: requestedReviewers,
+            tabs:               [tab],
+            mergeable:          mergeableBool,
+            headRefName:        node.headRefName ?? "",
+            linesAdded:         node.additions ?? 0,
+            linesDeleted:       node.deletions ?? 0
         )
     }
 
@@ -267,10 +309,21 @@ final class GitHubClient {
             state
             reviewDecision
             updatedAt
+            mergeable
+            headRefName
+            additions
+            deletions
             author { login }
             repository { nameWithOwner }
             comments { totalCount }
             reviews { totalCount }
+            reviewRequests(first: 10) {
+              nodes {
+                requestedReviewer {
+                  ... on User { login }
+                }
+              }
+            }
             commits(last: 1) {
               nodes {
                 commit {
@@ -283,6 +336,173 @@ final class GitHubClient {
       }
     }
     """
+
+    // MARK: - Fetch diff (REST)
+
+    /// Fetches the unified diff text for a PR.
+    /// Caps the response at 512 KB to avoid OOM on very large PRs.
+    func fetchDiff(repoFullName: String, number: Int, token: String) async throws -> String {
+        let urlString = "https://api.github.com/repos/\(repoFullName)/pulls/\(number)"
+        guard let url = URL(string: urlString) else { throw GitHubAPIError.unknown(0) }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github.v3.diff", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
+
+        switch http.statusCode {
+        case 200: break
+        case 401: throw GitHubAPIError.unauthorized
+        default:  throw GitHubAPIError.unknown(http.statusCode)
+        }
+
+        let cap = 512 * 1024  // 512 KB
+        let truncated = data.count > cap ? data.prefix(cap) : data
+        return String(data: truncated, encoding: .utf8) ?? String(data: truncated, encoding: .isoLatin1) ?? ""
+    }
+
+    // MARK: - Fetch files (REST)
+
+    /// Fetches the list of files changed in a PR.
+    func fetchFiles(repoFullName: String, number: Int, token: String) async throws -> [PRFile] {
+        let urlString = "https://api.github.com/repos/\(repoFullName)/pulls/\(number)/files?per_page=100"
+        guard let url = URL(string: urlString) else { throw GitHubAPIError.unknown(0) }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
+
+        switch http.statusCode {
+        case 200: break
+        case 401: throw GitHubAPIError.unauthorized
+        default:  throw GitHubAPIError.unknown(http.statusCode)
+        }
+
+        do {
+            return try JSONDecoder().decode([PRFile].self, from: data)
+        } catch {
+            throw GitHubAPIError.decodingError(error)
+        }
+    }
+
+    // MARK: - Perform GraphQL mutation
+
+    /// Executes an arbitrary GraphQL mutation and decodes the response.
+    func performMutation<T: Decodable>(
+        _ gql: String,
+        variables: [String: Any],
+        token: String,
+        responseType: T.Type
+    ) async throws -> T {
+        guard let url = URL(string: "https://api.github.com/graphql") else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        let bodyDict: [String: Any] = ["query": gql, "variables": variables]
+        guard let body = try? JSONSerialization.data(withJSONObject: bodyDict) else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
+
+        try checkRateLimit(http)
+
+        switch http.statusCode {
+        case 200: break
+        case 401: throw GitHubAPIError.unauthorized
+        default:  throw GitHubAPIError.unknown(http.statusCode)
+        }
+
+        do {
+            return try JSONDecoder().decode(responseType, from: data)
+        } catch {
+            throw GitHubAPIError.decodingError(error)
+        }
+    }
+
+    // MARK: - Review mutations
+
+    private static let addPullRequestReviewMutation = """
+    mutation($pullRequestId: ID!, $event: PullRequestReviewEvent!, $body: String) {
+      addPullRequestReview(input: {
+        pullRequestId: $pullRequestId,
+        event: $event,
+        body: $body
+      }) {
+        pullRequestReview { id }
+      }
+    }
+    """
+
+    private static let mergePullRequestMutation = """
+    mutation($pullRequestId: ID!) {
+      mergePullRequest(input: { pullRequestId: $pullRequestId }) {
+        pullRequest { merged }
+      }
+    }
+    """
+
+    struct ReviewMutationResponse: Decodable {
+        struct AddReview: Decodable {
+            struct Review: Decodable { let id: String }
+            let pullRequestReview: Review?
+        }
+        let data: AddReview?
+    }
+
+    struct MergeMutationResponse: Decodable {
+        struct MergePR: Decodable {
+            struct PR: Decodable { let merged: Bool }
+            let pullRequest: PR?
+        }
+        let data: MergePR?
+    }
+
+    /// Approves a pull request via GraphQL addPullRequestReview.
+    func approvePR(nodeId: String, token: String) async throws {
+        let variables: [String: Any] = ["pullRequestId": nodeId, "event": "APPROVE"]
+        _ = try await performMutation(
+            Self.addPullRequestReviewMutation,
+            variables: variables,
+            token: token,
+            responseType: ReviewMutationResponse.self
+        )
+    }
+
+    /// Requests changes on a pull request.
+    func requestChangesPR(nodeId: String, body: String, token: String) async throws {
+        let variables: [String: Any] = ["pullRequestId": nodeId, "event": "REQUEST_CHANGES", "body": body]
+        _ = try await performMutation(
+            Self.addPullRequestReviewMutation,
+            variables: variables,
+            token: token,
+            responseType: ReviewMutationResponse.self
+        )
+    }
+
+    /// Merges a pull request.
+    func mergePR(nodeId: String, token: String) async throws {
+        let variables: [String: Any] = ["pullRequestId": nodeId]
+        _ = try await performMutation(
+            Self.mergePullRequestMutation,
+            variables: variables,
+            token: token,
+            responseType: MergeMutationResponse.self
+        )
+    }
 
     // MARK: - Helpers
 
