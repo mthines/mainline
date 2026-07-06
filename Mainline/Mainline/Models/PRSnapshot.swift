@@ -99,6 +99,27 @@ struct PRSnapshot: Codable, Equatable {
     /// Which tab(s) surfaced this PR. Unioned when the same PR appears in both queries.
     var tabs: Set<ReviewTab>
 
+    // MARK: - Triage Cockpit fields (Layer A/C/B)
+
+    /// Whether the PR has merge conflicts. nil = GitHub hasn't computed yet (treat as no conflict).
+    var mergeable: Bool?
+
+    /// The head branch name (e.g. "feat/my-feature"). Used for sensitive-branch heuristics.
+    var headRefName: String
+
+    /// Lines added in this PR (from GraphQL additions field).
+    var linesAdded: Int
+
+    /// Lines deleted in this PR (from GraphQL deletions field).
+    var linesDeleted: Int
+
+    /// Sensitive file paths populated lazily by REST `/files` fetch.
+    /// nil = not yet fetched; [] = fetched but none sensitive.
+    var sensitivePathFlags: [String]?
+
+    /// Total lines changed in this PR.
+    var totalLines: Int { linesAdded + linesDeleted }
+
     init(
         nodeId: String,
         number: Int,
@@ -116,7 +137,12 @@ struct PRSnapshot: Codable, Equatable {
         updatedAt: String,
         author: String,
         requestedReviewers: [String],
-        tabs: Set<ReviewTab> = []
+        tabs: Set<ReviewTab> = [],
+        mergeable: Bool? = nil,
+        headRefName: String = "",
+        linesAdded: Int = 0,
+        linesDeleted: Int = 0,
+        sensitivePathFlags: [String]? = nil
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -135,6 +161,11 @@ struct PRSnapshot: Codable, Equatable {
         self.author = author
         self.requestedReviewers = requestedReviewers
         self.tabs = tabs
+        self.mergeable = mergeable
+        self.headRefName = headRefName
+        self.linesAdded = linesAdded
+        self.linesDeleted = linesDeleted
+        self.sensitivePathFlags = sensitivePathFlags
     }
 
     // MARK: - Classification

@@ -19,6 +19,11 @@ final class MainlineSettings: ObservableObject {
         static let notifyReviewComment  = "notifyReviewComment"
         static let githubUsername       = "githubUsername"
         static let selectedTab          = "selectedTab"
+        // Triage Cockpit additions
+        static let writeActionsEnabled  = "writeActionsEnabled"
+        static let autopilotEnabled     = "autopilotEnabled"
+        static let collapsedSectionsRaw = "collapsedSectionsRaw"
+        static let snoozeMapData        = "snoozeMapData"
     }
 
     // MARK: - Persisted properties
@@ -58,6 +63,40 @@ final class MainlineSettings: ObservableObject {
     /// Last-selected Reviews tab ("For me" / "Created").
     @Published var selectedTab: ReviewTab {
         didSet { defaults.set(selectedTab.rawValue, forKey: Keys.selectedTab) }
+    }
+
+    // MARK: - Triage Cockpit settings
+
+    /// Whether write actions (Approve, Merge, Request Changes) are enabled. Default OFF.
+    @Published var writeActionsEnabled: Bool {
+        didSet { defaults.set(writeActionsEnabled, forKey: Keys.writeActionsEnabled) }
+    }
+
+    /// Whether autopilot auto-approve is active. Requires writeActionsEnabled. Default OFF.
+    @Published var autopilotEnabled: Bool {
+        didSet { defaults.set(autopilotEnabled, forKey: Keys.autopilotEnabled) }
+    }
+
+    /// Section raw values that are collapsed. Stored as [String] in UserDefaults.
+    @Published var collapsedSectionsRaw: [String] {
+        didSet { defaults.set(collapsedSectionsRaw, forKey: Keys.collapsedSectionsRaw) }
+    }
+
+    /// Typed accessor for collapsed sections.
+    var collapsedSections: Set<PRState> {
+        get { Set(collapsedSectionsRaw.compactMap { PRState(rawValue: $0) }) }
+        set { collapsedSectionsRaw = newValue.map { $0.rawValue } }
+    }
+
+    /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
+    @Published var snoozeMap: [String: Date] {
+        didSet {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            if let data = try? encoder.encode(snoozeMap) {
+                defaults.set(data, forKey: Keys.snoozeMapData)
+            }
+        }
     }
 
     // MARK: - ETag helpers
@@ -101,5 +140,21 @@ final class MainlineSettings: ObservableObject {
         // Selected tab — default "For me"
         selectedTab = defaults.string(forKey: Keys.selectedTab)
             .flatMap { ReviewTab(rawValue: $0) } ?? .forMe
+
+        // Triage Cockpit — default OFF for write actions and autopilot
+        writeActionsEnabled = defaults.bool(forKey: Keys.writeActionsEnabled)
+        autopilotEnabled    = defaults.bool(forKey: Keys.autopilotEnabled)
+
+        // Collapsed sections — default: none collapsed
+        collapsedSectionsRaw = defaults.stringArray(forKey: Keys.collapsedSectionsRaw) ?? []
+
+        // Snooze map — decode from JSON data; default empty
+        if let data = defaults.data(forKey: Keys.snoozeMapData) {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            snoozeMap = (try? decoder.decode([String: Date].self, from: data)) ?? [:]
+        } else {
+            snoozeMap = [:]
+        }
     }
 }
