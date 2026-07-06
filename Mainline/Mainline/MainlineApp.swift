@@ -15,10 +15,15 @@ struct MainlineApp: App {
     @StateObject private var manager = PRManager()
 
     var body: some Scene {
-        MenuBarExtra("Mainline", systemImage: "arrow.triangle.pull") {
+        MenuBarExtra {
             MenuBarView(manager: manager)
                 .task { await manager.start() }
                 .onAppear { ManagerBridge.instance = manager }
+        } label: {
+            MenuBarIconView(
+                prs: manager.prs,
+                myLogin: manager.settings.githubUsername
+            )
         }
         .menuBarExtraStyle(.window)
     }
