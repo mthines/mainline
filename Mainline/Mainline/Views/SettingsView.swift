@@ -154,14 +154,21 @@ struct SettingsView: View {
     private func runGHAuthToken() async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             Task.detached(priority: .userInitiated) {
-                // Find gh on PATH
-                let ghPath = ["gh", "/usr/local/bin/gh", "/opt/homebrew/bin/gh"]
-                    .first { FileManager.default.isExecutableFile(atPath: $0.hasPrefix("/") ? $0 : "/usr/bin/env") }
-                    ?? "gh"
+                // GUI apps launched from Finder/Dock inherit a minimal PATH that
+                // excludes Homebrew, so `env gh` can't find it. Try known absolute
+                // locations first, then fall back to a login shell that resolves the
+                // user's real PATH.
+                let candidates = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+                let ghAbsolute = candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
 
                 let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                process.arguments     = [ghPath, "auth", "token"]
+                if let ghAbsolute {
+                    process.executableURL = URL(fileURLWithPath: ghAbsolute)
+                    process.arguments     = ["auth", "token"]
+                } else {
+                    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                    process.arguments     = ["-lc", "gh auth token"]
+                }
 
                 let stdout = Pipe()
                 let stderr = Pipe()

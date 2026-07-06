@@ -112,6 +112,13 @@ struct MenuBarView: View {
                 Text(emptyMessage)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                if manager.hasToken {
+                    Text("If you expected PRs here, your token may lack repo/read:org scope or SSO authorization. Try “Import from gh”.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 260)
+                }
             }
             .padding(.vertical, 24)
             Spacer()

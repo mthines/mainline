@@ -40,6 +40,11 @@ final class PRManager: ObservableObject {
         store.$snapshots
             .map { dict in dict.values.sorted { $0.updatedAt > $1.updatedAt } }
             .assign(to: &$prs)
+
+        // Surface the poller's real status (poll results, auth/rate-limit errors)
+        // in the header. Without this the header is stuck on the last start() value.
+        poller.$statusMessage
+            .assign(to: &$statusMessage)
     }
 
     // MARK: - Token lifecycle
