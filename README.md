@@ -31,18 +31,36 @@ xcodebuild -scheme Mainline -configuration Debug -destination "platform=macOS" b
 
 The built app will be in `~/Library/Developer/Xcode/DerivedData/Mainline-*/Build/Products/Debug/Mainline.app`.
 
-## Setting up a Personal Access Token
+## Authentication
 
-1. Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
-2. Create a token with **read** access to your repositories (issues and pull requests)
-3. Open Mainline Settings and paste the token, or click **Import from gh** if you have [GitHub CLI](https://cli.github.com) installed and authenticated
+The easiest option is **Import from gh**: if you have the [GitHub CLI](https://cli.github.com)
+installed and authenticated (`gh auth login`), open Mainline Settings and click
+**Import from gh**. This reuses your `gh` token, which is already authorized for any
+SSO-protected organizations you belong to.
+
+To use a Personal Access Token instead:
+
+1. GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)**
+2. Grant the **`repo`** and **`read:org`** scopes
+3. If any of your PRs live in an organization that enforces **SAML SSO**, click
+   **Configure SSO** on the token and **authorize** it for that org — otherwise GitHub
+   silently returns *no results* for those repos
+4. Open Mainline Settings and paste the token
+
+> **Note:** a fine-grained token with only "read" access is usually **not** enough for
+> org repos — prefer a classic token with `repo` + `read:org`, or just use *Import from gh*.
 
 ## Signing & Notarization
 
-> **TODO** — The app currently builds unsigned. To distribute outside of your local machine:
-> 1. Set your Apple Developer Team ID in `DEVELOPMENT_TEAM` in the Xcode project settings
-> 2. Run `xcodebuild archive` and then `xcrun notarytool submit`
-> 3. Staple the notarization ticket with `xcrun stapler staple`
+Debug builds are signed automatically with your **Apple Development** identity — set your
+own Team ID in `DEVELOPMENT_TEAM` (Xcode → target → Signing & Capabilities, or the
+`project.pbxproj` build settings). A stable signing identity is required for consistent
+Keychain access across rebuilds; ad-hoc signing causes repeated Keychain prompts.
+
+To distribute outside your machine:
+
+1. Build with your **Developer ID Application** identity
+2. `xcodebuild archive` → `xcrun notarytool submit` → `xcrun stapler staple`
 
 ## Screenshots
 
