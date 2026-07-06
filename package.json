@@ -1,17 +1,17 @@
 {
-  "name": "perch",
+  "name": "mainline",
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "pnpm dlx nx run perch:build",
-    "build:release": "pnpm dlx nx run perch:build:release",
-    "test": "pnpm dlx nx run perch:test",
-    "clean": "pnpm dlx nx run perch:clean",
-    "install:app": "pnpm dlx nx run perch:install",
-    "install:launch": "pnpm dlx nx run perch:install:launch",
-    "install:full": "pnpm dlx nx run perch:install:full",
-    "install:full:launch": "pnpm dlx nx run perch:install:full:launch",
-    "dev": "pnpm dlx nx run perch:dev",
+    "build": "pnpm dlx nx run mainline:build",
+    "build:release": "pnpm dlx nx run mainline:build:release",
+    "test": "pnpm dlx nx run mainline:test",
+    "clean": "pnpm dlx nx run mainline:clean",
+    "install:app": "pnpm dlx nx run mainline:install",
+    "install:launch": "pnpm dlx nx run mainline:install:launch",
+    "install:full": "pnpm dlx nx run mainline:install:full",
+    "install:full:launch": "pnpm dlx nx run mainline:install:full:launch",
+    "dev": "pnpm dlx nx run mainline:dev",
     "reset": "nx reset"
   },
   "devDependencies": {

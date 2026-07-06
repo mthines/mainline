@@ -7,10 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		PC0000000000000000000001 /* PerchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000001 /* PerchApp.swift */; };
+		PC0000000000000000000001 /* MainlineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000001 /* MainlineApp.swift */; };
 		PC0000000000000000000002 /* PRSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000002 /* PRSnapshot.swift */; };
 		PC0000000000000000000003 /* PRTransition.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000003 /* PRTransition.swift */; };
-		PC0000000000000000000004 /* PerchSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000004 /* PerchSettings.swift */; };
+		PC0000000000000000000004 /* MainlineSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000004 /* MainlineSettings.swift */; };
 		PC0000000000000000000005 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000005 /* KeychainHelper.swift */; };
 		PC0000000000000000000006 /* GitHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000006 /* GitHubClient.swift */; };
 		PC0000000000000000000007 /* PRStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000007 /* PRStateStore.swift */; };
@@ -24,10 +24,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		PF0000000000000000000001 /* PerchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerchApp.swift; sourceTree = "<group>"; };
+		PF0000000000000000000001 /* MainlineApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainlineApp.swift; sourceTree = "<group>"; };
 		PF0000000000000000000002 /* PRSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRSnapshot.swift; sourceTree = "<group>"; };
 		PF0000000000000000000003 /* PRTransition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRTransition.swift; sourceTree = "<group>"; };
-		PF0000000000000000000004 /* PerchSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerchSettings.swift; sourceTree = "<group>"; };
+		PF0000000000000000000004 /* MainlineSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainlineSettings.swift; sourceTree = "<group>"; };
 		PF0000000000000000000005 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		PF0000000000000000000006 /* GitHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubClient.swift; sourceTree = "<group>"; };
 		PF0000000000000000000007 /* PRStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRStateStore.swift; sourceTree = "<group>"; };
@@ -39,8 +39,8 @@
 		PF000000000000000000000D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		PF000000000000000000000E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		PF000000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		PF0000000000000000000010 /* Perch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Perch.entitlements; sourceTree = "<group>"; };
-		PF0000000000000000000011 /* Perch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Perch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		PF0000000000000000000010 /* Mainline.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Mainline.entitlements; sourceTree = "<group>"; };
+		PF0000000000000000000011 /* Mainline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mainline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,23 +57,23 @@
 		PG0000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
-				PG0000000000000000000002 /* Perch */,
+				PG0000000000000000000002 /* Mainline */,
 				PG0000000000000000000007 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		PG0000000000000000000002 /* Perch */ = {
+		PG0000000000000000000002 /* Mainline */ = {
 			isa = PBXGroup;
 			children = (
-				PF0000000000000000000001 /* PerchApp.swift */,
+				PF0000000000000000000001 /* MainlineApp.swift */,
 				PF000000000000000000000F /* Info.plist */,
-				PF0000000000000000000010 /* Perch.entitlements */,
+				PF0000000000000000000010 /* Mainline.entitlements */,
 				PF000000000000000000000E /* Assets.xcassets */,
 				PG0000000000000000000003 /* Models */,
 				PG0000000000000000000004 /* Services */,
 				PG0000000000000000000005 /* Views */,
 			);
-			path = Perch/Perch;
+			path = Mainline/Mainline;
 			sourceTree = "<group>";
 		};
 		PG0000000000000000000003 /* Models */ = {
@@ -81,7 +81,7 @@
 			children = (
 				PF0000000000000000000002 /* PRSnapshot.swift */,
 				PF0000000000000000000003 /* PRTransition.swift */,
-				PF0000000000000000000004 /* PerchSettings.swift */,
+				PF0000000000000000000004 /* MainlineSettings.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -112,7 +112,7 @@
 		PG0000000000000000000007 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				PF0000000000000000000011 /* Perch.app */,
+				PF0000000000000000000011 /* Mainline.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -120,9 +120,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		PT0000000000000000000001 /* Perch */ = {
+		PT0000000000000000000001 /* Mainline */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = PL0000000000000000000001 /* Build configuration list for PBXNativeTarget "Perch" */;
+			buildConfigurationList = PL0000000000000000000001 /* Build configuration list for PBXNativeTarget "Mainline" */;
 			buildPhases = (
 				PS0000000000000000000001 /* Sources */,
 				PB0000000000000000000001 /* Frameworks */,
@@ -132,9 +132,9 @@
 			);
 			dependencies = (
 			);
-			name = Perch;
-			productName = Perch;
-			productReference = PF0000000000000000000011 /* Perch.app */;
+			name = Mainline;
+			productName = Mainline;
+			productReference = PF0000000000000000000011 /* Mainline.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -152,7 +152,7 @@
 					};
 				};
 			};
-			buildConfigurationList = PL0000000000000000000002 /* Build configuration list for PBXProject "Perch" */;
+			buildConfigurationList = PL0000000000000000000002 /* Build configuration list for PBXProject "Mainline" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -165,7 +165,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				PT0000000000000000000001 /* Perch */,
+				PT0000000000000000000001 /* Mainline */,
 			);
 		};
 /* End PBXProject section */
@@ -186,10 +186,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				PC0000000000000000000001 /* PerchApp.swift in Sources */,
+				PC0000000000000000000001 /* MainlineApp.swift in Sources */,
 				PC0000000000000000000002 /* PRSnapshot.swift in Sources */,
 				PC0000000000000000000003 /* PRTransition.swift in Sources */,
-				PC0000000000000000000004 /* PerchSettings.swift in Sources */,
+				PC0000000000000000000004 /* MainlineSettings.swift in Sources */,
 				PC0000000000000000000005 /* KeychainHelper.swift in Sources */,
 				PC0000000000000000000006 /* GitHubClient.swift in Sources */,
 				PC0000000000000000000007 /* PRStateStore.swift in Sources */,
@@ -322,14 +322,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Perch/Perch/Perch.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Mainline/Mainline/Mainline.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Perch/Perch/Info.plist;
+				INFOPLIST_FILE = Mainline/Mainline/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright \U00a9 2024 Mads Thines. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -337,7 +337,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.perch.github-pr-notifier";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.mainline.github-pr-notifier";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -349,14 +349,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Perch/Perch/Perch.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Mainline/Mainline/Mainline.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Perch/Perch/Info.plist;
+				INFOPLIST_FILE = Mainline/Mainline/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright \U00a9 2024 Mads Thines. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -364,7 +364,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.perch.github-pr-notifier";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.mainline.github-pr-notifier";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -374,7 +374,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		PL0000000000000000000001 /* Build configuration list for PBXNativeTarget "Perch" */ = {
+		PL0000000000000000000001 /* Build configuration list for PBXNativeTarget "Mainline" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				PX0000000000000000000003 /* Debug */,
@@ -383,7 +383,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		PL0000000000000000000002 /* Build configuration list for PBXProject "Perch" */ = {
+		PL0000000000000000000002 /* Build configuration list for PBXProject "Mainline" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				PX0000000000000000000001 /* Debug */,

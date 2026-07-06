@@ -3,7 +3,7 @@ import AppKit
 
 struct SettingsView: View {
     @ObservedObject var manager: PRManager
-    @ObservedObject private var settings: PerchSettings
+    @ObservedObject private var settings: MainlineSettings
 
     @State private var patDraft: String = ""
     @State private var patSaved: Bool = false

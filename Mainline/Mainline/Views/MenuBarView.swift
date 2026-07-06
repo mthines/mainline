@@ -3,7 +3,7 @@ import AppKit
 
 struct MenuBarView: View {
     @ObservedObject var manager: PRManager
-    @ObservedObject private var settings: PerchSettings
+    @ObservedObject private var settings: MainlineSettings
 
     /// Which sections start collapsed. Sections not in the set are expanded.
     @State private var collapsedSections: Set<PRState> = []
@@ -55,9 +55,9 @@ struct MenuBarView: View {
 
     private var header: some View {
         HStack {
-            Image(systemName: "bird.fill")
+            Image(systemName: "arrow.triangle.pull")
                 .foregroundStyle(.blue)
-            Text("Perch")
+            Text("Mainline")
                 .font(.headline)
             Spacer()
             Text(manager.statusMessage)
@@ -255,5 +255,5 @@ struct MenuBarView: View {
 // MARK: - Notification name
 
 extension Notification.Name {
-    static let openSettings = Notification.Name("PerchOpenSettings")
+    static let openSettings = Notification.Name("MainlineOpenSettings")
 }

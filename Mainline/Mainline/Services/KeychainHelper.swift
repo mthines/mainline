@@ -2,11 +2,11 @@ import Foundation
 import Security
 
 /// Minimal Keychain wrapper for storing the GitHub PAT.
-/// Service: "com.perch.github-pr-notifier"
+/// Service: "com.mainline.github-pr-notifier"
 /// Account: "github-pat"
 /// Class:   kSecClassGenericPassword
 enum KeychainHelper {
-    private static let service = "com.perch.github-pr-notifier"
+    private static let service = "com.mainline.github-pr-notifier"
     private static let account = "github-pat"
 
     // MARK: - Save

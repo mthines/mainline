@@ -7,7 +7,7 @@ final class NotificationService {
 
     // MARK: - Category & Action
 
-    static let categoryId       = "PERCH_PR"
+    static let categoryId       = "MAINLINE_PR"
     static let openActionId     = "OPEN_IN_BROWSER"
 
     // MARK: - Request permission
@@ -15,7 +15,7 @@ final class NotificationService {
     func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if let error {
-                print("[Perch] Notification auth error: \(error.localizedDescription)")
+                print("[Mainline] Notification auth error: \(error.localizedDescription)")
             }
         }
 
@@ -36,13 +36,13 @@ final class NotificationService {
     // MARK: - Fire transitions
 
     /// Fires one notification per transition, respecting the notification toggles.
-    func fireTransitions(_ transitions: [PRTransition], settings: PerchSettings) {
+    func fireTransitions(_ transitions: [PRTransition], settings: MainlineSettings) {
         for transition in transitions {
             switch transition {
             case .newPR(let pr):
                 guard settings.notifyNewPR else { continue }
                 fire(
-                    id:    "perch.new_pr.\(pr.nodeId)",
+                    id:    "mainline.new_pr.\(pr.nodeId)",
                     title: "New PR",
                     body:  "\(pr.repoFullName): \(pr.title)",
                     url:   pr.htmlUrl
@@ -51,7 +51,7 @@ final class NotificationService {
             case .readyForReview(let pr):
                 guard settings.notifyReadyForReview else { continue }
                 fire(
-                    id:    "perch.ready.\(pr.nodeId)",
+                    id:    "mainline.ready.\(pr.nodeId)",
                     title: "Ready for Review",
                     body:  "\(pr.repoFullName): \(pr.title)",
                     url:   pr.htmlUrl
@@ -60,7 +60,7 @@ final class NotificationService {
             case .ciStatusChanged(let pr, _, let to):
                 guard settings.notifyCIChange else { continue }
                 fire(
-                    id:    "perch.ci.\(pr.nodeId)",
+                    id:    "mainline.ci.\(pr.nodeId)",
                     title: "CI Status Changed",
                     body:  "\(pr.repoFullName): \(pr.title) — \(to.rawValue)",
                     url:   pr.htmlUrl
@@ -69,7 +69,7 @@ final class NotificationService {
             case .newReviewOrComment(let pr):
                 guard settings.notifyReviewComment else { continue }
                 fire(
-                    id:    "perch.comment.\(pr.nodeId)",
+                    id:    "mainline.comment.\(pr.nodeId)",
                     title: "New Review/Comment",
                     body:  "\(pr.repoFullName): \(pr.title)",
                     url:   pr.htmlUrl
@@ -91,7 +91,7 @@ final class NotificationService {
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error {
-                print("[Perch] Failed to deliver notification '\(id)': \(error.localizedDescription)")
+                print("[Mainline] Failed to deliver notification '\(id)': \(error.localizedDescription)")
             }
         }
     }

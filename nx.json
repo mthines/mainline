@@ -3,15 +3,15 @@
   "namedInputs": {
     "default": ["{projectRoot}/**/*"],
     "swift-sources": [
-      "{projectRoot}/Perch/**/*.swift",
-      "{projectRoot}/Perch/**/*.plist",
-      "{projectRoot}/Perch/**/*.entitlements",
-      "{projectRoot}/Perch/**/*.xcassets",
-      "{projectRoot}/Perch/**/*.xib",
-      "{projectRoot}/Perch/**/*.storyboard"
+      "{projectRoot}/Mainline/**/*.swift",
+      "{projectRoot}/Mainline/**/*.plist",
+      "{projectRoot}/Mainline/**/*.entitlements",
+      "{projectRoot}/Mainline/**/*.xcassets",
+      "{projectRoot}/Mainline/**/*.xib",
+      "{projectRoot}/Mainline/**/*.storyboard"
     ],
     "project-config": [
-      "{projectRoot}/Perch.xcodeproj/**/*",
+      "{projectRoot}/Mainline.xcodeproj/**/*",
       "{projectRoot}/*.xcworkspace/**/*"
     ],
     "scripts": ["{projectRoot}/scripts/**/*.sh"],

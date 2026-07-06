@@ -1,14 +1,14 @@
 #!/bin/bash
-# Build and install Perch to the Applications folder.
+# Build and install Mainline to the Applications folder.
 #
 # Usage: ./scripts/install.sh [--launch|-l]
 
 set -e
 cd "$(dirname "$0")/.."
 
-APP_NAME="Perch"
+APP_NAME="Mainline"
 BUILD_DIR="$(pwd)/build"
-BUILD_PATH="$BUILD_DIR/Build/Products/Debug/Perch.app"
+BUILD_PATH="$BUILD_DIR/Build/Products/Debug/Mainline.app"
 INSTALL_PATH="/Applications/$APP_NAME.app"
 
 # Clean and build the app
@@ -16,7 +16,7 @@ echo "Cleaning build artifacts..."
 rm -rf "$BUILD_DIR"
 
 echo "Building $APP_NAME (full rebuild)..."
-xcodebuild -scheme Perch -configuration Debug \
+xcodebuild -scheme Mainline -configuration Debug \
     -derivedDataPath "$BUILD_DIR" \
     build 2>&1 | grep -E "(error:|warning:.*error|BUILD)" || true
 

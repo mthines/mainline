@@ -99,9 +99,9 @@ private struct GraphQLRollup: Decodable {
 
 final class GitHubClient {
     private let session: URLSession
-    private let settings: PerchSettings
+    private let settings: MainlineSettings
 
-    init(settings: PerchSettings = .shared) {
+    init(settings: MainlineSettings = .shared) {
         self.settings = settings
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest  = 30

@@ -1,8 +1,8 @@
 #!/bin/bash
-# Perch Development Script
+# Mainline Development Script
 # Watches for file changes and rebuilds/relaunches the app.
 #
-# Usage: ./scripts/dev.sh   (or: pnpm dev / nx run perch:dev)
+# Usage: ./scripts/dev.sh   (or: pnpm dev / nx run mainline:dev)
 #
 # Requirements:
 #   - fswatch (install with: brew install fswatch)
@@ -11,11 +11,11 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-SCHEME="Perch"
+SCHEME="Mainline"
 BUILD_DIR="$PROJECT_DIR/build/Build/Products/Debug"
-APP_NAME="Perch.app"
+APP_NAME="Mainline.app"
 APP_PATH="$BUILD_DIR/$APP_NAME"
-WATCH_DIR="$PROJECT_DIR/Perch"
+WATCH_DIR="$PROJECT_DIR/Mainline"
 
 # Colors for output
 RED='\033[0;31m'
@@ -36,9 +36,9 @@ if ! command -v fswatch &> /dev/null; then
     exit 1
 fi
 
-# Kill any existing Perch processes
+# Kill any existing Mainline processes
 kill_app() {
-    pkill -x "Perch" 2>/dev/null || true
+    pkill -x "Mainline" 2>/dev/null || true
 }
 
 # Build the app (incremental — only recompiles changed files)
@@ -122,7 +122,7 @@ trap cleanup SIGINT SIGTERM
 # Main
 echo ""
 echo "╔════════════════════════════════════════╗"
-echo "║          Perch Development Mode         ║"
+echo "║          Mainline Development Mode         ║"
 echo "╠════════════════════════════════════════╣"
 echo "║  Watching for changes...               ║"
 echo "║  Press Ctrl+C to stop                  ║"
@@ -139,7 +139,7 @@ else
 fi
 
 echo ""
-log_info "Watching for file changes in Perch/..."
+log_info "Watching for file changes in Mainline/..."
 
 # Watch for changes (--latency debounces at the fswatch level too)
 fswatch -0 -r \

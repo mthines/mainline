@@ -1,13 +1,13 @@
 {
-  "name": "perch",
+  "name": "mainline",
   "$schema": "https://raw.githubusercontent.com/nrwl/nx/master/packages/nx/schemas/project-schema.json",
   "projectType": "application",
-  "sourceRoot": "Perch",
+  "sourceRoot": "Mainline",
   "targets": {
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "xcodebuild -scheme Perch -configuration Debug -derivedDataPath build build 2>&1 | grep -E '(error:|warning:.*error|BUILD)' || true",
+        "command": "xcodebuild -scheme Mainline -configuration Debug -derivedDataPath build build 2>&1 | grep -E '(error:|warning:.*error|BUILD)' || true",
         "cwd": "{projectRoot}"
       },
       "inputs": ["swift-sources", "project-config"],
@@ -17,7 +17,7 @@
     "build:release": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "xcodebuild -scheme Perch -configuration Release -derivedDataPath build clean build ONLY_ACTIVE_ARCH=NO 2>&1 | tail -5",
+        "command": "xcodebuild -scheme Mainline -configuration Release -derivedDataPath build clean build ONLY_ACTIVE_ARCH=NO 2>&1 | tail -5",
         "cwd": "{projectRoot}"
       },
       "inputs": ["swift-sources", "project-config"],
@@ -37,8 +37,8 @@
       "options": {
         "commands": [
           "rm -rf build",
-          "rm -rf $HOME/Library/Developer/Xcode/DerivedData/Perch-* 2>/dev/null || true",
-          "xcodebuild -scheme Perch clean -quiet 2>/dev/null || true"
+          "rm -rf $HOME/Library/Developer/Xcode/DerivedData/Mainline-* 2>/dev/null || true",
+          "xcodebuild -scheme Mainline clean -quiet 2>/dev/null || true"
         ],
         "cwd": "{projectRoot}",
         "parallel": false
@@ -50,15 +50,15 @@
       "options": {
         "commands": [
           {
-            "command": "pkill -x Perch 2>/dev/null && sleep 1 || true",
+            "command": "pkill -x Mainline 2>/dev/null && sleep 1 || true",
             "description": "Kill running app"
           },
           {
-            "command": "rm -rf /Applications/Perch.app 2>/dev/null || true",
+            "command": "rm -rf /Applications/Mainline.app 2>/dev/null || true",
             "description": "Remove old installation"
           },
           {
-            "command": "cp -R build/Build/Products/Debug/Perch.app /Applications/Perch.app",
+            "command": "cp -R build/Build/Products/Debug/Mainline.app /Applications/Mainline.app",
             "description": "Install to Applications"
           }
         ],
@@ -71,7 +71,7 @@
     "install:launch": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "open /Applications/Perch.app",
+        "command": "open /Applications/Mainline.app",
         "cwd": "{projectRoot}"
       },
       "dependsOn": ["install"],

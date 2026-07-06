@@ -10,12 +10,12 @@ private enum ManagerBridge {
 }
 
 @main
-struct PerchApp: App {
+struct MainlineApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var manager = PRManager()
 
     var body: some Scene {
-        MenuBarExtra("Perch", systemImage: "bird.fill") {
+        MenuBarExtra("Mainline", systemImage: "arrow.triangle.pull") {
             MenuBarView(manager: manager)
                 .task { await manager.start() }
                 .onAppear { ManagerBridge.instance = manager }
@@ -67,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let settingsView = SettingsView(manager: manager)
         let controller   = NSHostingController(rootView: settingsView)
         let window       = NSWindow(contentViewController: controller)
-        window.title                = "Perch Settings"
+        window.title                = "Mainline Settings"
         window.styleMask            = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.delegate             = self

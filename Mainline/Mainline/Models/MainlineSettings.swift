@@ -2,8 +2,8 @@ import Foundation
 import Combine
 
 /// All non-secret app settings backed by UserDefaults.
-final class PerchSettings: ObservableObject {
-    static let shared = PerchSettings()
+final class MainlineSettings: ObservableObject {
+    static let shared = MainlineSettings()
 
     private let defaults = UserDefaults.standard
 

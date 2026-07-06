@@ -1,4 +1,4 @@
-# Perch
+# Mainline
 
 A lightweight macOS menu bar app that notifies you about GitHub pull requests.
 
@@ -24,18 +24,18 @@ A lightweight macOS menu bar app that notifies you about GitHub pull requests.
 ## Building from Source
 
 ```bash
-git clone https://github.com/yourusername/perch.git
-cd perch
-xcodebuild -scheme Perch -configuration Debug -destination "platform=macOS" build
+git clone https://github.com/yourusername/mainline.git
+cd mainline
+xcodebuild -scheme Mainline -configuration Debug -destination "platform=macOS" build
 ```
 
-The built app will be in `~/Library/Developer/Xcode/DerivedData/Perch-*/Build/Products/Debug/Perch.app`.
+The built app will be in `~/Library/Developer/Xcode/DerivedData/Mainline-*/Build/Products/Debug/Mainline.app`.
 
 ## Setting up a Personal Access Token
 
 1. Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
 2. Create a token with **read** access to your repositories (issues and pull requests)
-3. Open Perch Settings and paste the token, or click **Import from gh** if you have [GitHub CLI](https://cli.github.com) installed and authenticated
+3. Open Mainline Settings and paste the token, or click **Import from gh** if you have [GitHub CLI](https://cli.github.com) installed and authenticated
 
 ## Signing & Notarization
 
@@ -50,7 +50,7 @@ The built app will be in `~/Library/Developer/Xcode/DerivedData/Perch-*/Build/Pr
 
 ## Distribution
 
-A Homebrew cask formula is scaffolded at `Homebrew/perch.rb` — update the `url` and `sha256` fields after creating a release.
+A Homebrew cask formula is scaffolded at `Homebrew/mainline.rb` — update the `url` and `sha256` fields after creating a release.
 
 ## License
 

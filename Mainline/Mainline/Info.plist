@@ -27,6 +27,6 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2024 Mads Thines. All rights reserved.</string>
 	<key>NSUserNotificationUsageDescription</key>
-	<string>Perch uses notifications to alert you about GitHub pull request updates.</string>
+	<string>Mainline uses notifications to alert you about GitHub pull request updates.</string>
 </dict>
 </plist>

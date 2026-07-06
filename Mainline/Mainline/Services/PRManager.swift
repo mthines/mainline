@@ -18,13 +18,13 @@ final class PRManager: ObservableObject {
     let notifications: NotificationService
     let client:        GitHubClient
     private let poller: PRPoller
-    let settings:      PerchSettings
+    let settings:      MainlineSettings
 
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Init
 
-    init(settings: PerchSettings = .shared) {
+    init(settings: MainlineSettings = .shared) {
         self.settings      = settings
         self.store         = PRStateStore()
         self.notifications = NotificationService()

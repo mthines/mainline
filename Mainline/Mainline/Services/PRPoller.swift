@@ -7,7 +7,7 @@ final class PRPoller {
     private let client:       GitHubClient
     private let store:        PRStateStore
     private let notifications: NotificationService
-    private let settings:     PerchSettings
+    private let settings:     MainlineSettings
 
     private var pollingTask: Task<Void, Never>?
 
@@ -18,7 +18,7 @@ final class PRPoller {
         client:        GitHubClient,
         store:         PRStateStore,
         notifications: NotificationService,
-        settings:      PerchSettings = .shared
+        settings:      MainlineSettings = .shared
     ) {
         self.client        = client
         self.store         = store
