@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var patSaved: Bool = false
     @State private var importError: String? = nil
     @State private var isImporting: Bool = false
+    @State private var hasStoredToken: Bool = false
 
     init(manager: PRManager) {
         self.manager  = manager
@@ -19,8 +20,17 @@ struct SettingsView: View {
         Form {
             // MARK: - GitHub Token
             Section("GitHub Token") {
-                SecureField("Personal Access Token", text: $patDraft)
-                    .textFieldStyle(.roundedBorder)
+                SecureField(
+                    hasStoredToken ? "A token is stored — paste a new one to replace" : "Personal Access Token",
+                    text: $patDraft
+                )
+                .textFieldStyle(.roundedBorder)
+
+                if hasStoredToken && !patSaved {
+                    Label("A token is stored", systemImage: "key.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
 
                 HStack {
                     Button("Save Token") {
@@ -91,23 +101,32 @@ struct SettingsView: View {
 
     private func loadToken() {
         Task {
-            if let token = await KeychainHelper.loadToken() {
-                await MainActor.run {
-                    // Show a masked placeholder — don't expose the real token in a text field
-                    patDraft = String(repeating: "•", count: min(token.count, 20))
-                }
+            let token = await KeychainHelper.loadToken()
+            await MainActor.run {
+                // Never place the real token (or a masked stand-in) into the editable
+                // field — doing so risks saving the placeholder back over the token.
+                // Track presence separately and keep the field empty.
+                hasStoredToken = !(token ?? "").isEmpty
+                patDraft = ""
             }
         }
     }
 
     private func saveToken() {
-        let token = patDraft
+        let token = patDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Guard against saving an empty value or the masked bullet placeholder.
+        guard !token.isEmpty, !token.contains("•") else {
+            importError = "Enter a token before saving."
+            return
+        }
         Task {
             do {
                 try KeychainHelper.saveToken(token)
                 await MainActor.run {
                     patSaved = true
                     importError = nil
+                    hasStoredToken = true
+                    patDraft = ""
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                         patSaved = false
                     }
@@ -131,8 +150,9 @@ struct SettingsView: View {
                 let token = try await runGHAuthToken()
                 try KeychainHelper.saveToken(token)
                 await MainActor.run {
-                    patDraft   = String(repeating: "•", count: min(token.count, 20))
-                    patSaved   = true
+                    patDraft    = ""
+                    hasStoredToken = true
+                    patSaved    = true
                     isImporting = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                         patSaved = false
