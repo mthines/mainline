@@ -48,16 +48,18 @@ final class PRPoller {
     // MARK: - Single poll
 
     private func poll(token: String) async {
-        let queries = [
-            settings.searchQueryAuthor,
-            settings.searchQueryReviewer
-        ].filter { !$0.isEmpty }
+        // Always poll both tabs so notifications fire regardless of which tab
+        // is currently visible. Each query is tagged with the tab that sourced it.
+        let queries: [(tab: ReviewTab, query: String)] = [
+            (.created, settings.searchQueryAuthor),
+            (.forMe,   settings.searchQueryReviewer)
+        ].filter { !$0.query.isEmpty }
 
         var allSnapshots: [PRSnapshot] = []
 
-        for query in queries {
+        for (tab, query) in queries {
             do {
-                let (snapshots, _) = try await client.searchPRs(query: query, token: token)
+                let (snapshots, _) = try await client.searchPRs(query: query, token: token, tab: tab)
                 allSnapshots.append(contentsOf: snapshots)
             } catch GitHubAPIError.notModified {
                 // 304 — keep existing state, no notification
@@ -76,9 +78,20 @@ final class PRPoller {
             }
         }
 
-        // De-duplicate by nodeId (same PR can appear in both queries)
-        var seen = Set<String>()
-        let unique = allSnapshots.filter { seen.insert($0.nodeId).inserted }
+        // De-duplicate by nodeId (same PR can appear in both queries),
+        // unioning the tab membership so a PR can belong to both tabs.
+        var merged: [String: PRSnapshot] = [:]
+        var order: [String] = []
+        for snapshot in allSnapshots {
+            if var existing = merged[snapshot.nodeId] {
+                existing.tabs.formUnion(snapshot.tabs)
+                merged[snapshot.nodeId] = existing
+            } else {
+                merged[snapshot.nodeId] = snapshot
+                order.append(snapshot.nodeId)
+            }
+        }
+        let unique = order.compactMap { merged[$0] }
 
         let myLogin = settings.githubUsername
         let transitions = store.update(new: unique, myLogin: myLogin)

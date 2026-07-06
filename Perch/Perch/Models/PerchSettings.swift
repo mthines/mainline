@@ -18,6 +18,7 @@ final class PerchSettings: ObservableObject {
         static let notifyCIChange       = "notifyCIChange"
         static let notifyReviewComment  = "notifyReviewComment"
         static let githubUsername       = "githubUsername"
+        static let selectedTab          = "selectedTab"
     }
 
     // MARK: - Persisted properties
@@ -52,6 +53,11 @@ final class PerchSettings: ObservableObject {
 
     @Published var githubUsername: String {
         didSet { defaults.set(githubUsername, forKey: Keys.githubUsername) }
+    }
+
+    /// Last-selected Reviews tab ("For me" / "Created").
+    @Published var selectedTab: ReviewTab {
+        didSet { defaults.set(selectedTab.rawValue, forKey: Keys.selectedTab) }
     }
 
     // MARK: - ETag helpers
@@ -91,5 +97,9 @@ final class PerchSettings: ObservableObject {
         notifyReviewComment  = defaults.object(forKey: Keys.notifyReviewComment) == nil  ? true : defaults.bool(forKey: Keys.notifyReviewComment)
 
         githubUsername = defaults.string(forKey: Keys.githubUsername) ?? ""
+
+        // Selected tab — default "For me"
+        selectedTab = defaults.string(forKey: Keys.selectedTab)
+            .flatMap { ReviewTab(rawValue: $0) } ?? .forMe
     }
 }

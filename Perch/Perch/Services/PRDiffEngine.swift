@@ -29,10 +29,9 @@ enum PRDiffEngine {
                 transitions.append(.readyForReview(pr))
             }
 
-            // Review requested from me (new reviewer addition)
-            if !myLogin.isEmpty,
-               !old.requestedReviewers.contains(myLogin),
-               pr.requestedReviewers.contains(myLogin) {
+            // Review newly requested from me: the PR entered the "For me" tab
+            // (surfaced by the review-requested:@me query) this poll.
+            if !old.tabs.contains(.forMe), pr.tabs.contains(.forMe) {
                 transitions.append(.readyForReview(pr))
             }
 

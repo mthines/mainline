@@ -3,50 +3,52 @@ import AppKit
 
 struct MenuBarView: View {
     @ObservedObject var manager: PRManager
+    @ObservedObject private var settings: PerchSettings
+
+    /// Which sections start collapsed. Sections not in the set are expanded.
+    @State private var collapsedSections: Set<PRState> = []
+
+    init(manager: PRManager) {
+        self.manager = manager
+        self.settings = manager.settings
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
             header
 
             Divider()
 
-            // PR list
-            if manager.prs.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        prSection(
-                            title: "My PRs",
-                            prs: manager.prs.filter { $0.author == manager.settings.githubUsername }
-                        )
-                        prSection(
-                            title: "Review Requested",
-                            prs: manager.prs.filter {
-                                $0.author != manager.settings.githubUsername &&
-                                $0.requestedReviewers.contains(manager.settings.githubUsername)
-                            }
-                        )
-                        prSection(
-                            title: "Other",
-                            prs: manager.prs.filter {
-                                $0.author != manager.settings.githubUsername &&
-                                !$0.requestedReviewers.contains(manager.settings.githubUsername)
-                            }
-                        )
-                    }
-                }
-                .frame(maxHeight: 380)
-            }
+            tabPicker
 
             Divider()
 
-            // Footer
+            content
+
+            Divider()
+
             footer
         }
         .frame(width: 340)
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Derived data
+
+    /// PRs belonging to the currently selected tab.
+    private var visiblePRs: [PRSnapshot] {
+        manager.prs.filter { $0.tabs.contains(settings.selectedTab) }
+    }
+
+    /// Sections in canonical order, each with its PRs, excluding empty ones.
+    private var sections: [(state: PRState, prs: [PRSnapshot])] {
+        let grouped = Dictionary(grouping: visiblePRs, by: { $0.classifiedState })
+        return PRState.allCases
+            .sorted { $0.sortIndex < $1.sortIndex }
+            .compactMap { state in
+                guard let prs = grouped[state], !prs.isEmpty else { return nil }
+                return (state, prs.sorted { $0.updatedAt > $1.updatedAt })
+            }
     }
 
     // MARK: - Header
@@ -66,6 +68,38 @@ struct MenuBarView: View {
         .padding(.vertical, 8)
     }
 
+    // MARK: - Tab picker
+
+    private var tabPicker: some View {
+        Picker("Reviews", selection: $settings.selectedTab) {
+            ForEach(ReviewTab.allCases) { tab in
+                Text(tab.title).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Content
+
+    @ViewBuilder
+    private var content: some View {
+        if sections.isEmpty {
+            emptyState
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(sections, id: \.state) { section in
+                        sectionView(state: section.state, prs: section.prs)
+                    }
+                }
+            }
+            .frame(maxHeight: 380)
+        }
+    }
+
     // MARK: - Empty state
 
     private var emptyState: some View {
@@ -75,7 +109,7 @@ struct MenuBarView: View {
                 Image(systemName: "checkmark.circle")
                     .font(.title2)
                     .foregroundStyle(.secondary)
-                Text(manager.hasToken ? "No open PRs" : "No token — open Settings")
+                Text(emptyMessage)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -84,25 +118,57 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - PR section
+    private var emptyMessage: String {
+        if !manager.hasToken { return "No token — open Settings" }
+        switch settings.selectedTab {
+        case .forMe:   return "Nothing to review"
+        case .created: return "No PRs created"
+        }
+    }
+
+    // MARK: - Section (collapsible)
 
     @ViewBuilder
-    private func prSection(title: String, prs: [PRSnapshot]) -> some View {
-        if !prs.isEmpty {
-            Section {
-                ForEach(prs, id: \.nodeId) { pr in
-                    prRow(pr)
-                    Divider().padding(.leading, 36)
-                }
-            } header: {
-                Text(title)
+    private func sectionView(state: PRState, prs: [PRSnapshot]) -> some View {
+        DisclosureGroup(
+            isExpanded: expansionBinding(for: state)
+        ) {
+            ForEach(prs, id: \.nodeId) { pr in
+                prRow(pr)
+                Divider().padding(.leading, 36)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(state.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text("\(prs.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
             }
+            .contentShape(Rectangle())
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+    }
+
+    private func expansionBinding(for state: PRState) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedSections.contains(state) },
+            set: { expanded in
+                if expanded {
+                    collapsedSections.remove(state)
+                } else {
+                    collapsedSections.insert(state)
+                }
+            }
+        )
     }
 
     // MARK: - PR row

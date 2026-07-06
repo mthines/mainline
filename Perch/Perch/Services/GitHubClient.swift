@@ -28,42 +28,71 @@ enum GitHubAPIError: Error, LocalizedError {
     }
 }
 
-// MARK: - GitHub API Response Models (private to this file)
+// MARK: - GraphQL Response Models (private to this file)
 
-private struct SearchResponse: Decodable {
-    let items: [IssueItem]
+private struct GraphQLResponse: Decodable {
+    let data: GraphQLData?
+    let errors: [GraphQLError]?
 }
 
-private struct IssueItem: Decodable {
-    let node_id: String
-    let number: Int
-    let title: String
-    let html_url: String
-    let draft: Bool?
-    let state: String
-    let user: GitHubUser
-    let comments: Int
-    let updated_at: String
-    let requested_reviewers: [GitHubUser]
-    let pull_request: PullRequestLinks?
-    let repository_url: String   // "https://api.github.com/repos/owner/repo"
+private struct GraphQLError: Decodable {
+    let message: String
+    let type: String?
 }
 
-private struct GitHubUser: Decodable {
-    let login: String
+private struct GraphQLData: Decodable {
+    let search: GraphQLSearch
 }
 
-private struct PullRequestLinks: Decodable {
-    let url: String
+private struct GraphQLSearch: Decodable {
+    let nodes: [GraphQLNode]
 }
 
-private struct CheckRunsResponse: Decodable {
-    let check_runs: [CheckRun]
+/// A search node. Non-PR results decode to all-nil (we filter them out).
+private struct GraphQLNode: Decodable {
+    let id: String?
+    let number: Int?
+    let title: String?
+    let url: String?
+    let isDraft: Bool?
+    let merged: Bool?
+    let closed: Bool?
+    let state: String?           // OPEN | CLOSED | MERGED
+    let reviewDecision: String?  // APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | null
+    let updatedAt: String?
+    let author: GraphQLActor?
+    let repository: GraphQLRepository?
+    let comments: GraphQLCount?
+    let reviews: GraphQLCount?
+    let commits: GraphQLCommits?
 }
 
-private struct CheckRun: Decodable {
-    let status: String       // "queued" | "in_progress" | "completed"
-    let conclusion: String?  // "success" | "failure" | "neutral" | "cancelled" | "timed_out" | "action_required"
+private struct GraphQLActor: Decodable {
+    let login: String?
+}
+
+private struct GraphQLRepository: Decodable {
+    let nameWithOwner: String
+}
+
+private struct GraphQLCount: Decodable {
+    let totalCount: Int
+}
+
+private struct GraphQLCommits: Decodable {
+    let nodes: [GraphQLCommitNode]
+}
+
+private struct GraphQLCommitNode: Decodable {
+    let commit: GraphQLCommit
+}
+
+private struct GraphQLCommit: Decodable {
+    let statusCheckRollup: GraphQLRollup?
+}
+
+private struct GraphQLRollup: Decodable {
+    let state: String  // SUCCESS | FAILURE | ERROR | PENDING | EXPECTED
 }
 
 // MARK: - GitHubClient
@@ -80,24 +109,34 @@ final class GitHubClient {
         self.session = URLSession(configuration: config)
     }
 
-    // MARK: - Search PRs
+    // MARK: - Search PRs (GraphQL)
 
-    /// Search for PRs matching `query`.
-    /// Returns the snapshot array and the new ETag (if any).
-    /// Throws `.notModified` if the server returned 304.
-    func searchPRs(query: String, token: String) async throws -> (snapshots: [PRSnapshot], etag: String?) {
-        let urlString = "https://api.github.com/search/issues?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)&per_page=100"
-        guard let url = URL(string: urlString) else {
+    /// Search for PRs matching `query` and tag the results with `tab`.
+    /// GraphQL returns review decision + CI rollup in a single round trip, so
+    /// no per-PR check-runs fan-out is needed.
+    /// Throws `.notModified` if the server returned 304 (ETag unchanged).
+    func searchPRs(query: String, token: String, tab: ReviewTab) async throws -> (snapshots: [PRSnapshot], etag: String?) {
+        guard let url = URL(string: "https://api.github.com/graphql") else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        let gql = Self.searchQueryDocument
+        let variables: [String: Any] = ["q": query, "first": 100]
+        let bodyDict: [String: Any] = ["query": gql, "variables": variables]
+        guard let body = try? JSONSerialization.data(withJSONObject: bodyDict) else {
             throw GitHubAPIError.unknown(0)
         }
 
         var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        // If-None-Match caching
-        if let storedEtag = settings.etag(for: urlString) {
+        // ETag caching — keyed per tab query so the two tabs don't collide.
+        let etagKey = "graphql.search.\(tab.rawValue).\(query)"
+        if let storedEtag = settings.etag(for: etagKey) {
             request.setValue(storedEtag, forHTTPHeaderField: "If-None-Match")
         }
 
@@ -119,104 +158,131 @@ final class GitHubClient {
             throw GitHubAPIError.unknown(http.statusCode)
         }
 
-        let newEtag = http.value(forHTTPHeaderField: "ETag")
-        if let newEtag {
-            settings.setEtag(newEtag, for: urlString)
+        if let newEtag = http.value(forHTTPHeaderField: "ETag") {
+            settings.setEtag(newEtag, for: etagKey)
         }
+        let newEtag = http.value(forHTTPHeaderField: "ETag")
 
-        let searchResponse: SearchResponse
+        let decoded: GraphQLResponse
         do {
-            searchResponse = try JSONDecoder().decode(SearchResponse.self, from: data)
+            decoded = try JSONDecoder().decode(GraphQLResponse.self, from: data)
         } catch {
             throw GitHubAPIError.decodingError(error)
         }
 
-        // Filter to PRs only (search/issues returns both issues and PRs)
-        let prItems = searchResponse.items.filter { $0.pull_request != nil }
+        // A bad/expired token can return 200 with a top-level errors array.
+        if let errors = decoded.errors, !errors.isEmpty {
+            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+                throw GitHubAPIError.unauthorized
+            }
+            throw GitHubAPIError.unknown(200)
+        }
 
-        // Fetch CI status for each PR
-        var snapshots: [PRSnapshot] = []
-        for item in prItems {
-            let repoFullName = extractRepoFullName(from: item.repository_url)
-            let ciStatus = await fetchCIStatus(
-                repoFullName: repoFullName,
-                prNumber: item.number,
-                token: token
-            )
-            let snapshot = PRSnapshot(
-                nodeId:             item.node_id,
-                number:             item.number,
-                title:              item.title,
-                htmlUrl:            item.html_url,
-                repoFullName:       repoFullName,
-                isDraft:            item.draft ?? false,
-                state:              item.state,
-                ciStatus:           ciStatus,
-                reviewState:        .none,
-                commentCount:       item.comments,
-                updatedAt:          item.updated_at,
-                author:             item.user.login,
-                requestedReviewers: item.requested_reviewers.map { $0.login }
-            )
-            snapshots.append(snapshot)
+        guard let nodes = decoded.data?.search.nodes else {
+            return ([], newEtag)
+        }
+
+        let snapshots: [PRSnapshot] = nodes.compactMap { node in
+            Self.makeSnapshot(from: node, tab: tab)
         }
 
         return (snapshots, newEtag)
     }
 
-    // MARK: - CI Status
+    // MARK: - Snapshot mapping
 
-    /// Fetches the aggregated CI status from check-runs for a given PR.
-    private func fetchCIStatus(repoFullName: String, prNumber: Int, token: String) async -> CIStatus {
-        let urlString = "https://api.github.com/repos/\(repoFullName)/commits/\(prNumber)/check-runs"
-        guard let url = URL(string: urlString) else { return .unknown }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-
-        if let etag = settings.etag(for: urlString) {
-            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+    private static func makeSnapshot(from node: GraphQLNode, tab: ReviewTab) -> PRSnapshot? {
+        // Non-PR results (issues) lack these fields — skip them.
+        guard let nodeId = node.id,
+              let number = node.number,
+              let title = node.title,
+              let url = node.url,
+              let repo = node.repository?.nameWithOwner else {
+            return nil
         }
 
-        guard let (data, response) = try? await performRequest(request),
-              let http = response as? HTTPURLResponse else {
-            return .unknown
+        let merged = node.merged ?? false
+        let closed = node.closed ?? false
+        let stateRaw = (node.state ?? "OPEN").lowercased() == "open" ? "open" : "closed"
+
+        let ciStatus = mapCIStatus(node.commits?.nodes.first?.commit.statusCheckRollup?.state)
+        let decision = node.reviewDecision.flatMap { ReviewDecision(rawValue: $0) }
+        let reviewCount = node.reviews?.totalCount ?? 0
+
+        // Derive a coarse reviewState for diff-engine continuity and open/in-review split.
+        let reviewState: ReviewState
+        switch decision {
+        case .approved:         reviewState = .approved
+        case .changesRequested: reviewState = .changesRequested
+        default:                reviewState = reviewCount > 0 ? .changesRequested : .none
         }
 
-        if http.statusCode == 304 {
-            return .unknown // no change — caller will use previous value
-        }
-
-        if let etag = http.value(forHTTPHeaderField: "ETag") {
-            settings.setEtag(etag, for: urlString)
-        }
-
-        guard http.statusCode == 200,
-              let cr = try? JSONDecoder().decode(CheckRunsResponse.self, from: data) else {
-            return .unknown
-        }
-
-        return aggregateCIStatus(from: cr.check_runs)
+        return PRSnapshot(
+            nodeId:             nodeId,
+            number:             number,
+            title:              title,
+            htmlUrl:            url,
+            repoFullName:       repo,
+            isDraft:            node.isDraft ?? false,
+            state:              stateRaw,
+            merged:             merged,
+            closed:             closed,
+            reviewDecision:     decision,
+            ciStatus:           ciStatus,
+            reviewState:        reviewState,
+            commentCount:       node.comments?.totalCount ?? 0,
+            updatedAt:          node.updatedAt ?? "",
+            author:             node.author?.login ?? "",
+            requestedReviewers: [],
+            tabs:               [tab]
+        )
     }
 
-    private func aggregateCIStatus(from runs: [CheckRun]) -> CIStatus {
-        if runs.isEmpty { return .unknown }
-        if runs.contains(where: { $0.status == "in_progress" || $0.status == "queued" }) {
-            return .pending
+    /// Maps GraphQL `StatusState` to the app's CIStatus.
+    private static func mapCIStatus(_ rollup: String?) -> CIStatus {
+        guard let rollup else { return .unknown }
+        switch rollup.uppercased() {
+        case "SUCCESS":            return .success
+        case "FAILURE":            return .failure
+        case "ERROR":              return .error
+        case "PENDING", "EXPECTED": return .pending
+        default:                   return .unknown
         }
-        if runs.contains(where: { $0.conclusion == "failure" || $0.conclusion == "timed_out" || $0.conclusion == "action_required" }) {
-            return .failure
-        }
-        if runs.contains(where: { $0.conclusion == "cancelled" }) {
-            return .error
-        }
-        if runs.allSatisfy({ $0.conclusion == "success" || $0.conclusion == "neutral" || $0.conclusion == "skipped" }) {
-            return .success
-        }
-        return .unknown
     }
+
+    // MARK: - GraphQL document
+
+    private static let searchQueryDocument = """
+    query($q: String!, $first: Int!) {
+      search(query: $q, type: ISSUE, first: $first) {
+        nodes {
+          ... on PullRequest {
+            id
+            number
+            title
+            url
+            isDraft
+            merged
+            closed
+            state
+            reviewDecision
+            updatedAt
+            author { login }
+            repository { nameWithOwner }
+            comments { totalCount }
+            reviews { totalCount }
+            commits(last: 1) {
+              nodes {
+                commit {
+                  statusCheckRollup { state }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
 
     // MARK: - Helpers
 
@@ -241,14 +307,5 @@ final class GitHubClient {
             let wait = max(resetTimestamp - now, 1)
             throw GitHubAPIError.rateLimited(retryAfter: wait)
         }
-    }
-
-    private func extractRepoFullName(from repositoryUrl: String) -> String {
-        // "https://api.github.com/repos/owner/repo" -> "owner/repo"
-        let prefix = "https://api.github.com/repos/"
-        if repositoryUrl.hasPrefix(prefix) {
-            return String(repositoryUrl.dropFirst(prefix.count))
-        }
-        return repositoryUrl
     }
 }
