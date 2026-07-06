@@ -5,9 +5,6 @@ struct MenuBarView: View {
     @ObservedObject var manager: PRManager
     @ObservedObject private var settings: MainlineSettings
 
-    /// Which sections start collapsed. Sections not in the set are expanded.
-    @State private var collapsedSections: Set<PRState> = []
-
     init(manager: PRManager) {
         self.manager = manager
         self.settings = manager.settings
@@ -31,6 +28,9 @@ struct MenuBarView: View {
         }
         .frame(width: 340)
         .padding(.vertical, 4)
+        .onAppear {
+            manager.snoozeStore.clearExpired()
+        }
     }
 
     // MARK: - Derived data
@@ -38,6 +38,16 @@ struct MenuBarView: View {
     /// PRs belonging to the currently selected tab.
     private var visiblePRs: [PRSnapshot] {
         manager.prs.filter { $0.tabs.contains(settings.selectedTab) }
+    }
+
+    /// Count for the For-me tab label.
+    private var forMeCount: Int {
+        manager.prs.filter { $0.tabs.contains(.forMe) }.count
+    }
+
+    /// Count for the Created tab label.
+    private var createdCount: Int {
+        manager.prs.filter { $0.tabs.contains(.created) }.count
     }
 
     /// Sections in canonical order, each with its PRs, excluding empty ones.
@@ -60,20 +70,32 @@ struct MenuBarView: View {
             Text("Mainline")
                 .font(.headline)
             Spacer()
-            Text(manager.statusMessage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // Error state: red + tappable to open Settings (AC-19)
+            if manager.tokenInvalid {
+                Button {
+                    NotificationCenter.default.post(name: .openSettings, object: nil)
+                } label: {
+                    Text("Token invalid — tap to fix")
+                        .font(.caption)
+                        .foregroundStyle(Color(nsColor: .systemRed))
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text(manager.statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
-    // MARK: - Tab picker
+    // MARK: - Tab picker (AC-18: labels show counts)
 
     private var tabPicker: some View {
         Picker("Reviews", selection: $settings.selectedTab) {
             ForEach(ReviewTab.allCases) { tab in
-                Text(tab.title).tag(tab)
+                Text(tabLabel(for: tab)).tag(tab)
             }
         }
         .pickerStyle(.segmented)
@@ -82,15 +104,39 @@ struct MenuBarView: View {
         .padding(.vertical, 8)
     }
 
+    private func tabLabel(for tab: ReviewTab) -> String {
+        switch tab {
+        case .forMe:   return forMeCount > 0   ? "For me (\(forMeCount))"     : tab.title
+        case .created: return createdCount > 0 ? "Created (\(createdCount))" : tab.title
+        }
+    }
+
     // MARK: - Content
 
     @ViewBuilder
     private var content: some View {
-        if sections.isEmpty {
+        if !manager.hasToken || manager.prs.isEmpty {
             emptyState
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    // Layer C: Needs-a-Human bucket at top
+                    if !visiblePRs.isEmpty {
+                        NeedsHumanView(
+                            prs: visiblePRs,
+                            myLogin: settings.githubUsername,
+                            trustLedger: manager.trustLedger
+                        )
+                        Divider()
+                    }
+
+                    // Layer B: keyboard triage deck
+                    TriageDeckView(
+                        prs: visiblePRs,
+                        manager: manager,
+                        settings: settings
+                    )
+
                     ForEach(sections, id: \.state) { section in
                         sectionView(state: section.state, prs: section.prs)
                     }
@@ -100,20 +146,18 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Empty state
+    // MARK: - Empty state (AC-23)
 
     private var emptyState: some View {
         HStack {
             Spacer()
             VStack(spacing: 6) {
-                Image(systemName: "checkmark.circle")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
+                emptyStateIcon
                 Text(emptyMessage)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if manager.hasToken {
-                    Text("If you expected PRs here, your token may lack repo/read:org scope or SSO authorization. Try “Import from gh”.")
+                    Text("If you expected PRs here, your token may lack repo/read:org scope or SSO authorization. Try \"Import from gh\".")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
@@ -125,15 +169,40 @@ struct MenuBarView: View {
         }
     }
 
+    @ViewBuilder
+    private var emptyStateIcon: some View {
+        if !manager.hasToken {
+            // AC-23: no token → key icon
+            Image(systemName: "key.fill")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+        } else if manager.tokenInvalid {
+            // AC-23: invalid token → exclamationmark.circle
+            Image(systemName: "exclamationmark.circle")
+                .font(.title2)
+                .foregroundStyle(Color(nsColor: .systemRed))
+        } else if manager.isRefreshing {
+            // AC-23: polling → ProgressView
+            ProgressView()
+                .controlSize(.regular)
+        } else {
+            // AC-23: genuinely empty → checkmark
+            Image(systemName: "checkmark.circle")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var emptyMessage: String {
         if !manager.hasToken { return "No token — open Settings" }
+        if manager.tokenInvalid { return "Token invalid — tap to fix" }
         switch settings.selectedTab {
         case .forMe:   return "Nothing to review"
         case .created: return "No PRs created"
         }
     }
 
-    // MARK: - Section (collapsible)
+    // MARK: - Section (collapsible, persisted — AC-22)
 
     @ViewBuilder
     private func sectionView(state: PRState, prs: [PRSnapshot]) -> some View {
@@ -165,15 +234,18 @@ struct MenuBarView: View {
         .padding(.bottom, 2)
     }
 
+    /// Collapse state persisted to MainlineSettings (AC-22).
     private func expansionBinding(for state: PRState) -> Binding<Bool> {
         Binding(
-            get: { !collapsedSections.contains(state) },
+            get: { !settings.collapsedSections.contains(state) },
             set: { expanded in
+                var collapsed = settings.collapsedSections
                 if expanded {
-                    collapsedSections.remove(state)
+                    collapsed.remove(state)
                 } else {
-                    collapsedSections.insert(state)
+                    collapsed.insert(state)
                 }
+                settings.collapsedSections = collapsed
             }
         )
     }
@@ -195,9 +267,13 @@ struct MenuBarView: View {
                         .font(.callout)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
-                    Text("\(pr.repoFullName) #\(pr.number)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("\(pr.repoFullName) #\(pr.number)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        // Layer D: trust badge
+                        TrustBadgeView(tier: manager.trustLedger.tier(for: pr.author))
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -208,7 +284,7 @@ struct MenuBarView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - CI icon
+    // MARK: - CI icon (AC-17: accessibilityLabel on every state)
 
     @ViewBuilder
     private func ciIcon(for ciStatus: CIStatus) -> some View {
@@ -216,46 +292,70 @@ struct MenuBarView: View {
         case .success:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-        case .failure, .error:
+                .accessibilityLabel("CI passed")
+        case .failure:
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
+                .accessibilityLabel("CI failed")
+        case .error:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.red)
+                .accessibilityLabel("CI error")
         case .pending:
             Image(systemName: "clock.fill")
                 .foregroundStyle(.orange)
+                .accessibilityLabel("CI pending")
         case .unknown:
             Image(systemName: "circle.dashed")
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("CI status unknown")
         }
     }
 
-    // MARK: - Footer
+    // MARK: - Footer (AC-21: 44pt hit targets, Quit separated)
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 0) {
             Button("Settings") {
                 NotificationCenter.default.post(name: .openSettings, object: nil)
             }
             .buttonStyle(.plain)
             .font(.callout)
+            .frame(minHeight: 44)
+            .padding(.horizontal, 12)
 
             Spacer()
 
-            Button("Refresh") {
-                Task {
-                    await manager.restart()
+            // AC-20: Refresh shows spinner + disabled during refresh
+            Button {
+                Task { await manager.triggerSingleRefresh() }
+            } label: {
+                if manager.isRefreshing {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Refreshing")
+                            .font(.callout)
+                    }
+                } else {
+                    Text("Refresh")
+                        .font(.callout)
                 }
             }
             .buttonStyle(.plain)
-            .font(.callout)
+            .disabled(manager.isRefreshing)
+            .frame(minHeight: 44)
+            .padding(.horizontal, 8)
 
             Button("Quit") {
                 NSApp.terminate(nil)
             }
             .buttonStyle(.plain)
             .font(.callout)
+            .frame(minHeight: 44)
+            .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 0)
     }
 }
 

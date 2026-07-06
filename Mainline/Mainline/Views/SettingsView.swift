@@ -88,10 +88,23 @@ struct SettingsView: View {
                 Toggle("CI Status Changed", isOn: $settings.notifyCIChange)
                 Toggle("New Review / Comment", isOn: $settings.notifyReviewComment)
             }
+
+            // MARK: - Triage (Layer B / D)
+            Section("Write Actions") {
+                Toggle("Enable write actions (Approve, Merge, Request Changes)", isOn: $settings.writeActionsEnabled)
+                if settings.writeActionsEnabled {
+                    Toggle("Enable autopilot auto-approve (advanced)", isOn: $settings.autopilotEnabled)
+                    if settings.autopilotEnabled {
+                        Label("Auto-approve fires when author is autopilot tier, CI green, and < 50 LOC changed.", systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 420, height: 480)
+        .frame(width: 420, height: 560)
         .onAppear {
             loadToken()
         }
