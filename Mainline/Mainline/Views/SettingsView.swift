@@ -11,6 +11,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
     case notifications
     case menuBar
     case appearance
+    case privacy
 
     var id: String { rawValue }
 
@@ -20,6 +21,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .notifications: return "Notifications"
         case .menuBar:       return "Menu Bar"
         case .appearance:    return "Appearance"
+        case .privacy:       return "Privacy"
         }
     }
 
@@ -29,6 +31,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .notifications: return "bell.fill"
         case .menuBar:       return "menubar.rectangle"
         case .appearance:    return "slider.horizontal.3"
+        case .privacy:       return "hand.raised.fill"
         }
     }
 }
@@ -47,6 +50,7 @@ struct SettingsView: View {
     @State private var isImporting: Bool = false
     @State private var hasStoredToken: Bool = false
     @State private var panelHeightDraft: Int = 560
+    @State private var showingTelemetryDetails: Bool = false
 
     // Panel-height bounds. The setting may store a large number; the render path
     // in MenuBarView clamps it to the usable screen height, so a big value just
@@ -103,6 +107,7 @@ struct SettingsView: View {
                 case .notifications: notificationsSection
                 case .menuBar:       menuBarSection
                 case .appearance:    appearanceSection
+                case .privacy:       privacySection
                 }
             }
             .formStyle(.grouped)
@@ -312,7 +317,13 @@ struct SettingsView: View {
         }
 
         Section("Drafts") {
-            Toggle("Show draft PRs", isOn: $settings.showDrafts)
+            Toggle("Show draft PRs", isOn: Binding(
+                get: { settings.showDrafts },
+                set: { newValue in
+                    settings.showDrafts = newValue
+                    TelemetryService.shared.recordTriageInteraction("drafts_toggle")
+                }
+            ))
             Label("When off, drafts are hidden from the list, sections, counts, and the Needs-a-Human bucket. Toggle in the panel with the Drafts chip or ⌘D.",
                   systemImage: "info.circle")
                 .font(.caption)
@@ -325,6 +336,32 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Privacy
+
+    @ViewBuilder
+    private var privacySection: some View {
+        TelemetryOptInBanner()
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+        Section("Telemetry") {
+            Toggle("Share anonymous usage data", isOn: $settings.telemetryEnabled)
+            Label("Opt-in. Poll results, error categories, triage interaction counts — never PR titles, repo names, or tokens.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Learn more about what is collected") {
+                showingTelemetryDetails = true
+            }
+            .buttonStyle(.link)
+        }
+        .sheet(isPresented: $showingTelemetryDetails) {
+            TelemetryDetailsSheet()
         }
     }
 
@@ -376,6 +413,7 @@ struct SettingsView: View {
                     }
                 }
                 await manager.fetchUsername(token: token)
+                TelemetryService.shared.recordTokenImport(method: "paste")
                 await manager.restart()
             } catch {
                 await MainActor.run {
@@ -403,6 +441,7 @@ struct SettingsView: View {
                     }
                 }
                 await manager.fetchUsername(token: token)
+                TelemetryService.shared.recordTokenImport(method: "gh")
                 await manager.restart()
             } catch {
                 await MainActor.run {

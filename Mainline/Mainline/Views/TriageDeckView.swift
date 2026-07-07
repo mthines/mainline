@@ -670,6 +670,7 @@ struct TriageDeckView: View {
             }
         } else {
             if let url = URL(string: pr.htmlUrl) {
+                TelemetryService.shared.recordTriageInteraction("open_in_browser")
                 NSWorkspace.shared.open(url)
             }
         }
@@ -802,6 +803,7 @@ struct TriageDeckView: View {
         // Diff preview
         case (" ", false):
             showDiff = true
+            TelemetryService.shared.recordTriageInteraction("diff_preview")
             return nil
 
         // Command palette
@@ -915,8 +917,12 @@ struct TriageDeckView: View {
             pushUndo(label: "Dismissed \(pr.title)", pr: pr) {}
         case .viewDiff:
             showDiff = true
+            TelemetryService.shared.recordTriageInteraction("diff_preview")
         case .openInBrowser:
-            if let url = URL(string: pr.htmlUrl) { NSWorkspace.shared.open(url) }
+            if let url = URL(string: pr.htmlUrl) {
+                TelemetryService.shared.recordTriageInteraction("open_in_browser")
+                NSWorkspace.shared.open(url)
+            }
         }
     }
 

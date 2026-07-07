@@ -35,6 +35,14 @@
 		PC000000000000000000001B /* AttentionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001E /* AttentionPolicy.swift */; };
 		PC000000000000000000001C /* ScopeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001F /* ScopeStore.swift */; };
 		PC0000000000000000000099 /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000099 /* GlobalHotKey.swift */; };
+		/* OTel framework linkage */
+		OT00000000000000000000C1 /* OpenTelemetryApi in Frameworks */ = {isa = PBXBuildFile; productRef = OT00000000000000000000D1 /* OpenTelemetryApi */; };
+		OT00000000000000000000C2 /* OpenTelemetrySdk in Frameworks */ = {isa = PBXBuildFile; productRef = OT00000000000000000000D2 /* OpenTelemetrySdk */; };
+		OT00000000000000000000C3 /* OpenTelemetryProtocolExporterHTTP in Frameworks */ = {isa = PBXBuildFile; productRef = OT00000000000000000000D3 /* OpenTelemetryProtocolExporterHTTP */; };
+		/* OTel source compilation */
+		OT00000000000000000000B1 /* TelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = OT00000000000000000000A1 /* TelemetryService.swift */; };
+		OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = OT00000000000000000000A2 /* TelemetryOptInBanner.swift */; };
+		OT00000000000000000000B3 /* TelemetryDetailsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -69,6 +77,10 @@
 		PF000000000000000000001E /* AttentionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionPolicy.swift; sourceTree = "<group>"; };
 		PF000000000000000000001F /* ScopeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeStore.swift; sourceTree = "<group>"; };
 		PF0000000000000000000099 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
+		/* OTel source file references */
+		OT00000000000000000000A1 /* TelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryService.swift; sourceTree = "<group>"; };
+		OT00000000000000000000A2 /* TelemetryOptInBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryOptInBanner.swift; sourceTree = "<group>"; };
+		OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryDetailsSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,6 +88,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				OT00000000000000000000C1 /* OpenTelemetryApi in Frameworks */,
+				OT00000000000000000000C2 /* OpenTelemetrySdk in Frameworks */,
+				OT00000000000000000000C3 /* OpenTelemetryProtocolExporterHTTP in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -132,6 +147,7 @@
 				PF0000000000000000000016 /* SnoozeStore.swift */,
 				PF000000000000000000001F /* ScopeStore.swift */,
 				PF0000000000000000000099 /* GlobalHotKey.swift */,
+				OT00000000000000000000A1 /* TelemetryService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -147,6 +163,8 @@
 				PF000000000000000000001B /* CommandPaletteView.swift */,
 				PF000000000000000000001C /* UndoToastView.swift */,
 				PF000000000000000000001D /* TrustBadgeView.swift */,
+				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
+				OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -169,12 +187,21 @@
 				PS0000000000000000000001 /* Sources */,
 				PB0000000000000000000001 /* Frameworks */,
 				PR0000000000000000000001 /* Resources */,
+				OT00000000000000000000S1 /* Embed Git Commit SHA */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = Mainline;
+			packageProductDependencies = (
+				OT00000000000000000000D1 /* OpenTelemetryApi */,
+				OT00000000000000000000D2 /* OpenTelemetrySdk */,
+				OT00000000000000000000D3 /* OpenTelemetryProtocolExporterHTTP */,
+			);
+			packageReferences = (
+				OT00000000000000000000E2 /* XCRemoteSwiftPackageReference "opentelemetry-swift" */,
+			);
 			productName = Mainline;
 			productReference = PF0000000000000000000011 /* Mainline.app */;
 			productType = "com.apple.product-type.application";
@@ -206,6 +233,9 @@
 			productRefGroup = PG0000000000000000000007 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				OT00000000000000000000E2 /* XCRemoteSwiftPackageReference "opentelemetry-swift" */,
+			);
 			targets = (
 				PT0000000000000000000001 /* Mainline */,
 			);
@@ -255,10 +285,35 @@
 				PC000000000000000000001B /* AttentionPolicy.swift in Sources */,
 				PC000000000000000000001C /* ScopeStore.swift in Sources */,
 				PC0000000000000000000099 /* GlobalHotKey.swift in Sources */,
+				OT00000000000000000000B1 /* TelemetryService.swift in Sources */,
+				OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */,
+				OT00000000000000000000B3 /* TelemetryDetailsSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		OT00000000000000000000S1 /* Embed Git Commit SHA */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Git Commit SHA";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Inject git short SHA into the built Info.plist.\n# Exits 0 with a warning when git is unavailable (non-git source tree).\nINFO_PLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nif ! command -v git >/dev/null 2>&1; then\n  echo \"warning: git not found — skipping GitCommitSHA injection\"\n  exit 0\nfi\nSHA=$(git -C \"${SRCROOT}\" rev-parse --short HEAD 2>/dev/null)\nif [ -z \"$SHA\" ]; then\n  echo \"warning: could not determine git commit SHA — skipping injection\"\n  exit 0\nfi\n/usr/libexec/PlistBuddy -c \"Set :GitCommitSHA $SHA\" \"$INFO_PLIST\" 2>/dev/null || \\\n  /usr/libexec/PlistBuddy -c \"Add :GitCommitSHA string $SHA\" \"$INFO_PLIST\"\necho \"Embedded GitCommitSHA: $SHA\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		PX0000000000000000000001 /* Debug */ = {
@@ -449,6 +504,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		OT00000000000000000000E2 /* XCRemoteSwiftPackageReference "opentelemetry-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/open-telemetry/opentelemetry-swift";
+			requirement = {
+				kind = exactVersion;
+				version = 1.17.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		OT00000000000000000000D1 /* OpenTelemetryApi */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = OT00000000000000000000E2 /* XCRemoteSwiftPackageReference "opentelemetry-swift" */;
+			productName = OpenTelemetryApi;
+		};
+		OT00000000000000000000D2 /* OpenTelemetrySdk */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = OT00000000000000000000E2 /* XCRemoteSwiftPackageReference "opentelemetry-swift" */;
+			productName = OpenTelemetrySdk;
+		};
+		OT00000000000000000000D3 /* OpenTelemetryProtocolExporterHTTP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = OT00000000000000000000E2 /* XCRemoteSwiftPackageReference "opentelemetry-swift" */;
+			productName = OpenTelemetryProtocolExporterHTTP;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = PP0000000000000000000001 /* Project object */;

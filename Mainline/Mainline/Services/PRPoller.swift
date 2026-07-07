@@ -81,29 +81,56 @@ final class PRPoller {
         var allSnapshots: [PRSnapshot] = []
 
         for (tab, query) in queries {
+            let queryType = tab == .created ? "author" : "reviewer"
+            let pollStart = Date()
+            TelemetryService.shared.recordPollStarted(queryType: queryType)
+
             do {
                 let (snapshots, _) = try await client.searchPRs(query: query, token: token, tab: tab)
+                let duration = Date().timeIntervalSince(pollStart)
+                TelemetryService.shared.recordPollCompleted(
+                    queryType: queryType,
+                    resultCount: snapshots.count,
+                    duration: duration,
+                    etag304: false
+                )
                 allSnapshots.append(contentsOf: snapshots)
             } catch GitHubAPIError.notModified {
                 // 304 — keep existing state, no notification
+                let duration = Date().timeIntervalSince(pollStart)
+                TelemetryService.shared.recordPollCompleted(
+                    queryType: queryType,
+                    resultCount: 0,
+                    duration: duration,
+                    etag304: true
+                )
                 continue
             } catch GitHubAPIError.cancelled {
                 // Popover closed mid-request; SwiftUI cancelled the `.task`.
                 // Benign — keep prior state/counts and do not surface an error.
+                let duration = Date().timeIntervalSince(pollStart)
+                TelemetryService.shared.recordPollFailed(queryType: queryType, error: .cancelled, duration: duration)
                 return
             } catch is CancellationError {
                 // Task cancellation — benign, keep prior state.
                 return
-            } catch GitHubAPIError.serverError {
+            } catch GitHubAPIError.serverError(let code) {
                 // Transient GitHub 5xx (500/502/503/504). Treat like cancellation:
                 // keep the last successful data/counts and do NOT surface an error
                 // banner. The next scheduled poll retries automatically.
+                let duration = Date().timeIntervalSince(pollStart)
+                TelemetryService.shared.recordPollFailed(queryType: queryType, error: .serverError(code), duration: duration)
                 return
             } catch GitHubAPIError.rateLimited(let seconds) {
+                let duration = Date().timeIntervalSince(pollStart)
+                TelemetryService.shared.recordPollFailed(queryType: queryType, error: .rateLimited(retryAfter: seconds), duration: duration)
                 await MainActor.run { self.statusMessage = "Rate limited — wait \(seconds)s" }
                 try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
                 return
             } catch GitHubAPIError.unauthorized {
+                let duration = Date().timeIntervalSince(pollStart)
+                TelemetryService.shared.recordPollFailed(queryType: queryType, error: .unauthorized, duration: duration)
+                TelemetryService.shared.recordTokenInvalid()
                 await MainActor.run { self.statusMessage = "Token invalid — open Settings" }
                 stop()
                 return

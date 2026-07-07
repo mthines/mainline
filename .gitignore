@@ -28,6 +28,7 @@ DerivedData/
 *.xcscmblueprint
 xcuserdata/
 *.moved-aside
+*.xcodeproj/project.xcworkspace/
 *.pbxuser
 *.mode1v3
 *.mode2v3

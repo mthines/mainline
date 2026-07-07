@@ -173,6 +173,7 @@ struct CommandPaletteView: View {
         .onAppear {
             textFieldFocused = true
             selectedIndex = 0
+            TelemetryService.shared.recordTriageInteraction("command_palette")
         }
         .onChange(of: filterText) { _ in
             selectedIndex = 0

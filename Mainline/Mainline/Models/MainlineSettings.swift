@@ -108,6 +108,11 @@ final class MainlineSettings: ObservableObject {
         static let globalShortcutEnabled   = "globalShortcutEnabled"
         static let globalShortcutKeyCode   = "globalShortcutKeyCode"
         static let globalShortcutModifiers = "globalShortcutModifiers"
+        // Telemetry consent
+        static let telemetryEnabled                 = "telemetryEnabled"
+        static let telemetryInstallationId          = "telemetryInstallationId"
+        static let telemetryBannerDismissedVersion  = "telemetryBannerDismissedVersion"
+        static let telemetryLastLaunchedVersion     = "telemetryLastLaunchedVersion"
     }
 
     // MARK: - Global shortcut defaults
@@ -282,6 +287,50 @@ final class MainlineSettings: ObservableObject {
     /// Default `[.command, .shift, .control]`.
     @Published var globalShortcutModifiers: UInt {
         didSet { defaults.set(globalShortcutModifiers, forKey: Keys.globalShortcutModifiers) }
+    }
+
+    // MARK: - Telemetry consent
+
+    /// The current telemetry consent schema version. Bump to re-surface the banner.
+    static let currentTelemetryConsentVersion: Int = 1
+
+    /// Whether the user has opted in to anonymous telemetry. Default OFF (opt-in).
+    @Published var telemetryEnabled: Bool {
+        didSet {
+            defaults.set(telemetryEnabled, forKey: Keys.telemetryEnabled)
+            if telemetryEnabled {
+                TelemetryService.shared.configure()
+            }
+        }
+    }
+
+    /// Stable, random UUID per install — used as service.instance.id in OTel.
+    var installationId: String {
+        if let existing = defaults.string(forKey: Keys.telemetryInstallationId), !existing.isEmpty {
+            return existing
+        }
+        let new = UUID().uuidString
+        defaults.set(new, forKey: Keys.telemetryInstallationId)
+        return new
+    }
+
+    /// The telemetry consent banner schema version the user last dismissed.
+    /// When less than `currentTelemetryConsentVersion`, the banner is shown again.
+    var telemetryBannerDismissedVersion: Int {
+        get { defaults.integer(forKey: Keys.telemetryBannerDismissedVersion) }
+        set { defaults.set(newValue, forKey: Keys.telemetryBannerDismissedVersion) }
+    }
+
+    /// Whether the banner has been dismissed for the current consent version.
+    var telemetryBannerDismissed: Bool {
+        telemetryBannerDismissedVersion >= Self.currentTelemetryConsentVersion
+    }
+
+    /// The app version string recorded at the previous launch.
+    /// Used by TelemetryService to detect upgrades and emit "App upgraded" logs.
+    var lastLaunchedVersion: String? {
+        get { defaults.string(forKey: Keys.telemetryLastLaunchedVersion) }
+        set { defaults.set(newValue, forKey: Keys.telemetryLastLaunchedVersion) }
     }
 
     /// Typed accessor for the stored modifier flags, masked to the device-
@@ -486,6 +535,9 @@ final class MainlineSettings: ObservableObject {
         globalShortcutModifiers = defaults.object(forKey: Keys.globalShortcutModifiers) == nil
             ? Self.defaultShortcutModifiers
             : UInt(defaults.integer(forKey: Keys.globalShortcutModifiers))
+
+        // Telemetry consent — default OFF (opt-in)
+        telemetryEnabled = defaults.bool(forKey: Keys.telemetryEnabled)
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {
