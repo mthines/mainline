@@ -9,10 +9,11 @@ import SwiftUI
 /// own all scrolling — the two independently-fixed nested ScrollViews that caused
 /// the expand crash are gone.
 struct NeedsHumanHeaderView: View {
-    /// Bucket size — shown in the header pill. Tab-agnostic (from `PRManager`) so
-    /// it equals the menu-bar badge on either tab.
+    /// Bucket size — shown in the header pill. Tab-scoped to the visible
+    /// population (see `MenuBarView.panelNeedsHuman`).
     let needsHumanCount: Int
-    /// Count of the scope+draft-filtered population that is NOT in the bucket.
+    /// Count of the visible (tab-scoped) population that is NOT in the bucket —
+    /// i.e. PRs that don't currently need the user's attention.
     let handledCount: Int
     /// Whether the bucket is expanded. Owned by `MenuBarView`; the shared scroll
     /// region shows the rows when this is true.
@@ -66,13 +67,14 @@ struct NeedsHumanHeaderView: View {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(Color(nsColor: .systemGreen))
                 .frame(width: 20, height: 20)
-            Text("\(handledCount) handled by agents")
+            Text("\(handledCount) looking good — no action needed")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .help("PRs in this view that don't currently need your attention (CI passing, no changes requested, not stale).")
     }
 }
 

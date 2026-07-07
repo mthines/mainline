@@ -10,11 +10,22 @@ struct MenuBarView: View {
     @ObservedObject private var scopeStore: ScopeStore
     @ObservedObject private var trustLedger: TrustLedgerStore
 
-    /// Whether the "Needs a Human" bucket is expanded. Lifted up from
-    /// `NeedsHumanView` so the height math below can react to expansion: collapsed
-    /// hands the whole budget to the browse list; expanded gives the needs-human
-    /// list a real, scrolling height. Collapsed by default.
-    @State private var needsHumanExpanded = false
+    /// Binding to the persisted "Needs a Human" expanded state. Backed by
+    /// `settings.needsHumanExpanded` so expansion survives panel opens and app
+    /// relaunches (default collapsed). The height math below reacts to expansion:
+    /// collapsed hands the whole budget to the browse list; expanded gives the
+    /// needs-human list a real, scrolling height.
+    private var needsHumanExpanded: Binding<Bool> {
+        Binding(
+            get: { settings.needsHumanExpanded },
+            set: { settings.needsHumanExpanded = $0 }
+        )
+    }
+
+    /// Confirmation target for the inline Merge button on Needs-a-Human rows.
+    /// MenuBarView owns this dialog so the bucket rows route through the SAME
+    /// confirm + `performAction(.merge)` path as the triage deck.
+    @State private var mergeConfirmPR: PRSnapshot? = nil
 
     /// Natural (unclamped) height of the single scrollable body — the
     /// Needs-a-Human rows (when expanded) plus the browse deck. Measured via a
@@ -93,6 +104,22 @@ struct MenuBarView: View {
                 manager.markAllSeen()
             }
         }
+        // Confirm dialog for the inline Merge button on Needs-a-Human rows. Uses
+        // the SAME write path (`performAction(.merge)`) and guardrails as the
+        // triage deck's M verb — no second merge code path.
+        .confirmationDialog(
+            mergeConfirmTitle,
+            isPresented: Binding(get: { mergeConfirmPR != nil }, set: { if !$0 { mergeConfirmPR = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Confirm") {
+                if let pr = mergeConfirmPR {
+                    Task { await manager.performAction(.merge(pr)) }
+                    mergeConfirmPR = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { mergeConfirmPR = nil }
+        }
         .overlay(alignment: .bottom) {
             HStack(spacing: 0) {
                 Button("") { cycleScopeBackward() }
@@ -149,6 +176,32 @@ struct MenuBarView: View {
             sourceFiltered = scopeFiltered
         }
         return sourceFiltered.sorted(by: PRSnapshot.triageOrder)
+    }
+
+    /// The TAB-SCOPED "Needs a Human" subset: the needs-human PRs within the
+    /// currently visible (tab + scope + drafts + For-me Direct/Team filtered)
+    /// population. On Created it surfaces only the user's authored PRs that need
+    /// action; on For me only their review-relevant PRs. Uses the same
+    /// `TriageClassifier.needsHuman` predicate (respecting the conflicts setting)
+    /// as the global bucket, so only the input population differs. This is a
+    /// smaller array fed into the same rendering — no new scroll region.
+    private var tabScopedNeedsHuman: [PRSnapshot] {
+        let myLogin = settings.githubUsername
+        return visiblePRs.filter { pr in
+            let tier = trustLedger.tier(for: pr.author)
+            return TriageClassifier.needsHuman(
+                pr,
+                myLogin: myLogin,
+                trustTier: tier,
+                includeConflicts: settings.includeConflictsInNeedsHuman
+            )
+        }
+    }
+
+    /// Tab-scoped "handled" count: visible PRs that are NOT in the tab-scoped
+    /// needs-human bucket. Drives the reassurance summary row.
+    private var tabScopedHandledCount: Int {
+        max(0, visiblePRs.count - tabScopedNeedsHuman.count)
     }
 
     /// Whether a PR should count toward the tab labels, honouring the draft toggle.
@@ -453,28 +506,47 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - "Needs a Human" section (GLOBAL / tab-agnostic)
+    // MARK: - "Needs a Human" section (TAB-SCOPED)
 
-    /// The GLOBAL "Needs a Human" bucket — sourced from `manager.needsHumanPRs`
-    /// (scope + drafts + conflicts applied, but NOT tab-scoped). Using the same
-    /// set the badge reads guarantees the collapsed "Needs a Human · N" header
-    /// count equals `PRManager.needsHumanCount` / `menuBarBadge` on EITHER tab.
-    private var globalNeedsHuman: [PRSnapshot] {
-        manager.needsHumanPRs
+    /// The "Needs a Human" bucket shown in the panel — TAB-SCOPED to the visible
+    /// population (`tabScopedNeedsHuman`) so it is relevant to the selected tab:
+    /// on Created only the user's authored PRs that need action, on For me only
+    /// their review-relevant ones. This intentionally DECOUPLES the bucket count
+    /// from the menu-bar badge (which stays global / configurable via
+    /// `manager.needsHumanPRs`); the badge explainer line already labels the badge.
+    private var panelNeedsHuman: [PRSnapshot] {
+        tabScopedNeedsHuman
     }
 
-    /// The GLOBAL "Needs a Human" HEADER — always-pinned chrome. Renders only the
-    /// tappable disclosure header (+ the "N handled" summary); the ROWS live in the
-    /// shared scroll region below (`scrollableBody`). Header count is tab-agnostic
-    /// so it matches the menu-bar badge on every tab.
+    /// Routes an inline Merge tap from a Needs-a-Human row through the shared
+    /// confirm path. When write actions are disabled, surfaces the same guidance
+    /// as the triage deck (open Settings) instead of silently doing nothing.
+    private func requestMerge(_ pr: PRSnapshot) {
+        guard settings.writeActionsEnabled else {
+            NotificationCenter.default.post(name: .openSettings, object: nil)
+            return
+        }
+        mergeConfirmPR = pr
+    }
+
+    /// Title for the Needs-a-Human merge confirmation dialog.
+    private var mergeConfirmTitle: String {
+        guard let pr = mergeConfirmPR else { return "Merge PR?" }
+        return "Merge \"\(pr.title)\"?"
+    }
+
+    /// The "Needs a Human" HEADER — always-pinned chrome. Renders only the
+    /// tappable disclosure header (+ the reassurance summary); the ROWS live in the
+    /// shared scroll region below (`scrollableBody`). Count and handled total are
+    /// tab-scoped.
     @ViewBuilder
     private var needsHumanHeaderSection: some View {
-        let bucket = globalNeedsHuman
+        let bucket = panelNeedsHuman
         if manager.hasToken && !bucket.isEmpty {
             NeedsHumanHeaderView(
                 needsHumanCount: bucket.count,
-                handledCount: manager.handledCount,
-                expanded: $needsHumanExpanded
+                handledCount: tabScopedHandledCount,
+                expanded: needsHumanExpanded
             )
             .padding(.vertical, 4)
 
@@ -498,7 +570,7 @@ struct MenuBarView: View {
         if !manager.hasToken || manager.prs.isEmpty {
             // Empty / no-token: still show the needs-human rows if expanded, else
             // the empty state. No fixed frame needed — content is small chrome.
-            if needsHumanExpanded && !globalNeedsHuman.isEmpty {
+            if needsHumanExpanded.wrappedValue && !panelNeedsHuman.isEmpty {
                 ScrollView {
                     bodyContent
                         .background(bodyHeightReader)
@@ -521,13 +593,15 @@ struct MenuBarView: View {
     private var bodyContent: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
             // Needs-a-Human ROWS — rendered here (inside the shared scroll region)
-            // only when the bucket is expanded and non-empty.
-            if needsHumanExpanded && !globalNeedsHuman.isEmpty {
+            // only when the bucket is expanded and non-empty. Tab-scoped set.
+            if needsHumanExpanded.wrappedValue && !panelNeedsHuman.isEmpty {
                 NeedsHumanRowsView(
-                    needsHumanPRs: globalNeedsHuman,
+                    needsHumanPRs: panelNeedsHuman,
                     myLogin: settings.githubUsername,
                     includeConflicts: settings.includeConflictsInNeedsHuman,
                     metrics: RowMetrics.forCompact(settings.compactRows),
+                    writeActionsEnabled: settings.writeActionsEnabled,
+                    onMerge: { requestMerge($0) },
                     trustLedger: trustLedger
                 )
                 Divider()

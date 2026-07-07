@@ -77,6 +77,7 @@ final class MainlineSettings: ObservableObject {
         static let splitDrafts          = "splitDrafts"
         static let forMeReviewFilter    = "forMeReviewFilter"
         static let compactRows          = "compactRows"
+        static let needsHumanExpanded   = "needsHumanExpanded"
     }
 
     // MARK: - Persisted properties
@@ -200,6 +201,13 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(compactRows, forKey: Keys.compactRows) }
     }
 
+    /// Whether the "Needs a Human" section is expanded. Persisted so that once
+    /// the user expands it, it stays expanded across panel opens and relaunches.
+    /// Default `false` (collapsed).
+    @Published var needsHumanExpanded: Bool {
+        didSet { defaults.set(needsHumanExpanded, forKey: Keys.needsHumanExpanded) }
+    }
+
     /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
     @Published var snoozeMap: [String: Date] {
         didSet {
@@ -298,6 +306,9 @@ final class MainlineSettings: ObservableObject {
         compactRows = defaults.object(forKey: Keys.compactRows) == nil
             ? true
             : defaults.bool(forKey: Keys.compactRows)
+
+        // Needs-a-Human expanded — default collapsed (false); persisted on change
+        needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {
