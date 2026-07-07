@@ -40,8 +40,8 @@ struct RowMetrics {
         titleMetadataSpacing: 1,
         leadingIconSize: 16,
         rowHStackSpacing: 6,
-        sectionHeaderTopPadding: 4,
-        sectionHeaderBottomPadding: 2,
+        sectionHeaderTopPadding: 10,
+        sectionHeaderBottomPadding: 8,
         unreadDotSlotWidth: 10
     )
 
@@ -51,8 +51,8 @@ struct RowMetrics {
         titleMetadataSpacing: 2,
         leadingIconSize: 20,
         rowHStackSpacing: 8,
-        sectionHeaderTopPadding: 8,
-        sectionHeaderBottomPadding: 2,
+        sectionHeaderTopPadding: 14,
+        sectionHeaderBottomPadding: 10,
         unreadDotSlotWidth: 12
     )
 
