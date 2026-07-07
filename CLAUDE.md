@@ -10,6 +10,21 @@ xcodebuild -scheme Mainline -configuration Debug -destination "platform=macOS" b
 xcodebuild -scheme Mainline -configuration Debug -destination "platform=macOS" build 2>&1 | tail -5
 ```
 
+## Release
+
+```bash
+# Local release (interactive — bumps version, builds, zips, updates tap, pushes)
+pnpm release
+# or: bash scripts/release.sh
+
+# One-time tap setup (creates homebrew-mainline repo locally + prints next steps)
+pnpm setup-tap
+# or: bash scripts/setup-tap.sh
+```
+
+CI releases run automatically: push to `main` → stable; non-draft PR → beta.
+See `docs/release.md` for secrets, trigger model, and signing setup.
+
 ## Architecture
 
 ```
