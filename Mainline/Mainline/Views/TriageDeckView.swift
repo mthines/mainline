@@ -173,7 +173,7 @@ struct TriageDeckView: View {
                 }
 
                 if showCommandPalette, let pr = focusedPR {
-                    Color.black.opacity(0.2)
+                    Color.black.opacity(0.45)
                         .ignoresSafeArea()
                         .onTapGesture { showCommandPalette = false }
                     CommandPaletteView(
@@ -785,11 +785,19 @@ struct TriageDeckView: View {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
-        // Don't intercept when overlays are showing (they handle their own keys)
-        if showDiff || showCommandPalette { return event }
-
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let cmd = event.modifierFlags.contains(.command)
+
+        // ⌘K toggles the command palette — handled before the overlay guard below
+        // so a second ⌘K while it's open dismisses it. Consumed here so the
+        // palette's TextField never receives the key. (Not while the diff is up.)
+        if cmd, chars == "k", !showDiff {
+            showCommandPalette.toggle()
+            return nil
+        }
+
+        // Don't intercept other keys when overlays are showing (they handle their own keys)
+        if showDiff || showCommandPalette { return event }
 
         switch (chars, cmd) {
         // Navigation
@@ -804,11 +812,6 @@ struct TriageDeckView: View {
         case (" ", false):
             showDiff = true
             TelemetryService.shared.recordTriageInteraction("diff_preview")
-            return nil
-
-        // Command palette
-        case ("k", true):
-            showCommandPalette = true
             return nil
 
         // Undo

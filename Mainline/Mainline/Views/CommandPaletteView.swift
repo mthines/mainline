@@ -167,7 +167,17 @@ struct CommandPaletteView: View {
             .padding(.vertical, 4)
         }
         .frame(width: 320)
-        .background(.background)
+        // Opaque fill: `.background(.background)` resolves to a translucent
+        // vibrancy material inside the MenuBarExtra(.window) popover, letting the
+        // PR list bleed through. An explicit window-background color is opaque.
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .shadow(radius: 16)
         .onAppear {
