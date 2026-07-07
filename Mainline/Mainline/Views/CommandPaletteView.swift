@@ -126,32 +126,41 @@ struct CommandPaletteView: View {
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 16)
             } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(Array(filteredActions.enumerated()), id: \.element.id) { index, action in
-                            actionRow(action: action, index: index)
-                        }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(Array(filteredActions.enumerated()), id: \.element.id) { index, action in
+                                actionRow(action: action, index: index)
+                                    .id(index)
+                            }
 
-                        if let mgr = manager, (!filteredScopes.isEmpty || showAllScopeEntry) {
-                            Divider().padding(.vertical, 4)
-                            HStack {
-                                Text("Switch Scope")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    .padding(.horizontal, 12)
-                                Spacer()
-                            }
-                            if showAllScopeEntry {
-                                scopeRow(label: "All scopes", scope: nil, mgr: mgr)
-                            }
-                            ForEach(filteredScopes, id: \.rawValue) { scope in
-                                let count = mgr.scopeStore.scopeCounts[scope] ?? 0
-                                scopeRow(label: "\(scope.displayName) (\(count))", scope: scope, mgr: mgr)
+                            if let mgr = manager, (!filteredScopes.isEmpty || showAllScopeEntry) {
+                                Divider().padding(.vertical, 4)
+                                HStack {
+                                    Text("Switch Scope")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .padding(.horizontal, 12)
+                                    Spacer()
+                                }
+                                if showAllScopeEntry {
+                                    scopeRow(label: "All scopes", scope: nil, mgr: mgr)
+                                }
+                                ForEach(filteredScopes, id: \.rawValue) { scope in
+                                    let count = mgr.scopeStore.scopeCounts[scope] ?? 0
+                                    scopeRow(label: "\(scope.displayName) (\(count))", scope: scope, mgr: mgr)
+                                }
                             }
                         }
                     }
+                    .frame(maxHeight: 280)
+                    // Keep the keyboard-selected row visible as ↑/↓ moves selection.
+                    .onChange(of: selectedIndex) { newIndex in
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(newIndex, anchor: .center)
+                        }
+                    }
                 }
-                .frame(maxHeight: 280)
             }
 
             Divider()
