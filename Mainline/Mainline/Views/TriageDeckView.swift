@@ -199,7 +199,6 @@ struct TriageDeckView: View {
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
     @State private var undoEntries: [UndoEntry] = []
-    @State private var eventMonitor: Any? = nil
 
     // MARK: - Body
 
@@ -237,12 +236,13 @@ struct TriageDeckView: View {
                     .zIndex(5)
             }
         }
-        .onAppear {
-            installKeyMonitor()
-        }
-        .onDisappear {
-            removeKeyMonitor()
-        }
+        // Keyboard triage capture. A first-responder NSView that overrides keyDown
+        // directly — reliable inside the MenuBarExtra popover regardless of how it
+        // was opened, unlike a global/local NSEvent monitor which needs the app to
+        // be active. `handleKeyDown` returns nil when it consumed the key.
+        .background(
+            KeyCaptureView { event in handleKeyDown(event) }
+        )
     }
 
     // MARK: - PR list
@@ -847,42 +847,7 @@ struct TriageDeckView: View {
         return ordered[selectedIndex]
     }
 
-    // MARK: - Key monitor (macOS 13 compatible)
-
-    private func installKeyMonitor() {
-        focusPanelForKeyboard()
-
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
-            return self.handleKeyDown(event)
-        }
-    }
-
-    /// Make the menu-bar popover the active, key window and take first responder so
-    /// the local key monitor receives J/K/arrow presses.
-    ///
-    /// Opening via the global shortcut calls `NSApp.activate` (see
-    /// `MenuBarPopoverOpener`), so keyboard nav works there. But clicking the menu
-    /// bar icon does NOT activate an accessory app — `NSApp.keyWindow` is then nil,
-    /// `makeFirstResponder` no-ops, and keyDown never reaches the monitor, so J/K and
-    /// arrows do nothing. Activate here too. Retry briefly: right after `onAppear`
-    /// the popover may not yet be the key window in the first runloop tick.
-    private func focusPanelForKeyboard(attempt: Int = 0) {
-        NSApp.activate(ignoringOtherApps: true)
-        if let key = NSApp.keyWindow {
-            key.makeFirstResponder(key.contentView)
-        } else if attempt < 10 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                focusPanelForKeyboard(attempt: attempt + 1)
-            }
-        }
-    }
-
-    private func removeKeyMonitor() {
-        if let monitor = eventMonitor {
-            NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
-        }
-    }
+    // MARK: - Keyboard triage
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
@@ -1337,5 +1302,75 @@ struct ReviewSourceBadge: View {
             .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
             .foregroundStyle(color)
             .accessibilityLabel(text == "you" ? "Directly requested" : "Team requested: \(text)")
+    }
+}
+
+// MARK: - KeyCaptureView
+
+/// A zero-size `NSView` that takes first responder and handles `keyDown` directly,
+/// giving the triage deck reliable keyboard capture inside the MenuBarExtra popover.
+///
+/// Why not an `NSEvent` local monitor: a local monitor only fires while the app is
+/// active, and clicking the menu bar icon does not activate an accessory app — so
+/// J/K/arrows silently did nothing on click-open. A first-responder view receives
+/// `keyDown` whenever its window is key (which the popover is, since it hosts
+/// interactive controls), independent of app-active state.
+///
+/// `handler` returns nil when it consumed the key (so it is not passed to `super`).
+/// It is refreshed every SwiftUI update via `updateNSView`, so it never captures
+/// stale `@State`.
+private struct KeyCaptureView: NSViewRepresentable {
+    let handler: (NSEvent) -> NSEvent?
+
+    func makeNSView(context: Context) -> KeyView {
+        let view = KeyView()
+        view.handler = handler
+        return view
+    }
+
+    func updateNSView(_ nsView: KeyView, context: Context) {
+        nsView.handler = handler
+        nsView.reassertFocusIfIdle()
+    }
+
+    final class KeyView: NSView {
+        var handler: ((NSEvent) -> NSEvent?)?
+        override var acceptsFirstResponder: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            takeFocus(attempt: 0)
+        }
+
+        /// Reclaim first responder only when nothing meaningful holds it (the window
+        /// or its contentView) — so we don't steal focus from a real control, but we
+        /// do recover if SwiftUI reset the responder chain on a re-render. There are
+        /// no text fields in the deck, so this is safe.
+        func reassertFocusIfIdle() {
+            guard let window else { return }
+            let fr = window.firstResponder
+            if fr !== self && (fr == nil || fr === window || fr === window.contentView) {
+                window.makeFirstResponder(self)
+            }
+        }
+
+        /// Claim first responder so keyDown routes here. Retry briefly because the
+        /// popover window may not be key in the first runloop tick after it opens.
+        private func takeFocus(attempt: Int) {
+            guard let window else { return }
+            window.makeFirstResponder(self)
+            if window.firstResponder !== self, attempt < 12 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    self?.takeFocus(attempt: attempt + 1)
+                }
+            }
+        }
+
+        override func keyDown(with event: NSEvent) {
+            // handler returns nil == consumed; non-nil == pass through to super.
+            if let handler, handler(event) == nil { return }
+            super.keyDown(with: event)
+        }
     }
 }
