@@ -20,7 +20,7 @@
       "{projectRoot}/scripts/**/*.sh"
     ],
     "cask": [
-      "{projectRoot}/Homebrew/**/*.rb"
+      "{projectRoot}/Casks/**/*.rb"
     ]
   },
   "targetDefaults": {
