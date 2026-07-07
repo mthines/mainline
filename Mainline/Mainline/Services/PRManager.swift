@@ -52,6 +52,7 @@ final class PRManager: ObservableObject {
             let tier = trustLedger.tier(for: pr.author)
             return TriageClassifier.needsHuman(pr, myLogin: myLogin, trustTier: tier)
         }
+        .sorted(by: PRSnapshot.triageOrder)
     }
 
     /// Count of PRs the user personally needs to act on (Layer A badge logic).
@@ -74,6 +75,61 @@ final class PRManager: ObservableObject {
     /// Count of PRs that have been "handled" (not in needs-human bucket).
     var handledCount: Int {
         prs.count - needsHumanPRs.count
+    }
+
+    // MARK: - Menu-bar badge (scope-aware + configurable — Bug 2 / 5)
+
+    /// PRs the menu-bar badge should consider — all PRs, optionally narrowed to
+    /// the currently selected scope when `menuBarScopeFollowsSelection` is on.
+    private var badgeScopedPRs: [PRSnapshot] {
+        guard settings.menuBarScopeFollowsSelection,
+              let scope = scopeStore.selectedScope else { return prs }
+        return prs.filter { pr in
+            switch scope {
+            case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
+            case .repo(let r): return pr.repoFullName == r
+            }
+        }
+    }
+
+    /// The badge for the menu-bar icon, computed from the configured metric and
+    /// scope. Colorblind-safe: encodes shape + tint (see `MenuBarBadge`).
+    var menuBarBadge: MenuBarBadge {
+        let scoped = badgeScopedPRs
+        let myLogin = settings.githubUsername
+
+        switch settings.menuBarMetric {
+        case .needsAHuman:
+            let count = scoped.filter { pr in
+                let tier = trustLedger.tier(for: pr.author)
+                return TriageClassifier.needsHuman(pr, myLogin: myLogin, trustTier: tier)
+            }.count
+            return .attention(count)
+
+        case .failingCI:
+            let count = scoped.filter { pr in
+                pr.classifiedState != .merged && pr.classifiedState != .closed &&
+                (pr.ciStatus == .failure || pr.ciStatus == .error)
+            }.count
+            return .blocker(count)
+
+        case .reviewRequests:
+            guard !myLogin.isEmpty else { return .attention(0) }
+            let count = scoped.filter { pr in
+                pr.tabs.contains(.forMe) && pr.requestedReviewers.contains(myLogin)
+            }.count
+            return .attention(count)
+
+        case .unread:
+            let count = scoped.filter { unreadPRIds.contains($0.nodeId) }.count
+            return .attention(count)
+
+        case .totalOpen:
+            let count = scoped.filter {
+                $0.classifiedState != .merged && $0.classifiedState != .closed
+            }.count
+            return .neutral(count)
+        }
     }
 
     // MARK: - Init

@@ -168,6 +168,21 @@ struct PRSnapshot: Codable, Equatable {
         self.sensitivePathFlags = sensitivePathFlags
     }
 
+    // MARK: - Canonical ordering
+
+    /// The single shared comparator used everywhere PRs are listed.
+    ///
+    /// Primary key: `classifiedState.sortIndex` ascending — Open(0) / InReview(1) /
+    /// Approved(2) rank above Draft(3), which ranks above Merged(4) / Closed(5).
+    /// This guarantees drafts never appear above non-draft open PRs.
+    /// Secondary key: `updatedAt` descending (most recently updated first).
+    static func triageOrder(_ lhs: PRSnapshot, _ rhs: PRSnapshot) -> Bool {
+        let li = lhs.classifiedState.sortIndex
+        let ri = rhs.classifiedState.sortIndex
+        if li != ri { return li < ri }
+        return lhs.updatedAt > rhs.updatedAt
+    }
+
     // MARK: - Classification
 
     /// Classify the PR into one of the six display buckets.

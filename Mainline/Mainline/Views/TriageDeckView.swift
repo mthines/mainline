@@ -111,10 +111,16 @@ struct TriageDeckView: View {
 
     // MARK: - PR list
 
+    /// PRs in canonical triage order — Open/InReview/Approved above Draft,
+    /// then most-recently-updated first. Drafts never appear above open PRs.
+    private var orderedPRs: [PRSnapshot] {
+        prs.sorted(by: PRSnapshot.triageOrder)
+    }
+
     private var prList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(Array(prs.enumerated()), id: \.element.nodeId) { index, pr in
+                ForEach(Array(orderedPRs.enumerated()), id: \.element.nodeId) { index, pr in
                     deckRow(pr: pr, index: index)
                     Divider().padding(.leading, 36)
                 }
@@ -184,8 +190,9 @@ struct TriageDeckView: View {
     // MARK: - Focused PR
 
     private var focusedPR: PRSnapshot? {
-        guard selectedIndex < prs.count else { return nil }
-        return prs[selectedIndex]
+        let ordered = orderedPRs
+        guard selectedIndex < ordered.count else { return nil }
+        return ordered[selectedIndex]
     }
 
     // MARK: - Key monitor (macOS 13 compatible)

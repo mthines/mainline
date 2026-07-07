@@ -17,6 +17,7 @@ struct NeedsHumanView: View {
             let tier = trustLedger.tier(for: pr.author)
             return TriageClassifier.needsHuman(pr, myLogin: myLogin, trustTier: tier)
         }
+        .sorted(by: PRSnapshot.triageOrder)
     }
 
     private var handledCount: Int {
