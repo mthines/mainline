@@ -157,6 +157,35 @@ final class PRManager: ObservableObject {
         }
     }
 
+    /// A human-readable one-line description of the current menu-bar badge:
+    /// "<count> <metric-noun>[ in <scope>]". The count is read verbatim from
+    /// `menuBarBadge.rawCount`, so this string ALWAYS agrees with the icon.
+    ///
+    /// Examples: "115 open PRs in dash0hq", "33 need a human", "5 review requests".
+    var badgeExplanation: String {
+        let count = menuBarBadge.rawCount
+
+        let noun: String
+        switch settings.menuBarMetric {
+        case .needsAHuman:    noun = "need a human"
+        case .failingCI:      noun = "with failing CI"
+        case .reviewRequests: noun = "review requests"
+        case .unread:         noun = "unread"
+        case .totalOpen:      noun = "open PRs"
+        }
+
+        let scopeSuffix: String
+        if settings.menuBarScopeFollowsSelection, let scope = scopeStore.selectedScope {
+            scopeSuffix = " in \(scope.displayName)"
+        } else if settings.menuBarMetric == .totalOpen {
+            scopeSuffix = " across all repos"
+        } else {
+            scopeSuffix = ""
+        }
+
+        return "\(count) \(noun)\(scopeSuffix)"
+    }
+
     // MARK: - Init
 
     init(settings: MainlineSettings = .shared) {

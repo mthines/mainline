@@ -29,6 +29,13 @@ struct MenuBarView: View {
 
             Divider()
 
+            // Badge explainer: mirrors the menu-bar icon (same glyph + tint) and
+            // spells out what the number means, so the panel ties the icon count
+            // to the selected scope/metric. Counted in `chromeReserve`.
+            badgeExplainer
+
+            Divider()
+
             // Tab picker is the PRIMARY axis — it sits at the top and EVERYTHING
             // below it (scope filter, Needs-a-Human, browse list) respects the
             // selected tab.
@@ -174,11 +181,11 @@ struct MenuBarView: View {
 
     /// Fixed reserve for the always-present (non-scrolling) chrome. Summed from
     /// the real elements so it is not under-counted:
-    ///   header ~44 + tab picker ~44 + scope/drafts row ~44 +
+    ///   header ~44 + badge explainer ~22 + tab picker ~44 + scope/drafts row ~44 +
     ///   collapsed needs-human header ~40 + footer ~48 + dividers/padding ~30
     ///   (+ For-me sub-filter ~36 only when the For-me tab is active).
     private var chromeReserve: CGFloat {
-        let base: CGFloat = 44 + 44 + 44 + 40 + 48 + 30   // = 250
+        let base: CGFloat = 44 + 22 + 44 + 44 + 40 + 48 + 30   // = 272
         let forMeFilter: CGFloat = settings.selectedTab == .forMe ? 36 : 0
         return base + forMeFilter
     }
@@ -272,6 +279,43 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - Badge explainer
+
+    /// Compact one-line caption that mirrors the menu-bar badge: same glyph + tint
+    /// as `MenuBarIconView`, followed by `manager.badgeExplanation`. Explains what
+    /// the icon number counts (e.g. "◐ 115 open PRs in dash0hq"). Uses the badge's
+    /// symbol/tint without the count text, so the number appears once (in the
+    /// explanation string) and never disagrees with the icon.
+    private var badgeExplainer: some View {
+        let badge = manager.menuBarBadge
+        return HStack(spacing: 6) {
+            Image(systemName: badge.symbolName)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(badgeTint(for: badge))
+                .font(.caption)
+            Text(manager.badgeExplanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .help(manager.badgeExplanation)
+    }
+
+    /// Tint mirroring `MenuBarIconView.iconColor`: clear/neutral → secondary,
+    /// attention → orange, blocker → red.
+    private func badgeTint(for badge: MenuBarBadge) -> Color {
+        guard badge.count != nil else { return .secondary }
+        switch badge {
+        case .neutral:   return .secondary
+        case .attention: return Color(nsColor: .systemOrange)
+        case .blocker:   return Color(nsColor: .systemRed)
+        }
     }
 
     // MARK: - Tab picker (AC-18: labels show counts)

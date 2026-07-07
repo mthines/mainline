@@ -56,6 +56,7 @@ private struct MenuBarLabel: View {
 
     var body: some View {
         MenuBarIconView(badge: manager.menuBarBadge)
+            .help(manager.badgeExplanation)
     }
 }
 
