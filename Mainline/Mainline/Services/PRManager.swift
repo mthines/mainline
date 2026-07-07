@@ -27,6 +27,11 @@ final class PRManager: ObservableObject {
     @Published var tokenInvalid: Bool = false
     @Published var isRefreshing: Bool = false
 
+    /// True once the poller has been started. Guards `start()` against being
+    /// invoked twice (label `.task` + popover-content `.task`) which would
+    /// otherwise spawn a second poll loop or re-request authorization.
+    private var didStart: Bool = false
+
     /// PRs the user has not yet looked at. Persisted across launches.
     @Published var unreadPRIds: Set<String> = []
 
@@ -50,7 +55,12 @@ final class PRManager: ObservableObject {
         let myLogin = settings.githubUsername
         return prs.filter { pr in
             let tier = trustLedger.tier(for: pr.author)
-            return TriageClassifier.needsHuman(pr, myLogin: myLogin, trustTier: tier)
+            return TriageClassifier.needsHuman(
+                pr,
+                myLogin: myLogin,
+                trustTier: tier,
+                includeConflicts: settings.includeConflictsInNeedsHuman
+            )
         }
         .sorted(by: PRSnapshot.triageOrder)
     }
@@ -102,7 +112,12 @@ final class PRManager: ObservableObject {
         case .needsAHuman:
             let count = scoped.filter { pr in
                 let tier = trustLedger.tier(for: pr.author)
-                return TriageClassifier.needsHuman(pr, myLogin: myLogin, trustTier: tier)
+                return TriageClassifier.needsHuman(
+                    pr,
+                    myLogin: myLogin,
+                    trustTier: tier,
+                    includeConflicts: settings.includeConflictsInNeedsHuman
+                )
             }.count
             return .attention(count)
 
@@ -186,6 +201,12 @@ final class PRManager: ObservableObject {
     // MARK: - Token lifecycle
 
     func start() async {
+        // Idempotent: the always-rendered menu-bar label and the popover
+        // content both attach a `.task { await manager.start() }`. Only the
+        // first call should spin up the poller.
+        guard !didStart else { return }
+        didStart = true
+
         notifications.requestAuthorization()
         await trustLedger.load()
 
@@ -202,6 +223,8 @@ final class PRManager: ObservableObject {
 
     func restart() async {
         poller.stop()
+        // Allow start() to run again after an explicit restart (e.g. token change).
+        didStart = false
         await start()
     }
 

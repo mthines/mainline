@@ -17,10 +17,20 @@ struct MainlineApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuBarView(manager: manager)
+                // Guarded fallback only — `start()` is idempotent, so the
+                // real initial start happens on the always-rendered label
+                // below, independent of popover visibility.
                 .task { await manager.start() }
                 .onAppear { ManagerBridge.instance = manager }
         } label: {
             MenuBarLabel(manager: manager)
+                // The menu-bar icon is always rendered, so this task begins
+                // polling at launch regardless of whether the popover is
+                // opened. Idempotent — a second call is a no-op.
+                .task {
+                    ManagerBridge.instance = manager
+                    await manager.start()
+                }
         }
         .menuBarExtraStyle(.window)
     }
