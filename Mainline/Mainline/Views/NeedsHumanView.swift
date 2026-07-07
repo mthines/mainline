@@ -21,9 +21,12 @@ struct NeedsHumanView: View {
     let maxExpandedHeight: CGFloat
     @ObservedObject var trustLedger: TrustLedgerStore
 
-    /// Whether the bucket is expanded into a bounded ScrollView. Collapsed by
-    /// default so the section never blocks the browse list below it.
-    @State private var expanded: Bool = false
+    /// Whether the bucket is expanded into a bounded ScrollView. Owned by
+    /// `MenuBarView` and passed down as a Binding so the panel's height math can
+    /// react to expansion (collapsed → the whole budget goes to the browse list;
+    /// expanded → the needs-human list gets a real, scrolling height). Collapsed
+    /// by default so the section never blocks the browse list below it.
+    @Binding var expanded: Bool
 
     // MARK: - Derived data
 

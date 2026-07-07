@@ -10,6 +10,12 @@ struct MenuBarView: View {
     @ObservedObject private var scopeStore: ScopeStore
     @ObservedObject private var trustLedger: TrustLedgerStore
 
+    /// Whether the "Needs a Human" bucket is expanded. Lifted up from
+    /// `NeedsHumanView` so the height math below can react to expansion: collapsed
+    /// hands the whole budget to the browse list; expanded gives the needs-human
+    /// list a real, scrolling height. Collapsed by default.
+    @State private var needsHumanExpanded = false
+
     init(manager: PRManager) {
         self.manager = manager
         self.settings = manager.settings
@@ -141,16 +147,22 @@ struct MenuBarView: View {
     //
     // A MenuBarExtra(.window) popover has NO external height constraint: it sizes
     // to its SwiftUI content and macOS clips (does NOT scroll) anything past the
-    // screen. So we bound the ONE scrollable browse region to the REAL available
-    // on-screen height. The invariant we maintain:
+    // screen. So we bound the scrollable regions to the REAL available on-screen
+    // height. The invariant we maintain:
     //
     //     chromeReserve + needsHumanHeight + browseHeight <= available <= screen
     //
+    // where `needsHumanHeight` is 0 when the bucket is collapsed (or empty) and
+    // the expanded value otherwise. When collapsed the browse list receives the
+    // entire post-chrome budget; when expanded the needs-human list takes the
+    // majority and the browse list keeps a usable floor.
+    //
     // `chromeReserve` counts every always-present fixed element conservatively
     // (over-, never under-counting — under-counting is what caused the overrun /
-    // clipped footer). The browse ScrollView gets a FIXED `.frame(height:)`, not
-    // `maxHeight`, so overflow always scrolls and the total declared height stays
-    // within `available`.
+    // clipped footer). The collapsed needs-human HEADER (40pt) is part of
+    // `chromeReserve` regardless of expansion. Both ScrollViews get a FIXED
+    // `.frame(height:)`, not `maxHeight`, so overflow always scrolls and the
+    // total declared height stays within `available`.
 
     /// Conservative on-screen budget: the smaller of the user's preferred panel
     /// height and the real space below the menu bar (visibleFrame minus a small
@@ -171,28 +183,49 @@ struct MenuBarView: View {
         return base + forMeFilter
     }
 
-    /// Max height for the EXPANDED "Needs a Human" ScrollView. Capped so that,
-    /// even when expanded, `chromeReserve + needsHumanHeight + browseHeight`
-    /// stays within `available`: at most a third of the post-chrome budget,
-    /// hard-capped at 260, and never so large the browse list drops below its
-    /// 200pt floor. Collapsed, the section adds nothing here (its header is part
-    /// of `chromeReserve`).
-    private var needsHumanMaxHeight: CGFloat {
-        let postChrome = max(availableHeight - chromeReserve, 0)
-        let byBudget = min(postChrome / 3, 260)
-        return min(byBudget, max(postChrome - 200, 0))
+    /// Post-chrome budget: the space left after the always-present fixed chrome.
+    /// Shared basis for both scroll regions.
+    private var postChrome: CGFloat {
+        max(availableHeight - chromeReserve, 0)
     }
 
-    /// FIXED height for the tabbed browse ScrollView. `available` minus the fixed
-    /// chrome, floored at 200 so it stays usable on short screens. A fixed height
-    /// (not maxHeight) guarantees content taller than it scrolls and the footer
-    /// stays on-screen. When the needs-human bucket exists we also subtract its
-    /// expanded reserve so the two scrolling regions plus chrome never exceed
-    /// `available`.
+    /// Height for the "Needs a Human" ScrollView.
+    ///
+    /// - Collapsed, empty, or no token: 0 — the section contributes only its
+    ///   header (already counted in `chromeReserve`) and the browse list gets the
+    ///   whole `postChrome` budget.
+    /// - Expanded (with items): the MAJORITY of the budget — ~60% of `postChrome`,
+    ///   clamped to a floor of 160 (so it is never a zero/one-pixel sliver) and a
+    ///   ceiling of `postChrome - 150` (so the browse list keeps its 150pt floor).
+    ///   The floor itself is clamped not to exceed the ceiling on very short
+    ///   screens, and a hard 140pt minimum guarantees a genuinely useful list.
+    private var needsHumanMaxHeight: CGFloat {
+        let hasBucket = manager.hasToken && !globalNeedsHuman.isEmpty
+        guard hasBucket && needsHumanExpanded else { return 0 }
+
+        let target = (postChrome * 0.6).rounded()
+        let ceiling = max(postChrome - 150, 160)
+        let floor: CGFloat = 160
+        let clamped = min(max(target, floor), ceiling)
+        // Never a sliver: guarantee at least ~140pt whenever expanded with items.
+        return max(clamped, min(140, postChrome))
+    }
+
+    /// FIXED height for the tabbed browse ScrollView. Gets the entire post-chrome
+    /// budget when the needs-human list is collapsed/empty; otherwise `postChrome`
+    /// minus the expanded needs-human height. Floored at 150 so it stays usable
+    /// even when the bucket is expanded, and at 200 when it has the whole budget.
+    /// A fixed height (not maxHeight) guarantees a taller list scrolls and the
+    /// footer stays on-screen. Together with `needsHumanMaxHeight` this preserves
+    /// `needsHumanMaxHeight + browseHeight <= postChrome` whenever the budget
+    /// allows (both floors can only grow the panel on very short screens, where
+    /// the browse list's own ScrollView still scrolls).
     private var browseHeight: CGFloat {
-        let hasBucket = !globalNeedsHuman.isEmpty
-        let reserved = hasBucket ? needsHumanMaxHeight : 0
-        return max(200, availableHeight - chromeReserve - reserved)
+        let nh = needsHumanMaxHeight
+        if nh <= 0 {
+            return max(200, postChrome)
+        }
+        return max(150, postChrome - nh)
     }
 
     // MARK: - Header
@@ -392,7 +425,8 @@ struct MenuBarView: View {
                 myLogin: settings.githubUsername,
                 includeConflicts: settings.includeConflictsInNeedsHuman,
                 maxExpandedHeight: needsHumanMaxHeight,
-                trustLedger: trustLedger
+                trustLedger: trustLedger,
+                expanded: $needsHumanExpanded
             )
             .padding(.vertical, 4)
 
