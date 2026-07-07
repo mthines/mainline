@@ -105,27 +105,23 @@ final class PRManager: ObservableObject {
         settings.menuBarScopeFollowsSelection ? currentViewPRs : prs
     }
 
-    /// PRs that need human attention based on TriageClassifier, computed over
-    /// `badgeBasePRs` so the `.needsAHuman` badge follows the current view (tab +
-    /// scope + drafts + For-me sub-filter) when follow-view is on, or all PRs when
-    /// off. The panel's own bucket is tab-scoped separately in `MenuBarView`.
-    var needsHumanPRs: [PRSnapshot] {
-        let myLogin = settings.githubUsername
-        return badgeBasePRs.filter { pr in
-            let tier = trustLedger.tier(for: pr.author)
-            return TriageClassifier.needsHuman(
-                pr,
-                myLogin: myLogin,
-                trustTier: tier,
-                includeConflicts: settings.includeConflictsInNeedsHuman
-            )
-        }
-        .sorted(by: PRSnapshot.triageOrder)
+    /// PRs that need attention — the SINGLE "needs attention" concept. Uses the one
+    /// shared predicate `PRSnapshot.needsAttention` (CI failing / changes requested /
+    /// unresolved threads), the same one the browse list's "Needs attention"
+    /// (`ActionGroup.needsAttention`) group uses, computed over `badgeBasePRs` so the
+    /// badge follows the current view (tab + scope + drafts + For-me sub-filter) when
+    /// follow-view is on, or all PRs when off. The list group counts over
+    /// `currentViewPRs`; with follow-view on (the default) `badgeBasePRs ==
+    /// currentViewPRs`, so the badge and the list group agree.
+    var needsAttentionPRs: [PRSnapshot] {
+        badgeBasePRs
+            .filter { $0.needsAttention }
+            .sorted(by: PRSnapshot.triageOrder)
     }
 
-    /// Count of PRs that need a human. Single source of truth for the badge
-    /// (`.needsAHuman`) and the panel bucket header.
-    var needsHumanCount: Int { needsHumanPRs.count }
+    /// Count of PRs that need attention. Single source of truth for the badge's
+    /// `.needsAHuman` metric.
+    var needsAttentionCount: Int { needsAttentionPRs.count }
 
     /// Count of PRs the user personally needs to act on (Layer A badge logic).
     /// - Authored PR with failing CI  → merge blocker
@@ -144,12 +140,6 @@ final class PRManager: ObservableObject {
         }.count
     }
 
-    /// Count of PRs that have been "handled" (in the badge-base population but not
-    /// in the needs-human bucket). Matches the same denominator as `needsHumanPRs`.
-    var handledCount: Int {
-        badgeBasePRs.count - needsHumanPRs.count
-    }
-
     // MARK: - Menu-bar badge (scope-aware + configurable — Bug 2 / 5)
 
     /// The badge for the menu-bar icon, computed from the configured metric.
@@ -163,8 +153,9 @@ final class PRManager: ObservableObject {
 
         switch settings.menuBarMetric {
         case .needsAHuman:
-            // Reuses the exact same set the panel's bucket shows.
-            return .attention(needsHumanCount)
+            // Reuses the exact same "needs attention" predicate the browse list's
+            // "Needs attention" group uses (over the same base population).
+            return .attention(needsAttentionCount)
 
         case .failingCI:
             let count = scoped.filter { pr in
@@ -204,7 +195,7 @@ final class PRManager: ObservableObject {
 
         let noun: String
         switch settings.menuBarMetric {
-        case .needsAHuman:    noun = "need a human"
+        case .needsAHuman:    noun = "need attention"
         case .failingCI:      noun = "with failing CI"
         case .reviewRequests: noun = "review requests"
         case .unread:         noun = "unread"

@@ -10,28 +10,11 @@ struct MenuBarView: View {
     @ObservedObject private var scopeStore: ScopeStore
     @ObservedObject private var trustLedger: TrustLedgerStore
 
-    /// Binding to the persisted "Needs a Human" expanded state. Backed by
-    /// `settings.needsHumanExpanded` so expansion survives panel opens and app
-    /// relaunches (default collapsed). The height math below reacts to expansion:
-    /// collapsed hands the whole budget to the browse list; expanded gives the
-    /// needs-human list a real, scrolling height.
-    private var needsHumanExpanded: Binding<Bool> {
-        Binding(
-            get: { settings.needsHumanExpanded },
-            set: { settings.needsHumanExpanded = $0 }
-        )
-    }
-
-    /// Confirmation target for the inline Merge button on Needs-a-Human rows.
-    /// MenuBarView owns this dialog so the bucket rows route through the SAME
-    /// confirm + `performAction(.merge)` path as the triage deck.
-    @State private var mergeConfirmPR: PRSnapshot? = nil
-
-    /// Natural (unclamped) height of the single scrollable body — the
-    /// Needs-a-Human rows (when expanded) plus the browse deck. Measured via a
-    /// `GeometryReader` background on the body content and reported through
-    /// `BodyHeightKey`. The panel sizes the scroll region to this value clamped to
-    /// `regionCap`, so it follows content up to the max. `0` until first measured.
+    /// Natural (unclamped) height of the single scrollable body — the tabbed
+    /// browse deck. Measured via a `GeometryReader` background on the body content
+    /// and reported through `BodyHeightKey`. The panel sizes the scroll region to
+    /// this value clamped to `regionCap`, so it follows content up to the max.
+    /// `0` until first measured.
     @State private var measuredBodyHeight: CGFloat = 0
 
     init(manager: PRManager) {
@@ -55,8 +38,7 @@ struct MenuBarView: View {
             Divider()
 
             // Tab picker is the PRIMARY axis — it sits at the top and EVERYTHING
-            // below it (scope filter, Needs-a-Human, browse list) respects the
-            // selected tab.
+            // below it (scope filter, browse list) respects the selected tab.
             tabPicker
 
             // For-me sub-filter (Direct / Team) — only visible on the For-me tab.
@@ -72,16 +54,13 @@ struct MenuBarView: View {
 
             Divider()
 
-            // "Needs a Human" HEADER — always pinned (non-scrolling). Its count is
-            // TAB-SCOPED (`tabScopedNeedsHuman`), matching the visible list below.
-            // Collapsed by default.
-            needsHumanHeaderSection
-
-            // The SINGLE scrollable body: the Needs-a-Human rows (only when
-            // expanded) followed by the tabbed browse deck. One ScrollView, sized
-            // to its MEASURED content clamped to `regionCap`, so the panel follows
-            // content up to the max and scrolls only when it overflows. Replaces the
-            // old two independently-fixed nested ScrollViews (the crash source).
+            // The SINGLE scrollable body: the tabbed browse deck, grouped by
+            // actionability (Needs attention → Ready to merge → Waiting → Draft →
+            // Merged → Closed). One ScrollView, sized to its MEASURED content
+            // clamped to `regionCap`, so the panel follows content up to the max and
+            // scrolls only when it overflows. Replaces the old two independently-
+            // fixed nested ScrollViews (the crash source) AND the separate top
+            // "Needs a Human" bucket (which duplicated the "Needs attention" group).
             scrollableBody
 
             Divider()
@@ -103,22 +82,6 @@ struct MenuBarView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 manager.markAllSeen()
             }
-        }
-        // Confirm dialog for the inline Merge button on Needs-a-Human rows. Uses
-        // the SAME write path (`performAction(.merge)`) and guardrails as the
-        // triage deck's M verb — no second merge code path.
-        .confirmationDialog(
-            mergeConfirmTitle,
-            isPresented: Binding(get: { mergeConfirmPR != nil }, set: { if !$0 { mergeConfirmPR = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Confirm") {
-                if let pr = mergeConfirmPR {
-                    Task { await manager.performAction(.merge(pr)) }
-                    mergeConfirmPR = nil
-                }
-            }
-            Button("Cancel", role: .cancel) { mergeConfirmPR = nil }
         }
         .overlay(alignment: .bottom) {
             HStack(spacing: 0) {
@@ -142,38 +105,13 @@ struct MenuBarView: View {
 
     /// PRs belonging to the currently selected tab, filtered by scope, drafts, and
     /// the For-me Direct/Team sub-filter. This is the single source of truth for
-    /// the visible list, the sections, the panel's Needs-a-Human bucket, and every
-    /// count derived below. Delegates to `manager.currentViewPRs` — the SAME
-    /// computation the menu-bar badge reads — so the list and the badge can never
-    /// diverge; this view only adds the display sort.
+    /// the visible list, the sections, and every count derived below. Delegates to
+    /// `manager.currentViewPRs` — the SAME computation the menu-bar badge reads — so
+    /// the list and the badge can never diverge; this view only adds the display
+    /// sort. The browse deck's "Needs attention" group (`ActionGroup.needsAttention`)
+    /// is the single "needs attention" concept; there is no separate top bucket.
     private var visiblePRs: [PRSnapshot] {
         manager.currentViewPRs.sorted(by: PRSnapshot.triageOrder)
-    }
-
-    /// The TAB-SCOPED "Needs a Human" subset: the needs-human PRs within the
-    /// currently visible (tab + scope + drafts + For-me Direct/Team filtered)
-    /// population. On Created it surfaces only the user's authored PRs that need
-    /// action; on For me only their review-relevant PRs. Uses the same
-    /// `TriageClassifier.needsHuman` predicate (respecting the conflicts setting)
-    /// as the global bucket, so only the input population differs. This is a
-    /// smaller array fed into the same rendering — no new scroll region.
-    private var tabScopedNeedsHuman: [PRSnapshot] {
-        let myLogin = settings.githubUsername
-        return visiblePRs.filter { pr in
-            let tier = trustLedger.tier(for: pr.author)
-            return TriageClassifier.needsHuman(
-                pr,
-                myLogin: myLogin,
-                trustTier: tier,
-                includeConflicts: settings.includeConflictsInNeedsHuman
-            )
-        }
-    }
-
-    /// Tab-scoped "handled" count: visible PRs that are NOT in the tab-scoped
-    /// needs-human bucket. Drives the reassurance summary row.
-    private var tabScopedHandledCount: Int {
-        max(0, visiblePRs.count - tabScopedNeedsHuman.count)
     }
 
     /// Whether a PR should count toward the tab labels. Honours both the draft
@@ -248,10 +186,14 @@ struct MenuBarView: View {
     /// Fixed reserve for the always-present (non-scrolling) chrome. Summed from
     /// the real elements so it is not under-counted:
     ///   header ~44 + badge explainer ~22 + tab picker ~44 + scope/drafts row ~44 +
-    ///   collapsed needs-human header ~40 + footer ~48 + dividers/padding ~30
+    ///   footer ~48 + dividers/padding ~30
     ///   (+ For-me sub-filter ~36 only when the For-me tab is active).
+    /// The old ~40pt reserve for the top "Needs a Human" header is gone — that
+    /// header was removed when the browse list's "Needs attention" group became the
+    /// single view. The rest of the crash-safe invariant is unchanged:
+    /// chromeReserve + scrollRegionHeight <= cap <= screen, every term finite/>= 0.
     private var chromeReserve: CGFloat {
-        let base: CGFloat = 44 + 22 + 44 + 44 + 40 + 48 + 30   // = 272
+        let base: CGFloat = 44 + 22 + 44 + 44 + 48 + 30   // = 232
         let forMeFilter: CGFloat = settings.selectedTab == .forMe ? 36 : 0
         return base + forMeFilter
     }
@@ -489,61 +431,14 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - "Needs a Human" section (TAB-SCOPED)
+    // MARK: - Scrollable body (SINGLE region: the actionability-grouped browse deck)
 
-    /// The "Needs a Human" bucket shown in the panel — TAB-SCOPED to the visible
-    /// population (`tabScopedNeedsHuman`) so it is relevant to the selected tab:
-    /// on Created only the user's authored PRs that need action, on For me only
-    /// their review-relevant ones. This intentionally DECOUPLES the bucket count
-    /// from the menu-bar badge (which stays global / configurable via
-    /// `manager.needsHumanPRs`); the badge explainer line already labels the badge.
-    private var panelNeedsHuman: [PRSnapshot] {
-        tabScopedNeedsHuman
-    }
-
-    /// Routes an inline Merge tap from a Needs-a-Human row through the shared
-    /// confirm path. When write actions are disabled, surfaces the same guidance
-    /// as the triage deck (open Settings) instead of silently doing nothing.
-    private func requestMerge(_ pr: PRSnapshot) {
-        guard settings.writeActionsEnabled else {
-            NotificationCenter.default.post(name: .openSettings, object: nil)
-            return
-        }
-        mergeConfirmPR = pr
-    }
-
-    /// Title for the Needs-a-Human merge confirmation dialog.
-    private var mergeConfirmTitle: String {
-        guard let pr = mergeConfirmPR else { return "Merge PR?" }
-        return "Merge \"\(pr.title)\"?"
-    }
-
-    /// The "Needs a Human" HEADER — always-pinned chrome. Renders only the
-    /// tappable disclosure header (+ the reassurance summary); the ROWS live in the
-    /// shared scroll region below (`scrollableBody`). Count and handled total are
-    /// tab-scoped.
-    @ViewBuilder
-    private var needsHumanHeaderSection: some View {
-        let bucket = panelNeedsHuman
-        if manager.hasToken && !bucket.isEmpty {
-            NeedsHumanHeaderView(
-                needsHumanCount: bucket.count,
-                handledCount: tabScopedHandledCount,
-                expanded: needsHumanExpanded,
-                metrics: RowMetrics.forCompact(settings.compactRows)
-            )
-            .padding(.vertical, 4)
-
-            Divider()
-        }
-    }
-
-    // MARK: - Scrollable body (SINGLE region: needs-human rows + browse deck)
-
-    /// The one and only scroll region. It contains the Needs-a-Human rows (only
-    /// when the bucket is expanded) followed by the tabbed browse deck. Its height
-    /// is the MEASURED natural height of that content clamped to `regionCap`, so
-    /// the panel is short with few PRs and scrolls only when content overflows.
+    /// The one and only scroll region: the tabbed browse deck, grouped by
+    /// actionability (Needs attention → Ready to merge → Waiting → Draft → Merged →
+    /// Closed). Its height is the MEASURED natural height of that content clamped to
+    /// `regionCap`, so the panel is short with few PRs and scrolls only when content
+    /// overflows. The separate top "Needs a Human" bucket was removed — the
+    /// list's "Needs attention" group is the single "needs attention" view.
     ///
     /// A `GeometryReader` background measures the natural content height and reports
     /// it via `BodyHeightKey`; `onPreferenceChange` stores it in `measuredBodyHeight`.
@@ -552,17 +447,7 @@ struct MenuBarView: View {
     @ViewBuilder
     private var scrollableBody: some View {
         if !manager.hasToken || manager.prs.isEmpty {
-            // Empty / no-token: still show the needs-human rows if expanded, else
-            // the empty state. No fixed frame needed — content is small chrome.
-            if needsHumanExpanded.wrappedValue && !panelNeedsHuman.isEmpty {
-                ScrollView {
-                    bodyContent
-                        .background(bodyHeightReader)
-                }
-                .frame(height: scrollRegionHeight)
-            } else {
-                emptyState
-            }
+            emptyState
         } else {
             ScrollView {
                 bodyContent
@@ -572,35 +457,19 @@ struct MenuBarView: View {
         }
     }
 
-    /// The measured content: Needs-a-Human rows (when expanded) + the browse deck.
+    /// The measured content: the actionability-grouped browse deck.
     @ViewBuilder
     private var bodyContent: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
-            // Needs-a-Human ROWS — rendered here (inside the shared scroll region)
-            // only when the bucket is expanded and non-empty. Tab-scoped set.
-            if needsHumanExpanded.wrappedValue && !panelNeedsHuman.isEmpty {
-                NeedsHumanRowsView(
-                    needsHumanPRs: panelNeedsHuman,
-                    myLogin: settings.githubUsername,
-                    includeConflicts: settings.includeConflictsInNeedsHuman,
-                    metrics: RowMetrics.forCompact(settings.compactRows),
-                    writeActionsEnabled: settings.writeActionsEnabled,
-                    onMerge: { requestMerge($0) },
-                    trustLedger: trustLedger
-                )
-                Divider()
-            }
-
             // The keyboard-navigable triage deck, grouped into collapsible
-            // per-state sections, scoped to the selected tab. Does NOT render its
-            // own Needs-a-Human bucket; that global bucket lives above.
-            if manager.hasToken && !manager.prs.isEmpty {
-                TriageDeckView(
-                    prs: visiblePRs,
-                    manager: manager,
-                    settings: settings
-                )
-            }
+            // actionability sections, scoped to the selected tab. Its
+            // "Needs attention" group (`ActionGroup.needsAttention`) is the single
+            // "needs attention" concept — there is no separate top bucket.
+            TriageDeckView(
+                prs: visiblePRs,
+                manager: manager,
+                settings: settings
+            )
         }
     }
 

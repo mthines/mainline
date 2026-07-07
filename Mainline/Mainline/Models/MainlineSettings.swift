@@ -15,7 +15,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .needsAHuman:    return "Needs a Human"
+        case .needsAHuman:    return "Needs attention"
         case .failingCI:      return "Failing CI"
         case .reviewRequests: return "Review Requests"
         case .unread:         return "Unread"
@@ -205,9 +205,11 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(compactRows, forKey: Keys.compactRows) }
     }
 
-    /// Whether the "Needs a Human" section is expanded. Persisted so that once
-    /// the user expands it, it stays expanded across panel opens and relaunches.
-    /// Default `false` (collapsed).
+    /// LEGACY (unused): formerly whether the separate top "Needs a Human" section
+    /// was expanded. That bucket was removed — the browse list's "Needs attention"
+    /// group is now the single "needs attention" view — so nothing reads this. The
+    /// field is retained (harmless) so an existing stored value decodes without
+    /// crashing; it can be removed in a later cleanup. Default `false`.
     @Published var needsHumanExpanded: Bool {
         didSet { defaults.set(needsHumanExpanded, forKey: Keys.needsHumanExpanded) }
     }

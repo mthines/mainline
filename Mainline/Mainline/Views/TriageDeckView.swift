@@ -4,8 +4,8 @@ import AppKit
 // MARK: - RowMetrics
 
 /// Shared layout metrics for PR rows, driven by `settings.compactRows`. Used by
-/// both `TriageDeckView` deck rows and `NeedsHumanView` rows so the two lists
-/// stay visually consistent at either density.
+/// the `TriageDeckView` deck rows so every actionability section stays visually
+/// consistent at either density.
 struct RowMetrics {
     /// Title line limit (1 = single-line truncating tail; 2 = comfortable).
     let titleLineLimit: Int
@@ -23,12 +23,10 @@ struct RowMetrics {
     /// Bottom padding for per-state section headers.
     let sectionHeaderBottomPadding: CGFloat
 
-    /// Fixed width of the leading UNREAD-DOT slot, reserved on EVERY PR row (deck
-    /// rows AND Needs-a-Human rows) whether or not an unread dot is shown, so the
-    /// status icon that follows it starts at the same x in every section. The
-    /// unread dot itself is 7pt; the slot is a touch wider to give the dot breathing
-    /// room and keep the icon column stable. Shared by both row views so they can't
-    /// drift.
+    /// Fixed width of the leading UNREAD-DOT slot, reserved on EVERY PR row whether
+    /// or not an unread dot is shown, so the status icon that follows it starts at
+    /// the same x in every section. The unread dot itself is 7pt; the slot is a
+    /// touch wider to give the dot breathing room and keep the icon column stable.
     let unreadDotSlotWidth: CGFloat
 
     /// Horizontal padding applied to the leading/trailing edge of every PR row and
@@ -75,9 +73,9 @@ struct RowMetrics {
 
 // MARK: - LeadingColumn
 
-/// The single, shared leading structure for EVERY PR row — the triage deck rows
-/// and the Needs-a-Human rows both compose it so their unread-dot slot and status
-/// icon (and therefore their titles) line up in one column at both densities.
+/// The single, shared leading structure for EVERY PR row — every actionability
+/// section's deck rows compose it so their unread-dot slot and status icon (and
+/// therefore their titles) line up in one column at both densities.
 ///
 /// Layout (left → right), all inside the row's `.padding(.horizontal, RowMetrics.horizontalPadding)`:
 ///   [unread-dot slot: FIXED `unreadDotSlotWidth`, renders the dot when `isUnread`,
@@ -667,8 +665,8 @@ struct TriageDeckView: View {
 // MARK: - MergeButton
 
 /// Compact inline "Merge" button rendered on the trailing side of a
-/// ready-to-merge PR row (deck rows and Needs-a-Human rows). It has its own
-/// borderless hit area so a tap never triggers the row's click-to-open; the
+/// ready-to-merge PR row. It has its own borderless hit area so a tap never
+/// triggers the row's click-to-open; the
 /// `onMerge` closure routes through the SAME write-action confirm path used by
 /// the `M` keyboard verb / command palette (`dispatchVerb(.merge)` →
 /// confirmation dialog → `performAction(.merge)`).
@@ -712,8 +710,7 @@ struct MergeButton: View {
 
 /// Compact gray/secondary pill marking a PR as a draft. Rendered on the
 /// repo/#number metadata line alongside the trust/feedback/trigger tags, using
-/// the same visual style so drafts are obvious while scrolling. Shared by the
-/// triage deck rows and the Needs-a-Human rows.
+/// the same visual style so drafts are obvious while scrolling.
 struct DraftBadge: View {
     var body: some View {
         Text("Draft")

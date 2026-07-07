@@ -27,7 +27,6 @@
 		PC0000000000000000000012 /* TrustLedgerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000015 /* TrustLedgerStore.swift */; };
 		PC0000000000000000000013 /* SnoozeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000016 /* SnoozeStore.swift */; };
 		PC0000000000000000000014 /* MenuBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000017 /* MenuBarIconView.swift */; };
-		PC0000000000000000000015 /* NeedsHumanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000018 /* NeedsHumanView.swift */; };
 		PC0000000000000000000016 /* TriageDeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000019 /* TriageDeckView.swift */; };
 		PC0000000000000000000017 /* DiffPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001A /* DiffPreviewView.swift */; };
 		PC0000000000000000000018 /* CommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001B /* CommandPaletteView.swift */; };
@@ -61,7 +60,6 @@
 		PF0000000000000000000015 /* TrustLedgerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustLedgerStore.swift; sourceTree = "<group>"; };
 		PF0000000000000000000016 /* SnoozeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnoozeStore.swift; sourceTree = "<group>"; };
 		PF0000000000000000000017 /* MenuBarIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarIconView.swift; sourceTree = "<group>"; };
-		PF0000000000000000000018 /* NeedsHumanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeedsHumanView.swift; sourceTree = "<group>"; };
 		PF0000000000000000000019 /* TriageDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriageDeckView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001A /* DiffPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffPreviewView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001B /* CommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteView.swift; sourceTree = "<group>"; };
@@ -141,7 +139,6 @@
 				PF000000000000000000000C /* MenuBarView.swift */,
 				PF000000000000000000000D /* SettingsView.swift */,
 				PF0000000000000000000017 /* MenuBarIconView.swift */,
-				PF0000000000000000000018 /* NeedsHumanView.swift */,
 				PF0000000000000000000019 /* TriageDeckView.swift */,
 				PF000000000000000000001A /* DiffPreviewView.swift */,
 				PF000000000000000000001B /* CommandPaletteView.swift */,
@@ -247,7 +244,6 @@
 				PC0000000000000000000012 /* TrustLedgerStore.swift in Sources */,
 				PC0000000000000000000013 /* SnoozeStore.swift in Sources */,
 				PC0000000000000000000014 /* MenuBarIconView.swift in Sources */,
-				PC0000000000000000000015 /* NeedsHumanView.swift in Sources */,
 				PC0000000000000000000016 /* TriageDeckView.swift in Sources */,
 				PC0000000000000000000017 /* DiffPreviewView.swift in Sources */,
 				PC0000000000000000000018 /* CommandPaletteView.swift in Sources */,

@@ -34,10 +34,9 @@ Mainline/Mainline/                     ← Source root
 │   ├── TrustLedgerStore.swift   ← @MainActor JSON persistence (Application Support)
 │   └── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
 └── Views/
-    ├── MenuBarView.swift         ← MenuBarExtra panel; NeedsHumanView + TriageDeckView integrated
+    ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView
     ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions/autopilot
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
-    ├── NeedsHumanView.swift      ← "Needs a Human" derived bucket + "N handled" summary
     ├── TriageDeckView.swift      ← Keyboard triage: J/K/Space/A/M/R/S/E/X/⌘K/⌘Z
     ├── DiffPreviewView.swift     ← Quick Look diff overlay (REST .diff fetch)
     ├── CommandPaletteView.swift  ← ⌘K Raycast-style palette
