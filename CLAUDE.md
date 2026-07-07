@@ -109,3 +109,18 @@ JSON file at `~/Library/Application Support/com.mainline.github-pr-notifier/trus
 ## macOS Version
 
 Deployment target: **macOS 13.0**. Use only APIs available on 13+. `MenuBarExtra` requires 13+.
+
+## Telemetry
+
+Mainline ships opt-in anonymous observability via OpenTelemetry (opentelemetry-swift 1.17.1 → OTLP/HTTP → Dash0).
+
+**Default:** OFF. User opts in via Settings → Privacy banner or toggle.
+
+**Full architecture, signal design, privacy contract, and instrumentation guide:** `docs/telemetry.md`
+
+**Quick reference:**
+- Entry point: `TelemetryService.shared` — all methods no-op when `MainlineSettings.telemetryEnabled` is false.
+- `configure()` called from `MainlineSettings.telemetryEnabled.didSet` (on enable) and on app launch.
+- `shutdown()` called in `AppDelegate.applicationWillTerminate`.
+- Privacy rule: NEVER pass PR titles, repo names, branch names, user logins, or tokens to any `TelemetryService` method.
+- To add instrumentation: add a bounded-parameter method to `TelemetryService`, add the counter/histogram instrument in `setupOTel()`, call from the instrumented site. See `docs/telemetry.md` for the full guide.

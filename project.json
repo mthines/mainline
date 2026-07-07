@@ -7,7 +7,7 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "xcodebuild -scheme Mainline -configuration Debug -derivedDataPath build build 2>&1 | grep -E '(error:|warning:.*error|BUILD)' || true",
+        "command": "DASH0_AUTH_TOKEN=\"${DASH0_AUTH_TOKEN:-}\" OTEL_EXPORTER_OTLP_ENDPOINT=\"${OTEL_EXPORTER_OTLP_ENDPOINT:-}\" xcodebuild -scheme Mainline -configuration Debug -derivedDataPath build build 2>&1 | grep -E '(error:|warning:.*error|BUILD)' || true",
         "cwd": "{projectRoot}"
       },
       "inputs": ["swift-sources", "project-config"],
@@ -17,7 +17,7 @@
     "build:release": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "xcodebuild -scheme Mainline -configuration Release -derivedDataPath build clean build ONLY_ACTIVE_ARCH=NO 2>&1 | tail -5",
+        "command": "DASH0_AUTH_TOKEN=\"${DASH0_AUTH_TOKEN:-}\" OTEL_EXPORTER_OTLP_ENDPOINT=\"${OTEL_EXPORTER_OTLP_ENDPOINT:-}\" xcodebuild -scheme Mainline -configuration Release -derivedDataPath build clean build ONLY_ACTIVE_ARCH=NO 2>&1 | tail -5",
         "cwd": "{projectRoot}"
       },
       "inputs": ["swift-sources", "project-config"],

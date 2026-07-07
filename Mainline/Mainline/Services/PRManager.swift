@@ -384,13 +384,17 @@ final class PRManager: ObservableObject {
         switch action {
         case .snooze(let pr, let until):
             snoozeStore.snooze(pr, until: until)
+            TelemetryService.shared.recordTriageInteraction("snooze")
             return
         case .unsnooze(let pr):
             snoozeStore.unsnooze(nodeId: pr.nodeId)
+            TelemetryService.shared.recordTriageInteraction("unsnooze")
             return
-        case .markSeen, .dismiss:
-            // Both are local no-ops today (dismiss clears until next poll,
-            // markSeen is handled elsewhere) — nothing network-bound to do.
+        case .markSeen:
+            TelemetryService.shared.recordTriageInteraction("mark_seen")
+            return
+        case .dismiss:
+            TelemetryService.shared.recordTriageInteraction("dismiss")
             return
         default:
             break
@@ -400,6 +404,7 @@ final class PRManager: ObservableObject {
 
         switch action {
         case .approve(let pr):
+            let actionStart = Date()
             do {
                 try await client.approvePR(nodeId: pr.nodeId, token: token)
                 let verdict = VerdictRecord(
@@ -411,12 +416,28 @@ final class PRManager: ObservableObject {
                     hadTests: false
                 )
                 trustLedger.recordVerdict(verdict, for: pr.author)
+                TelemetryService.shared.recordWriteAction(
+                    "approve",
+                    mergeMethod: nil,
+                    result: "success",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: nil
+                )
             } catch {
                 statusMessage = "Approve failed: \(error.localizedDescription)"
+                TelemetryService.shared.recordWriteAction(
+                    "approve",
+                    mergeMethod: nil,
+                    result: "failure",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: "api_error"
+                )
                 Self.presentActionFailure("Approve failed", error: error)
             }
 
         case .merge(let pr):
+            let actionStart = Date()
+            let resolvedMergeMethod = resolvedMergeMethodString(for: pr)
             do {
                 try await client.mergePR(pr: pr, preference: settings.mergeMethodPreference, token: token)
                 let verdict = VerdictRecord(
@@ -428,12 +449,27 @@ final class PRManager: ObservableObject {
                     hadTests: false
                 )
                 trustLedger.recordVerdict(verdict, for: pr.author)
+                TelemetryService.shared.recordWriteAction(
+                    "merge",
+                    mergeMethod: resolvedMergeMethod,
+                    result: "success",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: nil
+                )
             } catch {
                 statusMessage = "Merge failed: \(error.localizedDescription)"
+                TelemetryService.shared.recordWriteAction(
+                    "merge",
+                    mergeMethod: resolvedMergeMethod,
+                    result: "failure",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: "api_error"
+                )
                 Self.presentActionFailure("Merge failed", error: error)
             }
 
         case .requestChanges(let pr):
+            let actionStart = Date()
             do {
                 try await client.requestChangesPR(nodeId: pr.nodeId, body: "", token: token)
                 let verdict = VerdictRecord(
@@ -445,8 +481,22 @@ final class PRManager: ObservableObject {
                     hadTests: false
                 )
                 trustLedger.recordVerdict(verdict, for: pr.author)
+                TelemetryService.shared.recordWriteAction(
+                    "request_changes",
+                    mergeMethod: nil,
+                    result: "success",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: nil
+                )
             } catch {
                 statusMessage = "Request changes failed: \(error.localizedDescription)"
+                TelemetryService.shared.recordWriteAction(
+                    "request_changes",
+                    mergeMethod: nil,
+                    result: "failure",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: "api_error"
+                )
                 Self.presentActionFailure("Request changes failed", error: error)
             }
 
@@ -460,6 +510,18 @@ final class PRManager: ObservableObject {
         // for the next scheduled poll — otherwise the action looks like it did
         // nothing even though GitHub performed it.
         await triggerSingleRefresh()
+    }
+
+    /// Returns the resolved merge method string for telemetry — uses the same logic
+    /// as `GitHubClient.resolveMergeMethod` but returns a lowercase string.
+    /// Never includes PR titles, repo names, or author logins.
+    private func resolvedMergeMethodString(for pr: PRSnapshot) -> String {
+        let method = GitHubClient.resolveMergeMethod(for: pr, preference: settings.mergeMethodPreference)
+        switch method {
+        case .squash: return "squash"
+        case .rebase: return "rebase"
+        case .merge:  return "merge"
+        }
     }
 
     /// Presents an app-modal NSAlert describing a failed write action. The popover

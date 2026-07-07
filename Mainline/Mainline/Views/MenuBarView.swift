@@ -312,7 +312,15 @@ struct MenuBarView: View {
     // MARK: - Tab picker (AC-18: labels show counts)
 
     private var tabPicker: some View {
-        Picker("Reviews", selection: $settings.selectedTab) {
+        Picker("Reviews", selection: Binding(
+            get: { settings.selectedTab },
+            set: { newTab in
+                if newTab != settings.selectedTab {
+                    settings.selectedTab = newTab
+                    TelemetryService.shared.recordTriageInteraction("tab_switch")
+                }
+            }
+        )) {
             ForEach(ReviewTab.allCases) { tab in
                 Text(tabLabel(for: tab)).tag(tab)
             }
@@ -396,7 +404,10 @@ struct MenuBarView: View {
     private func scopeChip(label: String, scope: PRScope?) -> some View {
         let isSelected = scopeStore.selectedScope == scope
         return Button {
-            scopeStore.selectedScope = scope
+            if scopeStore.selectedScope != scope {
+                scopeStore.selectedScope = scope
+                TelemetryService.shared.recordTriageInteraction("scope_filter_change")
+            }
         } label: {
             Text(label)
                 .font(.caption)

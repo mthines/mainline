@@ -48,9 +48,20 @@ final class NotificationService {
 
             let level = settings.level(for: event)
             switch level {
-            case .off:    continue
-            case .quiet:  quietNodeIds.append(pr.nodeId)
-            case .notify: fire(id: notifArgs.id, title: notifArgs.title, body: notifArgs.body, url: notifArgs.url)
+            case .off:
+                continue
+            case .quiet:
+                quietNodeIds.append(pr.nodeId)
+                TelemetryService.shared.recordNotificationFired(
+                    eventType: event.rawValue,
+                    attentionLevel: "quiet"
+                )
+            case .notify:
+                fire(id: notifArgs.id, title: notifArgs.title, body: notifArgs.body, url: notifArgs.url)
+                TelemetryService.shared.recordNotificationFired(
+                    eventType: event.rawValue,
+                    attentionLevel: "notify"
+                )
             }
         }
 

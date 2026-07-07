@@ -84,6 +84,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             object: nil
         )
 
+        // Configure telemetry if already opted in (re-enable across launches).
+        TelemetryService.shared.configure()
+
+        // Record app launch (no-op when telemetry is disabled).
+        TelemetryService.shared.recordAppLaunch()
+
         // Global shortcut: register now (if enabled) and re-register whenever the
         // stored combo or the enabled flag changes.
         setUpGlobalHotKey()
@@ -114,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationWillTerminate(_ notification: Notification) {
         NotificationCenter.default.removeObserver(self)
         globalHotKey.unregister()
+        TelemetryService.shared.shutdown()
     }
 
     // MARK: - Global hotkey wiring
@@ -127,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // `onPress` is delivered on the main thread, but hop through a
             // MainActor task so the compiler is satisfied and the call is safe.
             Task { @MainActor in
+                TelemetryService.shared.recordGlobalShortcutUsed()
                 MenuBarPopoverOpener.open()
             }
         }
