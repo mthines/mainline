@@ -3,7 +3,7 @@
 A lightweight macOS menu bar app that notifies you about GitHub pull requests.
 
 <!-- HERO IMAGE — replace with a screenshot (or short GIF) of the menu bar panel open, showing PRs grouped by actionability. Recommended width ~900px. -->
-<img width="406" height="661" alt="Screenshot 2026-07-07 at 21 50 26" src="https://github.com/user-attachments/assets/bc80478a-d49d-4019-a4ee-4687a3ae8887" />
+
 
 
 ## Features
