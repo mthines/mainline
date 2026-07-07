@@ -135,12 +135,41 @@ struct MenuBarView: View {
         manager.prs.filter { $0.tabs.contains(.created) && countsTowardTabs($0) }.count
     }
 
-    /// Dynamic panel content height — generous default, capped to screen.
+    /// Fixed (non-scrolling) chrome the panel always renders around the two
+    /// scrolling regions: header, dividers, scope filter, tab picker, optional
+    /// For-me sub-filter, and footer. Reserved so the OVERALL panel stays within
+    /// the screen guard.
+    private static let panelChromeHeight: CGFloat = 260
+
+    /// Dynamic panel content height — the total scrolling budget shared between
+    /// the "Needs a Human" box (when expanded) and the tabbed browse list below
+    /// it. Bounded so `panelChromeHeight + panelContentHeight` never exceeds the
+    /// `screenHeight * 0.80` guard.
     private var panelContentHeight: CGFloat {
         let preferred = CGFloat(settings.panelHeight)
         let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
-        let maxAllowed = screenHeight * 0.80 - 120
-        return min(preferred, maxAllowed)
+        let maxAllowed = screenHeight * 0.80 - Self.panelChromeHeight
+        return max(min(preferred, maxAllowed), 280)
+    }
+
+    /// Max height for the expanded "Needs a Human" ScrollView. At most half the
+    /// content budget, hard-capped at 320, and always leaving the browse list a
+    /// usable minimum so the two regions together never exceed the budget.
+    /// Collapsed, the section is short (top ~5 rows) regardless.
+    private var needsHumanMaxHeight: CGFloat {
+        let browseMinimum: CGFloat = 200
+        let byBudget = min(panelContentHeight * 0.5, 320)
+        // Never reserve so much that the browse list drops below its minimum.
+        return min(byBudget, max(panelContentHeight - browseMinimum, 0))
+    }
+
+    /// Height budget for the tabbed browse list — the remainder of the content
+    /// budget after reserving room for the Needs-a-Human box (only when the
+    /// bucket is non-empty). Guarantees needs-human + browse <= budget.
+    private var browseListHeight: CGFloat {
+        let hasBucket = !manager.needsHumanPRs.isEmpty
+        let reserved = hasBucket ? needsHumanMaxHeight : 0
+        return panelContentHeight - reserved
     }
 
     // MARK: - Header
@@ -314,6 +343,7 @@ struct MenuBarView: View {
                 handledCount: manager.handledCount,
                 myLogin: settings.githubUsername,
                 includeConflicts: settings.includeConflictsInNeedsHuman,
+                maxExpandedHeight: needsHumanMaxHeight,
                 trustLedger: trustLedger
             )
             .padding(.vertical, 4)
@@ -340,10 +370,11 @@ struct MenuBarView: View {
                     )
                 }
             }
-            // Give the scroll content a concrete height so the self-sizing
-            // `.window` MenuBarExtra popover actually grows to the configured
-            // size. `maxHeight` alone only caps and lets the ScrollView collapse.
-            .frame(height: panelContentHeight)
+            // Bound the browse list to its share of the content budget so the
+            // Needs-a-Human box + browse list + chrome stay within the screen
+            // guard. `maxHeight` lets a short list shrink (no forced empty
+            // space) while still capping a long one.
+            .frame(maxHeight: browseListHeight)
         }
     }
 

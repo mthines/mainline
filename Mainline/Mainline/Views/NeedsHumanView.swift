@@ -16,7 +16,17 @@ struct NeedsHumanView: View {
     let myLogin: String
     /// Whether merge conflicts count toward the bucket. Sourced from settings.
     let includeConflicts: Bool
+    /// Max height for the expanded (scrolling) rows region. Bounds the section so
+    /// a large bucket can never push the tabs/footer off screen.
+    let maxExpandedHeight: CGFloat
     @ObservedObject var trustLedger: TrustLedgerStore
+
+    /// Rule-of-Three: show at most this many rows inline before requiring the
+    /// "Show all N" expander.
+    private static let collapsedRowCount = 5
+
+    /// Whether the full bucket is expanded into a bounded ScrollView.
+    @State private var expanded: Bool = false
 
     // MARK: - Derived data
 
@@ -37,9 +47,9 @@ struct NeedsHumanView: View {
         VStack(alignment: .leading, spacing: 0) {
             if !sortedNeedsHuman.isEmpty {
                 sectionHeader
-                ForEach(sortedNeedsHuman, id: \.nodeId) { pr in
-                    needsHumanRow(pr)
-                    Divider().padding(.leading, 36)
+                bucketRows
+                if sortedNeedsHuman.count > Self.collapsedRowCount {
+                    expanderRow
                 }
             }
 
@@ -47,6 +57,50 @@ struct NeedsHumanView: View {
                 handledSummaryRow
             }
         }
+    }
+
+    /// The rows region. Collapsed: the top N most-urgent rows inline (no
+    /// scrolling). Expanded: every row inside a ScrollView bounded to
+    /// `maxExpandedHeight` so the section can never grow unbounded.
+    @ViewBuilder
+    private var bucketRows: some View {
+        if expanded && sortedNeedsHuman.count > Self.collapsedRowCount {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(sortedNeedsHuman, id: \.nodeId) { pr in
+                        needsHumanRow(pr)
+                        Divider().padding(.leading, 36)
+                    }
+                }
+            }
+            .frame(maxHeight: maxExpandedHeight)
+        } else {
+            ForEach(Array(sortedNeedsHuman.prefix(Self.collapsedRowCount)), id: \.nodeId) { pr in
+                needsHumanRow(pr)
+                Divider().padding(.leading, 36)
+            }
+        }
+    }
+
+    /// "Show all N" / "Show less" toggle, shown only when the bucket exceeds the
+    /// collapsed row count.
+    private var expanderRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                Text(expanded ? "Show less" : "Show all \(sortedNeedsHuman.count)")
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Section header
