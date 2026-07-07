@@ -450,6 +450,12 @@ final class PRManager: ObservableObject {
             // Handled above as local, no-network actions before the token guard.
             break
         }
+
+        // Reflect the change immediately: after a successful write action a merged
+        // PR should leave the open groups (and surface under "Done") without waiting
+        // for the next scheduled poll — otherwise the action looks like it did
+        // nothing even though GitHub performed it.
+        await triggerSingleRefresh()
     }
 
     // MARK: - Autopilot
