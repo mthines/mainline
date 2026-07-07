@@ -90,6 +90,12 @@ struct NeedsHumanRowsView: View {
     let includeConflicts: Bool
     /// Shared row layout metrics (compact vs comfortable).
     let metrics: RowMetrics
+    /// Whether write actions are enabled — drives the inline Merge button style.
+    let writeActionsEnabled: Bool
+    /// Requests a merge for the given PR. Routed by the owner (`MenuBarView`)
+    /// through the SAME write-action confirm + `performAction(.merge)` path used
+    /// everywhere else. Rendered only on `readyToMerge` rows.
+    let onMerge: (PRSnapshot) -> Void
     @ObservedObject var trustLedger: TrustLedgerStore
 
     // MARK: - Derived data
@@ -149,6 +155,17 @@ struct NeedsHumanRowsView: View {
                         FeedbackBadge(pr: pr)
                         triggerLabels(for: pr)
                     }
+                }
+
+                // Inline Merge — shown only on ready-to-merge rows. Separate hit
+                // area so it never triggers the row's click-to-open; routes
+                // through the shared merge confirm path (owned by MenuBarView).
+                if pr.readyToMerge {
+                    Spacer(minLength: 4)
+                    MergeButton(
+                        writeActionsEnabled: writeActionsEnabled,
+                        onMerge: { onMerge(pr) }
+                    )
                 }
             }
             // Drafts read as lower-priority: mute the whole row while keeping

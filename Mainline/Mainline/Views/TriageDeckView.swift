@@ -331,6 +331,18 @@ struct TriageDeckView: View {
                         FeedbackBadge(pr: pr)
                     }
                 }
+
+                // Inline Merge — shown only on ready-to-merge rows. Separate hit
+                // area (borderless button) so it never triggers the row's
+                // click-to-open; routes through the SAME confirm + performAction
+                // path as the M verb.
+                if pr.readyToMerge {
+                    Spacer(minLength: 4)
+                    MergeButton(
+                        writeActionsEnabled: settings.writeActionsEnabled,
+                        onMerge: { dispatchVerb(.merge(pr)) }
+                    )
+                }
             }
             // Drafts read as lower-priority: mute the whole row while keeping
             // it fully clickable/openable.
@@ -600,6 +612,50 @@ struct TriageDeckView: View {
     /// Returns the PRs currently in the multi-select set, in display order.
     private var selectedPRList: [PRSnapshot] {
         prs.filter { selectedPRs.contains($0.nodeId) }
+    }
+}
+
+// MARK: - MergeButton
+
+/// Compact inline "Merge" button rendered on the trailing side of a
+/// ready-to-merge PR row (deck rows and Needs-a-Human rows). It has its own
+/// borderless hit area so a tap never triggers the row's click-to-open; the
+/// `onMerge` closure routes through the SAME write-action confirm path used by
+/// the `M` keyboard verb / command palette (`dispatchVerb(.merge)` →
+/// confirmation dialog → `performAction(.merge)`).
+///
+/// When write actions are disabled the button stays visible (discoverable) and
+/// tapping it surfaces the "enable write actions" guidance via the shared
+/// dispatch path; a `.help` tooltip states the same up front.
+struct MergeButton: View {
+    let writeActionsEnabled: Bool
+    let onMerge: () -> Void
+
+    var body: some View {
+        Button(action: onMerge) {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.triangle.merge")
+                    .font(.caption2)
+                Text("Merge")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Color(nsColor: .systemGreen).opacity(writeActionsEnabled ? 0.18 : 0.10),
+                in: Capsule()
+            )
+            .foregroundStyle(
+                writeActionsEnabled ? Color(nsColor: .systemGreen) : Color.secondary
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.borderless)
+        .help(writeActionsEnabled
+              ? "Merge this PR"
+              : "Enable write actions in Settings to merge")
+        .accessibilityLabel("Merge")
     }
 }
 

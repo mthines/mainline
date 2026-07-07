@@ -230,6 +230,20 @@ struct PRSnapshot: Codable, Equatable {
         }
     }
 
+    /// Whether the PR is eligible for a one-click inline Merge: approved, cleanly
+    /// mergeable, green CI, and open (non-draft, not merged/closed). Gates the
+    /// inline Merge button on PR rows. The button still routes through the same
+    /// write-action confirm path (`performAction(.merge)`); this only decides
+    /// visibility.
+    var readyToMerge: Bool {
+        reviewDecision == .approved
+            && mergeable == true
+            && ciStatus == .success
+            && !isDraft
+            && !merged
+            && !closed
+    }
+
     /// Why this PR is in the "For me" set, from the point of view of `myLogin`.
     /// `.direct` when the user is personally a requested reviewer; `.team` when
     /// only a team the user belongs to is requested (the PR was pulled in by a
