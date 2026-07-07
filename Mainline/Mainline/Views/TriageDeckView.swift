@@ -139,6 +139,7 @@ struct TriageDeckView: View {
     @ObservedObject var settings: MainlineSettings
 
     @State private var selectedIndex: Int = 0
+    @State private var hoveredRowID: String? = nil
     @State private var showDiff: Bool = false
     @State private var showCommandPalette: Bool = false
     @State private var multiSelectMode: Bool = false
@@ -372,6 +373,9 @@ struct TriageDeckView: View {
         let isFocused = index == selectedIndex
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
+        // The "Later" button reveals on hover OR when this is the keyboard-focused
+        // row, so keyboard users can still reach it without a pointer.
+        let isLaterVisible = hoveredRowID == pr.nodeId || isFocused
         let m = metrics
         return Button {
             handleRowClick(pr: pr, index: index)
@@ -424,7 +428,21 @@ struct TriageDeckView: View {
                 // Inline "Later" — compact clock menu with the four durations. Its
                 // OWN borderless hit area so tapping it never triggers row-open
                 // (same pattern as MergeButton). Routes through `postpone`.
+                //
+                // Shown only when the row is hovered OR keyboard-focused, to keep
+                // resting rows uncluttered. Hidden variants stay in the layout at
+                // `.opacity(0)` + `.allowsHitTesting(false)` so their width is
+                // reserved and rows never resize as the button fades in/out.
                 LaterButton(onPostpone: { duration in postpone(pr, for: duration) })
+                    .opacity(isLaterVisible ? 1 : 0)
+                    .allowsHitTesting(isLaterVisible)
+                    .animation(.easeInOut(duration: 0.12), value: hoveredRowID)
+            }
+            // Track the hovered row so its Later button reveals on hover. Clearing
+            // only when THIS row was the hovered one avoids a late "mouse exited"
+            // from a previous row wiping a newer row's hover state.
+            .onHover { hovering in
+                hoveredRowID = hovering ? pr.nodeId : (hoveredRowID == pr.nodeId ? nil : hoveredRowID)
             }
             // Drafts read as lower-priority: mute the whole row while keeping
             // it fully clickable/openable.
