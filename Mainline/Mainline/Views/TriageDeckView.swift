@@ -13,16 +13,28 @@ struct RowMetrics {
     let rowVerticalPadding: CGFloat
     /// Spacing between the title and the metadata line.
     let titleMetadataSpacing: CGFloat
-    /// Square frame size for the leading icon (CI / trigger / focus indicator).
+    /// Square frame size for the leading STATUS icon (CI / trigger). This is the
+    /// single "icon frame" every PR row shares — see `LeadingColumn`.
     let leadingIconSize: CGFloat
     /// Spacing between the leading icons and the text column.
     let rowHStackSpacing: CGFloat
-    /// Leading inset applied to row dividers (keeps them aligned under the text).
-    let dividerLeadingInset: CGFloat
     /// Top padding for per-state section headers.
     let sectionHeaderTopPadding: CGFloat
     /// Bottom padding for per-state section headers.
     let sectionHeaderBottomPadding: CGFloat
+
+    /// Fixed width of the leading UNREAD-DOT slot, reserved on EVERY PR row (deck
+    /// rows AND Needs-a-Human rows) whether or not an unread dot is shown, so the
+    /// status icon that follows it starts at the same x in every section. The
+    /// unread dot itself is 7pt; the slot is a touch wider to give the dot breathing
+    /// room and keep the icon column stable. Shared by both row views so they can't
+    /// drift.
+    let unreadDotSlotWidth: CGFloat
+
+    /// Horizontal padding applied to the leading/trailing edge of every PR row and
+    /// section header. Kept on `RowMetrics` so headers, rows, dividers and the
+    /// "looking good" summary all read from ONE constant.
+    static let horizontalPadding: CGFloat = 12
 
     static let compact = RowMetrics(
         titleLineLimit: 1,
@@ -30,9 +42,9 @@ struct RowMetrics {
         titleMetadataSpacing: 1,
         leadingIconSize: 16,
         rowHStackSpacing: 6,
-        dividerLeadingInset: 28,
         sectionHeaderTopPadding: 4,
-        sectionHeaderBottomPadding: 2
+        sectionHeaderBottomPadding: 2,
+        unreadDotSlotWidth: 10
     )
 
     static let comfortable = RowMetrics(
@@ -41,13 +53,66 @@ struct RowMetrics {
         titleMetadataSpacing: 2,
         leadingIconSize: 20,
         rowHStackSpacing: 8,
-        dividerLeadingInset: 36,
         sectionHeaderTopPadding: 8,
-        sectionHeaderBottomPadding: 2
+        sectionHeaderBottomPadding: 2,
+        unreadDotSlotWidth: 12
     )
 
     static func forCompact(_ compact: Bool) -> RowMetrics {
         compact ? .compact : .comfortable
+    }
+
+    /// The x at which row CONTENT (the title/metadata column) begins, measured from
+    /// the row's leading edge INCLUDING the row's horizontal padding. This is the
+    /// single source of truth for aligning the row divider's leading inset so it
+    /// starts under the title in every section and at both densities.
+    ///
+    ///   horizontalPadding + unreadDotSlot + spacing + iconFrame + spacing
+    func dividerInset(forHorizontalPadding hPad: CGFloat = RowMetrics.horizontalPadding) -> CGFloat {
+        hPad + unreadDotSlotWidth + rowHStackSpacing + leadingIconSize + rowHStackSpacing
+    }
+}
+
+// MARK: - LeadingColumn
+
+/// The single, shared leading structure for EVERY PR row — the triage deck rows
+/// and the Needs-a-Human rows both compose it so their unread-dot slot and status
+/// icon (and therefore their titles) line up in one column at both densities.
+///
+/// Layout (left → right), all inside the row's `.padding(.horizontal, RowMetrics.horizontalPadding)`:
+///   [unread-dot slot: FIXED `unreadDotSlotWidth`, renders the dot when `isUnread`,
+///    else an equal-width empty spacer]
+///   [status-icon slot: FIXED `leadingIconSize` == the shared icon frame]
+///
+/// The HStack that hosts this uses `metrics.rowHStackSpacing`, matching
+/// `dividerInset(forHorizontalPadding:)`, so the content column and the divider
+/// share one measurement.
+struct LeadingColumn<Icon: View>: View {
+    let metrics: RowMetrics
+    let isUnread: Bool
+    /// The status-icon view (CI icon for deck rows, trigger icon for needs-human).
+    /// It is framed to the shared `leadingIconSize` by this column so callers don't
+    /// have to remember to.
+    @ViewBuilder let icon: () -> Icon
+
+    var body: some View {
+        // Unread-dot slot — ALWAYS reserved at a fixed width so the icon that
+        // follows starts at the same x whether or not a dot is shown.
+        ZStack {
+            if isUnread {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel("Unread")
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: metrics.unreadDotSlotWidth)
+
+        // Status-icon slot — fixed square == the shared icon frame.
+        icon()
+            .frame(width: metrics.leadingIconSize, height: metrics.leadingIconSize)
     }
 }
 
@@ -246,7 +311,7 @@ struct TriageDeckView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.top, metrics.sectionHeaderTopPadding)
             .padding(.bottom, metrics.sectionHeaderBottomPadding)
             .contentShape(Rectangle())
@@ -257,7 +322,7 @@ struct TriageDeckView: View {
         if expansion.wrappedValue {
             ForEach(sectionPRs, id: \.nodeId) { pr in
                 deckRow(pr: pr, index: flatIndex(of: pr))
-                Divider().padding(.leading, metrics.dividerLeadingInset)
+                Divider().padding(.leading, metrics.dividerInset())
             }
         }
     }
@@ -288,28 +353,15 @@ struct TriageDeckView: View {
             handleRowClick(pr: pr, index: index)
         } label: {
             HStack(alignment: .top, spacing: m.rowHStackSpacing) {
-                // Selection / focus indicator
-                ZStack {
-                    if isSelected {
-                        Circle().fill(Color.accentColor).frame(width: 8, height: 8)
-                    } else if isFocused {
-                        Circle().fill(Color.accentColor.opacity(0.4)).frame(width: 8, height: 8)
-                    } else {
-                        Circle().fill(Color.clear).frame(width: 8, height: 8)
-                    }
+                // Shared leading structure: [unread-dot slot][status-icon slot].
+                // Identical to the Needs-a-Human rows so the CI icon and the title
+                // start at the same x in every section.
+                LeadingColumn(
+                    metrics: m,
+                    isUnread: manager.unreadPRIds.contains(pr.nodeId)
+                ) {
+                    ciIcon(for: pr.ciStatus)
                 }
-                .frame(width: m.leadingIconSize, height: m.leadingIconSize, alignment: .center)
-
-                if manager.unreadPRIds.contains(pr.nodeId) {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 7, height: 7)
-                        .padding(.top, 6)
-                        .accessibilityLabel("Unread")
-                }
-
-                ciIcon(for: pr.ciStatus)
-                    .frame(width: m.leadingIconSize, height: m.leadingIconSize)
 
                 VStack(alignment: .leading, spacing: m.titleMetadataSpacing) {
                     Text(pr.title)
@@ -347,10 +399,20 @@ struct TriageDeckView: View {
             // Drafts read as lower-priority: mute the whole row while keeping
             // it fully clickable/openable.
             .opacity(isDraft ? 0.6 : 1.0)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.vertical, m.rowVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(isFocused ? Color.accentColor.opacity(0.08) : .clear)
+            // Focus / multi-select indication rendered as a leading accent bar in
+            // the row's leading padding, so it never consumes a layout column and
+            // the shared LeadingColumn stays aligned with the Needs-a-Human rows.
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(isSelected
+                          ? Color.accentColor
+                          : (isFocused ? Color.accentColor.opacity(0.4) : Color.clear))
+                    .frame(width: 3)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

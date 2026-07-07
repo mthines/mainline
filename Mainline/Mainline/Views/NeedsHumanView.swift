@@ -18,6 +18,9 @@ struct NeedsHumanHeaderView: View {
     /// Whether the bucket is expanded. Owned by `MenuBarView`; the shared scroll
     /// region shows the rows when this is true.
     @Binding var expanded: Bool
+    /// Shared row layout metrics (compact vs comfortable) so the "looking good"
+    /// summary row's leading icon lines up with the PR rows' status-icon column.
+    let metrics: RowMetrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -53,7 +56,7 @@ struct NeedsHumanHeaderView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.top, 8)
             .padding(.bottom, expanded ? 2 : 8)
             .contentShape(Rectangle())
@@ -63,16 +66,20 @@ struct NeedsHumanHeaderView: View {
     }
 
     private var handledSummaryRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(Color(nsColor: .systemGreen))
-                .frame(width: 20, height: 20)
+        // Uses the SAME shared leading structure as the PR rows so its icon and
+        // text align with every row's status-icon / title column. The unread-dot
+        // slot is reserved (empty) exactly as on the Needs-a-Human rows.
+        HStack(alignment: .center, spacing: metrics.rowHStackSpacing) {
+            LeadingColumn(metrics: metrics, isUnread: false) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color(nsColor: .systemGreen))
+            }
             Text("\(handledCount) looking good — no action needed")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, RowMetrics.horizontalPadding)
         .padding(.vertical, 6)
         .help("PRs in this view that don't currently need your attention (CI passing, no changes requested, not stale).")
     }
@@ -119,7 +126,7 @@ struct NeedsHumanRowsView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(sortedNeedsHuman, id: \.nodeId) { pr in
                 needsHumanRow(pr)
-                Divider().padding(.leading, metrics.dividerLeadingInset)
+                Divider().padding(.leading, metrics.dividerInset())
             }
         }
     }
@@ -136,8 +143,13 @@ struct NeedsHumanRowsView: View {
             let isDraft = pr.classifiedState == .draft
             let m = metrics
             HStack(alignment: .top, spacing: m.rowHStackSpacing) {
-                triggerIcon(for: pr)
-                    .frame(width: m.leadingIconSize, height: m.leadingIconSize)
+                // Shared leading structure: [unread-dot slot][status-icon slot].
+                // The unread-dot slot is ALWAYS reserved (empty here, since the
+                // needs-human bucket doesn't track per-row unread state) so the
+                // trigger icon aligns with the deck rows' CI icon.
+                LeadingColumn(metrics: m, isUnread: false) {
+                    triggerIcon(for: pr)
+                }
 
                 VStack(alignment: .leading, spacing: m.titleMetadataSpacing) {
                     Text(pr.title)
@@ -173,7 +185,7 @@ struct NeedsHumanRowsView: View {
             // Drafts read as lower-priority: mute the whole row while keeping
             // it fully clickable/openable.
             .opacity(isDraft ? 0.6 : 1.0)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.vertical, metrics.rowVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())

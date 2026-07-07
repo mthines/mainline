@@ -546,7 +546,8 @@ struct MenuBarView: View {
             NeedsHumanHeaderView(
                 needsHumanCount: bucket.count,
                 handledCount: tabScopedHandledCount,
-                expanded: needsHumanExpanded
+                expanded: needsHumanExpanded,
+                metrics: RowMetrics.forCompact(settings.compactRows)
             )
             .padding(.vertical, 4)
 
