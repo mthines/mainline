@@ -169,6 +169,13 @@ struct PRSnapshot: Codable, Equatable {
     var ciStatus: CIStatus
     var reviewState: ReviewState
     var commentCount: Int           // total comment count for new-comment detection
+    var reviewCount: Int            // total review count for new-review detection
+    /// Whether the most recent comment was authored by a bot/app. Used to filter
+    /// out bot-only comment activity from the "new review or comment" notification.
+    /// false when there are no comments.
+    var lastCommentIsBot: Bool
+    /// Whether the most recent review was authored by a bot/app. false when none.
+    var lastReviewIsBot: Bool
     var updatedAt: String           // ISO 8601
     let author: String              // PR author login
     var requestedReviewers: [String] // logins requested for review (User reviewers)
@@ -220,6 +227,9 @@ struct PRSnapshot: Codable, Equatable {
         ciStatus: CIStatus,
         reviewState: ReviewState,
         commentCount: Int,
+        reviewCount: Int = 0,
+        lastCommentIsBot: Bool = false,
+        lastReviewIsBot: Bool = false,
         updatedAt: String,
         author: String,
         requestedReviewers: [String],
@@ -245,6 +255,9 @@ struct PRSnapshot: Codable, Equatable {
         self.ciStatus = ciStatus
         self.reviewState = reviewState
         self.commentCount = commentCount
+        self.reviewCount = reviewCount
+        self.lastCommentIsBot = lastCommentIsBot
+        self.lastReviewIsBot = lastReviewIsBot
         self.updatedAt = updatedAt
         self.author = author
         self.requestedReviewers = requestedReviewers
@@ -256,6 +269,18 @@ struct PRSnapshot: Codable, Equatable {
         self.linesDeleted = linesDeleted
         self.sensitivePathFlags = sensitivePathFlags
         self.unresolvedThreadCount = unresolvedThreadCount
+    }
+
+    // MARK: - Bot detection
+
+    /// Whether a comment/review author is a bot or GitHub App. GitHub returns
+    /// `__typename == "Bot"` for app/bot authors; app committers also carry a
+    /// login ending in `[bot]` (e.g. "dependabot[bot]", "coderabbitai[bot]").
+    /// Pure — safe to call from the diff engine and snapshot mapping.
+    static func isBot(typename: String?, login: String?) -> Bool {
+        if typename == "Bot" { return true }
+        if let login, login.lowercased().hasSuffix("[bot]") { return true }
+        return false
     }
 
     // MARK: - Canonical ordering

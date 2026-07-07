@@ -216,6 +216,16 @@ struct SettingsView: View {
                 }
             }
         }
+
+        Section("Comments") {
+            Toggle("Only notify for comments from people (ignore bots)",
+                   isOn: $settings.notifyOnlyHumanComments)
+            Label("Skips the \"New review or comment\" banner when the latest comment or review is from a bot or app (CodeRabbit, Vercel, dependabot, Claude review bots, …). Unread and badge counts are unaffected.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - Menu Bar
@@ -248,7 +258,7 @@ struct SettingsView: View {
                 Spacer()
                 ShortcutRecorder(settings: settings)
                     .disabled(!settings.globalShortcutEnabled)
-                Button("Reset to default (⇧⌃⌘P)") {
+                Button("Reset to default (\(MainlineSettings.defaultGlobalShortcutDisplayString))") {
                     settings.resetGlobalShortcutToDefault()
                 }
                 .disabled(!settings.globalShortcutEnabled)

@@ -61,6 +61,7 @@ final class MainlineSettings: ObservableObject {
         static let notifyReadyForReview = "notifyReadyForReview"
         static let notifyCIChange       = "notifyCIChange"
         static let notifyReviewComment  = "notifyReviewComment"
+        static let notifyOnlyHumanComments = "notifyOnlyHumanComments"
         static let githubUsername       = "githubUsername"
         static let selectedTab          = "selectedTab"
         // Triage Cockpit additions
@@ -89,9 +90,9 @@ final class MainlineSettings: ObservableObject {
 
     /// Virtual key code for "P" (`kVK_ANSI_P`).
     static let defaultShortcutKeyCode = 0x23
-    /// Default modifier mask: ⇧⌃⌘ (shift + control + command).
+    /// Default modifier mask: ⇧⌃⌥ (shift + control + option).
     static let defaultShortcutModifiers: UInt = {
-        NSEvent.ModifierFlags([.command, .shift, .control]).rawValue
+        NSEvent.ModifierFlags([.shift, .control, .option]).rawValue
     }()
 
     // MARK: - Persisted properties
@@ -122,6 +123,14 @@ final class MainlineSettings: ObservableObject {
 
     @Published var notifyReviewComment: Bool {
         didSet { defaults.set(notifyReviewComment, forKey: Keys.notifyReviewComment) }
+    }
+
+    /// When true, the "new review or comment" notification fires only for
+    /// human-authored comments/reviews — bot/app activity (CodeRabbit, Vercel,
+    /// dependabot, Claude review bots, etc.) is ignored. Default true.
+    /// Affects notifications only; unread/badge state is unaffected.
+    @Published var notifyOnlyHumanComments: Bool {
+        didSet { defaults.set(notifyOnlyHumanComments, forKey: Keys.notifyOnlyHumanComments) }
     }
 
     @Published var githubUsername: String {
@@ -267,10 +276,26 @@ final class MainlineSettings: ObservableObject {
         return out
     }
 
-    /// Reset the global shortcut to the default ⇧⌃⌘P.
+    /// Reset the global shortcut to the default (⇧⌃⌥P).
     func resetGlobalShortcutToDefault() {
         globalShortcutKeyCode   = Self.defaultShortcutKeyCode
         globalShortcutModifiers = Self.defaultShortcutModifiers
+    }
+
+    /// Human-readable rendering of the DEFAULT shortcut, derived from the same
+    /// `defaultShortcutKeyCode` + `defaultShortcutModifiers` constants used by
+    /// first-run init and `resetGlobalShortcutToDefault()`. Kept as the single
+    /// source for UI labels so the default, the reset, and the label never drift.
+    static var defaultGlobalShortcutDisplayString: String {
+        var out = ""
+        let flags = NSEvent.ModifierFlags(rawValue: defaultShortcutModifiers)
+            .intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.shift)   { out += "⇧" }
+        if flags.contains(.control) { out += "⌃" }
+        if flags.contains(.option)  { out += "⌥" }
+        if flags.contains(.command) { out += "⌘" }
+        out += keyGlyph(for: defaultShortcutKeyCode)
+        return out
     }
 
     /// Map a virtual key code to a display glyph/character. Covers letters,
@@ -371,6 +396,8 @@ final class MainlineSettings: ObservableObject {
         notifyReadyForReview = defaults.object(forKey: Keys.notifyReadyForReview) == nil ? true : defaults.bool(forKey: Keys.notifyReadyForReview)
         notifyCIChange       = defaults.object(forKey: Keys.notifyCIChange) == nil       ? true : defaults.bool(forKey: Keys.notifyCIChange)
         notifyReviewComment  = defaults.object(forKey: Keys.notifyReviewComment) == nil  ? true : defaults.bool(forKey: Keys.notifyReviewComment)
+        // Ignore bot-authored comments by default — the user's stated intent.
+        notifyOnlyHumanComments = defaults.object(forKey: Keys.notifyOnlyHumanComments) == nil ? true : defaults.bool(forKey: Keys.notifyOnlyHumanComments)
 
         githubUsername = defaults.string(forKey: Keys.githubUsername) ?? ""
 

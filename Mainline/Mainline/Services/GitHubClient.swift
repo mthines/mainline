@@ -68,8 +68,8 @@ private struct GraphQLNode: Decodable {
     let updatedAt: String?
     let author: GraphQLActor?
     let repository: GraphQLRepository?
-    let comments: GraphQLCount?
-    let reviews: GraphQLCount?
+    let comments: GraphQLCountWithAuthors?
+    let reviews: GraphQLCountWithAuthors?
     let commits: GraphQLCommits?
     // Triage Cockpit additions
     let mergeable: String?       // MERGEABLE | CONFLICTING | UNKNOWN
@@ -121,6 +121,30 @@ private struct GraphQLRepository: Decodable {
 
 private struct GraphQLCount: Decodable {
     let totalCount: Int
+}
+
+/// Count plus the latest node's author, used to detect whether the most recent
+/// comment/review was authored by a bot. `nodes` is fetched with `last: 1`.
+private struct GraphQLCountWithAuthors: Decodable {
+    let totalCount: Int
+    let nodes: [GraphQLAuthoredNode]?
+}
+
+private struct GraphQLAuthoredNode: Decodable {
+    let author: GraphQLTypedActor?
+}
+
+/// An actor carrying its GraphQL `__typename` (e.g. "Bot", "User") and login.
+/// GitHub returns `__typename == "Bot"` for GitHub App / bot authors; app
+/// committers also carry a login ending in `[bot]`.
+private struct GraphQLTypedActor: Decodable {
+    let typename: String?
+    let login: String?
+
+    enum CodingKeys: String, CodingKey {
+        case typename = "__typename"
+        case login
+    }
 }
 
 private struct GraphQLCommits: Decodable {
@@ -294,6 +318,15 @@ final class GitHubClient {
         let decision = node.reviewDecision.flatMap { ReviewDecision(rawValue: $0) }
         let reviewCount = node.reviews?.totalCount ?? 0
 
+        // Whether the latest comment / review was authored by a bot. When there
+        // are no comments/reviews the flag is false (no bot activity to ignore).
+        let lastCommentAuthor = node.comments?.nodes?.last?.author
+        let lastReviewAuthor  = node.reviews?.nodes?.last?.author
+        let lastCommentIsBot = PRSnapshot.isBot(typename: lastCommentAuthor?.typename,
+                                                login: lastCommentAuthor?.login)
+        let lastReviewIsBot  = PRSnapshot.isBot(typename: lastReviewAuthor?.typename,
+                                                login: lastReviewAuthor?.login)
+
         // Derive a coarse reviewState for diff-engine continuity and open/in-review split.
         let reviewState: ReviewState
         switch decision {
@@ -342,6 +375,9 @@ final class GitHubClient {
             ciStatus:           ciStatus,
             reviewState:        reviewState,
             commentCount:       node.comments?.totalCount ?? 0,
+            reviewCount:        reviewCount,
+            lastCommentIsBot:   lastCommentIsBot,
+            lastReviewIsBot:    lastReviewIsBot,
             updatedAt:          node.updatedAt ?? "",
             author:             node.author?.login ?? "",
             requestedReviewers: requestedReviewers,
@@ -390,8 +426,8 @@ final class GitHubClient {
             deletions
             author { login }
             repository { nameWithOwner }
-            comments { totalCount }
-            reviews { totalCount }
+            comments(last: 1) { totalCount nodes { author { __typename login } } }
+            reviews(last: 1) { totalCount nodes { author { __typename login } } }
             reviewRequests(first: 10) {
               nodes {
                 requestedReviewer {

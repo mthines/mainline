@@ -133,7 +133,11 @@ final class PRPoller {
         let unique = order.compactMap { merged[$0] }
 
         let myLogin = settings.githubUsername
-        let transitions = store.update(new: unique, myLogin: myLogin)
+        let transitions = store.update(
+            new: unique,
+            myLogin: myLogin,
+            notifyOnlyHumanComments: settings.notifyOnlyHumanComments
+        )
         notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
 
         // ALL transitions (notify + quiet) mark the PR as unread

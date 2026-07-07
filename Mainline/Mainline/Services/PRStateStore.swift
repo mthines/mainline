@@ -9,11 +9,12 @@ final class PRStateStore: ObservableObject {
 
     /// Replaces the current snapshot set with a new array, runs the diff engine,
     /// and returns the detected transitions.
-    func update(new: [PRSnapshot], myLogin: String) -> [PRTransition] {
+    func update(new: [PRSnapshot], myLogin: String, notifyOnlyHumanComments: Bool = false) -> [PRTransition] {
         let transitions = PRDiffEngine.diff(
             previous: snapshots,
             next: new,
-            myLogin: myLogin
+            myLogin: myLogin,
+            notifyOnlyHumanComments: notifyOnlyHumanComments
         )
 
         // Rebuild the dict from the new array
