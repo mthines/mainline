@@ -15,9 +15,13 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>Dash0AuthToken</key>
+	<string>$(DASH0_AUTH_TOKEN)</string>
+	<key>GitCommitSHA</key>
+	<string>$(GIT_COMMIT_SHA)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
@@ -28,11 +32,7 @@
 	<string>Copyright © 2024 Mads Thines. All rights reserved.</string>
 	<key>NSUserNotificationUsageDescription</key>
 	<string>Mainline uses notifications to alert you about GitHub pull request updates.</string>
-	<key>Dash0AuthToken</key>
-	<string>$(DASH0_AUTH_TOKEN)</string>
 	<key>OTelExporterEndpoint</key>
 	<string>$(OTEL_EXPORTER_OTLP_ENDPOINT)</string>
-	<key>GitCommitSHA</key>
-	<string>$(GIT_COMMIT_SHA)</string>
 </dict>
 </plist>
