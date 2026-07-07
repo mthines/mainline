@@ -32,7 +32,7 @@
   "hooks": {
     "checkout": {
       "post": [
-        "cd {worktreePath} && pnpm install", // Install dependencies in the new worktree
+        "pnpm install", // Install dependencies in the new worktree
       ],
     },
   },
