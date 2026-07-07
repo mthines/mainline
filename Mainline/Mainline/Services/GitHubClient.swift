@@ -11,9 +11,12 @@ enum GitHubAPIError: Error, LocalizedError {
     case networkError(URLError)
     case decodingError(Error)
     case unknown(Int)                   // HTTP status code
+    case actionFailed(String)           // GraphQL top-level errors on a mutation (HTTP 200, data:null)
 
     var errorDescription: String? {
         switch self {
+        case .actionFailed(let message):
+            return message
         case .unauthorized:
             return "GitHub token is invalid or expired."
         case .rateLimited(let seconds):
@@ -30,6 +33,25 @@ enum GitHubAPIError: Error, LocalizedError {
             return "Failed to decode GitHub response: \(err.localizedDescription)"
         case .unknown(let code):
             return "Unexpected HTTP status: \(code)"
+        }
+    }
+}
+
+// MARK: - Merge Method
+
+/// The resolved GraphQL `PullRequestMergeMethod` actually sent to GitHub.
+/// Distinct from `MergeMethodPreference` (the user's setting, which includes `.auto`).
+enum GitHubMergeMethod {
+    case merge
+    case squash
+    case rebase
+
+    /// The GraphQL enum literal (`PullRequestMergeMethod`) sent as the `$method` variable.
+    var graphQLValue: String {
+        switch self {
+        case .merge:  return "MERGE"
+        case .squash: return "SQUASH"
+        case .rebase: return "REBASE"
         }
     }
 }
@@ -117,6 +139,9 @@ private struct GraphQLActor: Decodable {
 
 private struct GraphQLRepository: Decodable {
     let nameWithOwner: String
+    let mergeCommitAllowed: Bool?
+    let squashMergeAllowed: Bool?
+    let rebaseMergeAllowed: Bool?
 }
 
 private struct GraphQLCount: Decodable {
@@ -387,7 +412,10 @@ final class GitHubClient {
             headRefName:        node.headRefName ?? "",
             linesAdded:         node.additions ?? 0,
             linesDeleted:       node.deletions ?? 0,
-            unresolvedThreadCount: unresolvedThreadCount
+            unresolvedThreadCount: unresolvedThreadCount,
+            mergeCommitAllowed: node.repository?.mergeCommitAllowed ?? true,
+            squashMergeAllowed: node.repository?.squashMergeAllowed ?? true,
+            rebaseMergeAllowed: node.repository?.rebaseMergeAllowed ?? true
         )
     }
 
@@ -425,7 +453,7 @@ final class GitHubClient {
             additions
             deletions
             author { login }
-            repository { nameWithOwner }
+            repository { nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
             comments(last: 1) { totalCount nodes { author { __typename login } } }
             reviews(last: 1) { totalCount nodes { author { __typename login } } }
             reviewRequests(first: 10) {
@@ -544,11 +572,27 @@ final class GitHubClient {
         default:  throw GitHubAPIError.unknown(http.statusCode)
         }
 
+        // GitHub returns HTTP 200 with `data: null` + a top-level `errors` array
+        // when a mutation is rejected (e.g. disallowed merge method, not mergeable,
+        // already merged). Without this check a failed mutation is silently treated
+        // as success. Surface it as a thrown, descriptive error.
+        if let envelope = try? JSONDecoder().decode(GraphQLErrorEnvelope.self, from: data),
+           let errors = envelope.errors, !errors.isEmpty {
+            let message = errors.map { $0.message }.joined(separator: " ")
+            throw GitHubAPIError.actionFailed(message)
+        }
+
         do {
             return try JSONDecoder().decode(responseType, from: data)
         } catch {
             throw GitHubAPIError.decodingError(error)
         }
+    }
+
+    /// Minimal envelope for decoding a GraphQL response's top-level `errors` array,
+    /// independent of the mutation's `data` shape.
+    private struct GraphQLErrorEnvelope: Decodable {
+        let errors: [GraphQLError]?
     }
 
     // MARK: - Review mutations
@@ -566,8 +610,8 @@ final class GitHubClient {
     """
 
     private static let mergePullRequestMutation = """
-    mutation($pullRequestId: ID!) {
-      mergePullRequest(input: { pullRequestId: $pullRequestId }) {
+    mutation($pullRequestId: ID!, $method: PullRequestMergeMethod!) {
+      mergePullRequest(input: { pullRequestId: $pullRequestId, mergeMethod: $method }) {
         pullRequest { merged }
       }
     }
@@ -611,15 +655,44 @@ final class GitHubClient {
         )
     }
 
-    /// Merges a pull request.
-    func mergePR(nodeId: String, token: String) async throws {
-        let variables: [String: Any] = ["pullRequestId": nodeId]
+    /// Merges a pull request using the method resolved from the PR's repo
+    /// capabilities and the user's preference. GitHub rejects a disallowed merge
+    /// method (e.g. MERGE when `allow_merge_commit=false`) with a top-level
+    /// `errors` array, which `performMutation` now surfaces as `.actionFailed`.
+    func mergePR(pr: PRSnapshot, preference: MergeMethodPreference, token: String) async throws {
+        let method = Self.resolveMergeMethod(for: pr, preference: preference)
+        let variables: [String: Any] = ["pullRequestId": pr.nodeId, "method": method.graphQLValue]
         _ = try await performMutation(
             Self.mergePullRequestMutation,
             variables: variables,
             token: token,
             responseType: MergeMutationResponse.self
         )
+    }
+
+    /// Resolves the GraphQL `PullRequestMergeMethod` to send, given the PR's repo
+    /// capabilities and the user's preference. Never returns a method the repo
+    /// disallows: an explicit choice that isn't allowed falls back to the auto
+    /// order (squash → rebase → merge). If the repo allows none (shouldn't happen),
+    /// defaults to `.squash` so we send *something* and let GitHub report the error.
+    static func resolveMergeMethod(for pr: PRSnapshot, preference: MergeMethodPreference) -> GitHubMergeMethod {
+        let autoResolved: GitHubMergeMethod = {
+            if pr.squashMergeAllowed { return .squash }
+            if pr.rebaseMergeAllowed { return .rebase }
+            if pr.mergeCommitAllowed { return .merge }
+            return .squash
+        }()
+
+        switch preference {
+        case .auto:
+            return autoResolved
+        case .squash:
+            return pr.squashMergeAllowed ? .squash : autoResolved
+        case .rebase:
+            return pr.rebaseMergeAllowed ? .rebase : autoResolved
+        case .merge:
+            return pr.mergeCommitAllowed ? .merge : autoResolved
+        }
     }
 
     // MARK: - Helpers

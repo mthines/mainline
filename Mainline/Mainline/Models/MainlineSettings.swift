@@ -45,6 +45,29 @@ enum ForMeReviewFilter: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - MergeMethodPreference
+
+/// The user's preferred merge method for in-app merges. `.auto` (default) picks
+/// the repo's allowed method (squash → rebase → merge); the explicit cases request
+/// that method when the repo allows it, otherwise fall back to the auto order.
+enum MergeMethodPreference: String, CaseIterable, Identifiable {
+    case auto
+    case merge
+    case squash
+    case rebase
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .auto:   return "Auto"
+        case .merge:  return "Merge commit"
+        case .squash: return "Squash"
+        case .rebase: return "Rebase"
+        }
+    }
+}
+
 /// All non-secret app settings backed by UserDefaults.
 final class MainlineSettings: ObservableObject {
     static let shared = MainlineSettings()
@@ -67,6 +90,7 @@ final class MainlineSettings: ObservableObject {
         // Triage Cockpit additions
         static let writeActionsEnabled  = "writeActionsEnabled"
         static let autopilotEnabled     = "autopilotEnabled"
+        static let mergeMethodPreference = "mergeMethodPreference"
         static let collapsedSectionsRaw = "collapsedSectionsRaw"
         static let snoozeMapData        = "snoozeMapData"
         static let attentionPolicy      = "attentionPolicy"
@@ -152,6 +176,11 @@ final class MainlineSettings: ObservableObject {
     /// Whether autopilot auto-approve is active. Requires writeActionsEnabled. Default OFF.
     @Published var autopilotEnabled: Bool {
         didSet { defaults.set(autopilotEnabled, forKey: Keys.autopilotEnabled) }
+    }
+
+    /// The user's preferred merge method for in-app merges. Default `.auto`.
+    @Published var mergeMethodPreference: MergeMethodPreference {
+        didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
     }
 
     /// Section raw values that are collapsed. Stored as [String] in UserDefaults.
@@ -408,6 +437,10 @@ final class MainlineSettings: ObservableObject {
         // Triage Cockpit — default OFF for write actions and autopilot
         writeActionsEnabled = defaults.bool(forKey: Keys.writeActionsEnabled)
         autopilotEnabled    = defaults.bool(forKey: Keys.autopilotEnabled)
+
+        // Merge method preference — default Auto (picks the repo's allowed method)
+        mergeMethodPreference = defaults.string(forKey: Keys.mergeMethodPreference)
+            .flatMap { MergeMethodPreference(rawValue: $0) } ?? .auto
 
         // Collapsed sections — default: none collapsed
         collapsedSectionsRaw = defaults.stringArray(forKey: Keys.collapsedSectionsRaw) ?? []

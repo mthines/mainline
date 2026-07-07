@@ -210,6 +210,18 @@ struct PRSnapshot: Codable, Equatable {
     /// comments and never resolves).
     var unresolvedThreadCount: Int
 
+    // MARK: - Repository merge capabilities
+
+    /// Whether the PR's repository allows merge-commit merges (`allow_merge_commit`).
+    /// Default true (optimistic) when the repo capability wasn't fetched.
+    var mergeCommitAllowed: Bool
+
+    /// Whether the PR's repository allows squash merges (`allow_squash_merge`).
+    var squashMergeAllowed: Bool
+
+    /// Whether the PR's repository allows rebase merges (`allow_rebase_merge`).
+    var rebaseMergeAllowed: Bool
+
     /// Total lines changed in this PR.
     var totalLines: Int { linesAdded + linesDeleted }
 
@@ -240,7 +252,10 @@ struct PRSnapshot: Codable, Equatable {
         linesAdded: Int = 0,
         linesDeleted: Int = 0,
         sensitivePathFlags: [String]? = nil,
-        unresolvedThreadCount: Int = 0
+        unresolvedThreadCount: Int = 0,
+        mergeCommitAllowed: Bool = true,
+        squashMergeAllowed: Bool = true,
+        rebaseMergeAllowed: Bool = true
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -269,6 +284,9 @@ struct PRSnapshot: Codable, Equatable {
         self.linesDeleted = linesDeleted
         self.sensitivePathFlags = sensitivePathFlags
         self.unresolvedThreadCount = unresolvedThreadCount
+        self.mergeCommitAllowed = mergeCommitAllowed
+        self.squashMergeAllowed = squashMergeAllowed
+        self.rebaseMergeAllowed = rebaseMergeAllowed
     }
 
     // MARK: - Bot detection

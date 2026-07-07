@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 // MARK: - WriteAction
 
@@ -412,11 +413,12 @@ final class PRManager: ObservableObject {
                 trustLedger.recordVerdict(verdict, for: pr.author)
             } catch {
                 statusMessage = "Approve failed: \(error.localizedDescription)"
+                Self.presentActionFailure("Approve failed", error: error)
             }
 
         case .merge(let pr):
             do {
-                try await client.mergePR(nodeId: pr.nodeId, token: token)
+                try await client.mergePR(pr: pr, preference: settings.mergeMethodPreference, token: token)
                 let verdict = VerdictRecord(
                     prNodeId: pr.nodeId,
                     author: pr.author,
@@ -428,6 +430,7 @@ final class PRManager: ObservableObject {
                 trustLedger.recordVerdict(verdict, for: pr.author)
             } catch {
                 statusMessage = "Merge failed: \(error.localizedDescription)"
+                Self.presentActionFailure("Merge failed", error: error)
             }
 
         case .requestChanges(let pr):
@@ -444,6 +447,7 @@ final class PRManager: ObservableObject {
                 trustLedger.recordVerdict(verdict, for: pr.author)
             } catch {
                 statusMessage = "Request changes failed: \(error.localizedDescription)"
+                Self.presentActionFailure("Request changes failed", error: error)
             }
 
         case .snooze, .unsnooze, .markSeen, .dismiss:
@@ -456,6 +460,22 @@ final class PRManager: ObservableObject {
         // for the next scheduled poll — otherwise the action looks like it did
         // nothing even though GitHub performed it.
         await triggerSingleRefresh()
+    }
+
+    /// Presents an app-modal NSAlert describing a failed write action. The popover
+    /// closes on action, so `statusMessage` is never seen — an alert is the only
+    /// way the real GitHub error reaches the user. Benign cancellations (popover
+    /// closed mid-request) are suppressed. Runs on the main actor.
+    private static func presentActionFailure(_ title: String, error: Error) {
+        if case GitHubAPIError.cancelled = error { return }
+        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     // MARK: - Autopilot
