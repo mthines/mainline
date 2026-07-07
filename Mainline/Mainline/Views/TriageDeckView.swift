@@ -269,12 +269,21 @@ struct TriageDeckView: View {
     /// The single main list: the keyboard-navigable deck grouped into
     /// collapsible actionability sections. Row focus indices map back into the flat
     /// `orderedPRs` array so J/K navigation is unaffected by grouping.
+    ///
+    /// Renders as a plain (NON-lazy, NON-scrolling) `VStack`: this view is hosted
+    /// inside `MenuBarView`'s SINGLE outer `ScrollView`, so it must contribute its
+    /// FULL natural height to the layout. A nested inner `ScrollView` here would be
+    /// greedy — it would fill whatever height the outer offers while the outer's
+    /// frame is derived from measuring content that CONTAINS this scroll view,
+    /// creating a mutual layout dependency (infinite re-layout → beachball freeze)
+    /// and hiding expanded rows below the small measured frame. Using an eager
+    /// `VStack` makes every row (including a freshly expanded Postponed/Done bucket)
+    /// realized and measured, so expanding a section grows the measured body height
+    /// and the outer region follows it up to the cap, then scrolls.
     private var prList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(sections, id: \.group) { section in
-                    sectionView(group: section.group, prs: section.prs)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(sections, id: \.group) { section in
+                sectionView(group: section.group, prs: section.prs)
             }
         }
     }

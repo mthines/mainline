@@ -458,9 +458,17 @@ struct MenuBarView: View {
     }
 
     /// The measured content: the actionability-grouped browse deck.
+    ///
+    /// A plain (NON-lazy) `VStack` so the `GeometryReader` background measures the
+    /// FULL natural height of the content — including a freshly expanded section's
+    /// rows. With a `LazyVStack` the added rows sit below the current small frame and
+    /// are never realized/measured, so the panel would not grow on expand. Eager
+    /// layout means expanding a section raises `measuredBodyHeight` →
+    /// `scrollRegionHeight` grows (up to `regionCap`) → the panel grows, and once
+    /// content exceeds the cap the single OUTER `ScrollView` scrolls.
     @ViewBuilder
     private var bodyContent: some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             // The keyboard-navigable triage deck, grouped into collapsible
             // actionability sections, scoped to the selected tab. Its
             // "Needs attention" group (`ActionGroup.needsAttention`) is the single
