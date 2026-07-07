@@ -65,6 +65,10 @@ struct MenuBarView: View {
 
             Divider()
 
+            keyboardLegend
+
+            Divider()
+
             footer
         }
         .frame(width: 360)
@@ -191,14 +195,14 @@ struct MenuBarView: View {
     /// Fixed reserve for the always-present (non-scrolling) chrome. Summed from
     /// the real elements so it is not under-counted:
     ///   header ~44 + badge explainer ~22 + tab picker ~44 + scope/drafts row ~44 +
-    ///   footer ~48 + dividers/padding ~30
+    ///   keyboard legend ~22 + footer ~48 + dividers/padding ~38
     ///   (+ For-me sub-filter ~36 only when the For-me tab is active).
     /// The old ~40pt reserve for the top "Needs a Human" header is gone — that
     /// header was removed when the browse list's "Needs attention" group became the
     /// single view. The rest of the crash-safe invariant is unchanged:
     /// chromeReserve + scrollRegionHeight <= cap <= screen, every term finite/>= 0.
     private var chromeReserve: CGFloat {
-        let base: CGFloat = 44 + 22 + 44 + 44 + 48 + 30   // = 232
+        let base: CGFloat = 44 + 22 + 44 + 44 + 22 + 48 + 38   // = 262
         let forMeFilter: CGFloat = settings.selectedTab == .forMe ? 36 : 0
         return base + forMeFilter
     }
@@ -563,6 +567,24 @@ struct MenuBarView: View {
         case .forMe:   return "Nothing to review"
         case .created: return "No PRs created"
         }
+    }
+
+    // MARK: - Keyboard legend
+
+    /// Always-visible discoverability strip for the deck's keyboard verbs and the
+    /// row context menu — replaces the ⌘K command palette as the "what can I do
+    /// here?" affordance.
+    private var keyboardLegend: some View {
+        HStack(spacing: 0) {
+            Text("J/K move · Space diff · A/M/R act · S later · ⌘Z undo · right-click ▸ all")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 
     // MARK: - Footer (AC-21: 44pt hit targets, Quit separated)

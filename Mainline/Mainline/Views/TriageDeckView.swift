@@ -1,6 +1,57 @@
 import SwiftUI
 import AppKit
 
+// MARK: - TriageAction
+
+/// All actions available for a PR in the triage deck. Surfaced via the row
+/// context menu (right-click) and dispatched through `handleTriageAction`.
+enum TriageAction: Identifiable {
+    case approve
+    case merge
+    case requestChanges
+    case snooze(SnoozeDuration)
+    case markSeen
+    case dismiss
+    case viewDiff
+    case openInBrowser
+
+    var id: String { label }
+
+    var label: String {
+        switch self {
+        case .approve:            return "Approve PR"
+        case .merge:              return "Merge PR"
+        case .requestChanges:     return "Request Changes"
+        case .snooze(let d):      return "Later — \(d.title)"
+        case .markSeen:           return "Mark as Seen"
+        case .dismiss:            return "Dismiss"
+        case .viewDiff:           return "View Diff"
+        case .openInBrowser:      return "Open in Browser"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .approve:         return "checkmark.circle"
+        case .merge:           return "arrow.triangle.merge"
+        case .requestChanges:  return "text.bubble"
+        case .snooze:          return "clock"
+        case .markSeen:        return "eye"
+        case .dismiss:         return "xmark"
+        case .viewDiff:        return "doc.plaintext"
+        case .openInBrowser:   return "safari"
+        }
+    }
+
+    /// Returns true if this action requires write-actions to be enabled.
+    var requiresWriteActions: Bool {
+        switch self {
+        case .approve, .merge, .requestChanges: return true
+        default: return false
+        }
+    }
+}
+
 // MARK: - RowMetrics
 
 /// Shared layout metrics for PR rows, driven by `settings.compactRows`. Used by
@@ -117,8 +168,8 @@ struct LeadingColumn<Icon: View>: View {
 // MARK: - TriageDeckView
 
 /// Keyboard-driven triage deck. Manages selection, key bindings,
-/// single-key verb dispatch, multi-select, diff preview, command palette,
-/// and undo toast stack.
+/// single-key verb dispatch, multi-select, diff preview, a per-row context
+/// menu (right-click), and the undo toast stack.
 ///
 /// Key bindings:
 ///   J / ↓  — next PR
@@ -131,8 +182,8 @@ struct LeadingColumn<Icon: View>: View {
 ///   E      — mark seen
 ///   X      — dismiss
 ///   V      — toggle multi-select mode
-///   ⌘K     — command palette
 ///   ⌘Z     — undo last action
+///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
     let prs: [PRSnapshot]
     @ObservedObject var manager: PRManager
@@ -141,7 +192,10 @@ struct TriageDeckView: View {
     @State private var selectedIndex: Int = 0
     @State private var hoveredRowID: String? = nil
     @State private var showDiff: Bool = false
-    @State private var showCommandPalette: Bool = false
+    /// The PR whose diff the overlay shows. Set by both the Space key (focused row)
+    /// and the row context menu (the right-clicked row), so the diff always matches
+    /// the row the user acted on — not merely the keyboard-focused one.
+    @State private var diffPR: PRSnapshot?
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
     @State private var undoEntries: [UndoEntry] = []
@@ -159,7 +213,7 @@ struct TriageDeckView: View {
                 }
             }
             .overlay(alignment: .center) {
-                if showDiff, let pr = focusedPR {
+                if showDiff, let pr = diffPR {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
                         .onTapGesture { showDiff = false }
@@ -172,22 +226,6 @@ struct TriageDeckView: View {
                     .zIndex(10)
                 }
 
-                if showCommandPalette, let pr = focusedPR {
-                    Color.black.opacity(0.45)
-                        .ignoresSafeArea()
-                        .onTapGesture { showCommandPalette = false }
-                    CommandPaletteView(
-                        pr: pr,
-                        writeActionsEnabled: settings.writeActionsEnabled,
-                        onAction: { action in
-                            handleTriageAction(action, on: pr)
-                        },
-                        isPresented: $showCommandPalette,
-                        manager: manager
-                    )
-                    .transition(.scale(scale: 0.96).combined(with: .opacity))
-                    .zIndex(10)
-                }
             }
 
             // Undo toast stack
@@ -387,7 +425,7 @@ struct TriageDeckView: View {
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
         // "Later" is HOVER-ONLY — it reveals when the pointer is over this row and
-        // never on the keyboard-focused row (keyboard users snooze via `S` / ⌘K).
+        // never on the keyboard-focused row (keyboard users snooze via `S`).
         let isHovered = hoveredRowID == pr.nodeId
         let m = metrics
         return Button {
@@ -513,6 +551,53 @@ struct TriageDeckView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu { rowContextMenu(for: pr) }
+    }
+
+    /// Native right-click action menu for a PR row — the discoverable home for
+    /// every triage verb (replaces the old ⌘K command palette). Write actions are
+    /// disabled while `writeActionsEnabled` is off. Dispatches through the same
+    /// `handleTriageAction` path as the single-key verbs.
+    @ViewBuilder
+    private func rowContextMenu(for pr: PRSnapshot) -> some View {
+        let writeOff = !settings.writeActionsEnabled
+        Button { handleTriageAction(.approve, on: pr) } label: {
+            Label("Approve PR", systemImage: "checkmark.circle")
+        }
+        .disabled(writeOff)
+        Button { handleTriageAction(.merge, on: pr) } label: {
+            Label("Merge PR", systemImage: "arrow.triangle.merge")
+        }
+        .disabled(writeOff)
+        Button { handleTriageAction(.requestChanges, on: pr) } label: {
+            Label("Request Changes", systemImage: "text.bubble")
+        }
+        .disabled(writeOff)
+
+        Divider()
+
+        Menu {
+            ForEach(SnoozeDuration.allCases) { duration in
+                Button(duration.title) { handleTriageAction(.snooze(duration), on: pr) }
+            }
+        } label: {
+            Label("Later", systemImage: "clock")
+        }
+        Button { handleTriageAction(.markSeen, on: pr) } label: {
+            Label("Mark as Seen", systemImage: "eye")
+        }
+        Button { handleTriageAction(.dismiss, on: pr) } label: {
+            Label("Dismiss", systemImage: "xmark")
+        }
+
+        Divider()
+
+        Button { handleTriageAction(.viewDiff, on: pr) } label: {
+            Label("View Diff", systemImage: "doc.plaintext")
+        }
+        Button { handleTriageAction(.openInBrowser, on: pr) } label: {
+            Label("Open in Browser", systemImage: "safari")
+        }
     }
 
     /// The hover-only trailing action pill drawn as an `.overlay` on top of a
@@ -788,16 +873,8 @@ struct TriageDeckView: View {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let cmd = event.modifierFlags.contains(.command)
 
-        // ⌘K toggles the command palette — handled before the overlay guard below
-        // so a second ⌘K while it's open dismisses it. Consumed here so the
-        // palette's TextField never receives the key. (Not while the diff is up.)
-        if cmd, chars == "k", !showDiff {
-            showCommandPalette.toggle()
-            return nil
-        }
-
-        // Don't intercept other keys when overlays are showing (they handle their own keys)
-        if showDiff || showCommandPalette { return event }
+        // Don't intercept keys while the diff overlay is showing (it handles its own).
+        if showDiff { return event }
 
         switch (chars, cmd) {
         // Navigation
@@ -810,8 +887,11 @@ struct TriageDeckView: View {
 
         // Diff preview
         case (" ", false):
-            showDiff = true
-            TelemetryService.shared.recordTriageInteraction("diff_preview")
+            if let pr = focusedPR {
+                diffPR = pr
+                showDiff = true
+                TelemetryService.shared.recordTriageInteraction("diff_preview")
+            }
             return nil
 
         // Undo
@@ -833,7 +913,7 @@ struct TriageDeckView: View {
         // Non-write verbs
         case ("s", false):
             // Quick "Later" — postpone with the default duration (1 day). The clock
-            // button + command palette expose the full duration menu.
+            // button + row context menu expose the full duration menu.
             if let pr = focusedPR {
                 postpone(pr, for: .quickDefault)
             }
@@ -900,7 +980,7 @@ struct TriageDeckView: View {
         Task { await manager.performAction(action) }
     }
 
-    // MARK: - Triage action from command palette
+    // MARK: - Triage action from context menu
 
     private func handleTriageAction(_ action: TriageAction, on pr: PRSnapshot) {
         switch action {
@@ -919,6 +999,7 @@ struct TriageDeckView: View {
             Task { await manager.performAction(.dismiss(pr)) }
             pushUndo(label: "Dismissed \(pr.title)", pr: pr) {}
         case .viewDiff:
+            diffPR = pr
             showDiff = true
             TelemetryService.shared.recordTriageInteraction("diff_preview")
         case .openInBrowser:
@@ -990,7 +1071,7 @@ struct TriageDeckView: View {
 /// ready-to-merge PR row. It has its own borderless hit area so a tap never
 /// triggers the row's click-to-open; the
 /// `onMerge` closure routes through the SAME write-action confirm path used by
-/// the `M` keyboard verb / command palette (`dispatchVerb(.merge)` →
+/// the `M` keyboard verb / row context menu (`dispatchVerb(.merge)` →
 /// confirmation dialog → `performAction(.merge)`).
 ///
 /// When write actions are disabled the button stays visible (discoverable) and

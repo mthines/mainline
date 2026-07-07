@@ -29,7 +29,6 @@
 		PC0000000000000000000014 /* MenuBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000017 /* MenuBarIconView.swift */; };
 		PC0000000000000000000016 /* TriageDeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000019 /* TriageDeckView.swift */; };
 		PC0000000000000000000017 /* DiffPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001A /* DiffPreviewView.swift */; };
-		PC0000000000000000000018 /* CommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001B /* CommandPaletteView.swift */; };
 		PC0000000000000000000019 /* UndoToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001C /* UndoToastView.swift */; };
 		PC000000000000000000001A /* TrustBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001D /* TrustBadgeView.swift */; };
 		PC000000000000000000001B /* AttentionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001E /* AttentionPolicy.swift */; };
@@ -71,7 +70,6 @@
 		PF0000000000000000000017 /* MenuBarIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarIconView.swift; sourceTree = "<group>"; };
 		PF0000000000000000000019 /* TriageDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriageDeckView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001A /* DiffPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffPreviewView.swift; sourceTree = "<group>"; };
-		PF000000000000000000001B /* CommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001C /* UndoToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoToastView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001D /* TrustBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustBadgeView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001E /* AttentionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionPolicy.swift; sourceTree = "<group>"; };
@@ -160,7 +158,6 @@
 				PF0000000000000000000017 /* MenuBarIconView.swift */,
 				PF0000000000000000000019 /* TriageDeckView.swift */,
 				PF000000000000000000001A /* DiffPreviewView.swift */,
-				PF000000000000000000001B /* CommandPaletteView.swift */,
 				PF000000000000000000001C /* UndoToastView.swift */,
 				PF000000000000000000001D /* TrustBadgeView.swift */,
 				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
@@ -279,7 +276,6 @@
 				PC0000000000000000000014 /* MenuBarIconView.swift in Sources */,
 				PC0000000000000000000016 /* TriageDeckView.swift in Sources */,
 				PC0000000000000000000017 /* DiffPreviewView.swift in Sources */,
-				PC0000000000000000000018 /* CommandPaletteView.swift in Sources */,
 				PC0000000000000000000019 /* UndoToastView.swift in Sources */,
 				PC000000000000000000001A /* TrustBadgeView.swift in Sources */,
 				PC000000000000000000001B /* AttentionPolicy.swift in Sources */,

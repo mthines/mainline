@@ -52,9 +52,8 @@ Mainline/Mainline/                     ← Source root
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView
     ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions/autopilot
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
-    ├── TriageDeckView.swift      ← Keyboard triage: J/K/Space/A/M/R/S/E/X/⌘K/⌘Z
+    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/A/M/R/S/E/X/V/⌘Z) + TriageAction enum + per-row context menu
     ├── DiffPreviewView.swift     ← Quick Look diff overlay (REST .diff fetch)
-    ├── CommandPaletteView.swift  ← ⌘K Raycast-style palette
     ├── UndoToastView.swift       ← Batched undo toast stack
     └── TrustBadgeView.swift      ← Compact P/T/A tier dot for PR rows
 ```
