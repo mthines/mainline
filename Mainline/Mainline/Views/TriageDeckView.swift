@@ -145,7 +145,6 @@ struct TriageDeckView: View {
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
     @State private var undoEntries: [UndoEntry] = []
-    @State private var confirmingAction: WriteAction? = nil
     @State private var eventMonitor: Any? = nil
 
     // MARK: - Body
@@ -205,21 +204,6 @@ struct TriageDeckView: View {
         }
         .onDisappear {
             removeKeyMonitor()
-        }
-        .confirmationDialog(
-            confirmDialogTitle,
-            isPresented: Binding(get: { confirmingAction != nil }, set: { if !$0 { confirmingAction = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Confirm") {
-                if let action = confirmingAction {
-                    Task { await manager.performAction(action) }
-                    confirmingAction = nil
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                confirmingAction = nil
-            }
         }
     }
 
@@ -882,8 +866,20 @@ struct TriageDeckView: View {
             alert.runModal()
             return
         }
-        // Require confirmation for write actions
-        confirmingAction = action
+        // Require confirmation for write actions via an app-modal NSAlert.
+        // A SwiftUI `.confirmationDialog` inside the MenuBarExtra popover dismisses
+        // the popover before the action fires, so the merge/approve never happens
+        // ("closes instead of merges"). NSAlert is app-modal and independent of the
+        // popover's lifecycle, so the action reliably runs.
+        let copy = confirmCopy(for: action)
+        let alert = NSAlert()
+        alert.messageText = copy.message
+        alert.informativeText = "This performs the action on GitHub."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: copy.button)   // default — Return
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task { await manager.performAction(action) }
     }
 
     // MARK: - Triage action from command palette
@@ -947,15 +943,14 @@ struct TriageDeckView: View {
         Task { await manager.performAction(.unsnooze(pr)) }
     }
 
-    // MARK: - Confirmation dialog title
+    // MARK: - Confirmation copy
 
-    private var confirmDialogTitle: String {
-        guard let action = confirmingAction else { return "Confirm Action" }
+    private func confirmCopy(for action: WriteAction) -> (message: String, button: String) {
         switch action {
-        case .approve(let pr): return "Approve \"\(pr.title)\"?"
-        case .merge(let pr):   return "Merge \"\(pr.title)\"?"
-        case .requestChanges(let pr): return "Request changes on \"\(pr.title)\"?"
-        default: return "Confirm Action"
+        case .approve(let pr):        return ("Approve \"\(pr.title)\"?", "Approve")
+        case .merge(let pr):          return ("Merge \"\(pr.title)\"?", "Merge")
+        case .requestChanges(let pr): return ("Request changes on \"\(pr.title)\"?", "Request Changes")
+        default:                      return ("Perform this action?", "Confirm")
         }
     }
 
