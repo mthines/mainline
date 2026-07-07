@@ -16,6 +16,13 @@ struct MenuBarView: View {
     /// list a real, scrolling height. Collapsed by default.
     @State private var needsHumanExpanded = false
 
+    /// Natural (unclamped) height of the single scrollable body — the
+    /// Needs-a-Human rows (when expanded) plus the browse deck. Measured via a
+    /// `GeometryReader` background on the body content and reported through
+    /// `BodyHeightKey`. The panel sizes the scroll region to this value clamped to
+    /// `regionCap`, so it follows content up to the max. `0` until first measured.
+    @State private var measuredBodyHeight: CGFloat = 0
+
     init(manager: PRManager) {
         self.manager = manager
         self.settings = manager.settings
@@ -54,15 +61,17 @@ struct MenuBarView: View {
 
             Divider()
 
-            // "Needs a Human" bucket — GLOBAL (tab-agnostic): its header count and
-            // rows derive from `manager.needsHumanPRs` (scope + drafts + conflicts
-            // applied) so the count always equals the menu-bar badge, regardless of
-            // the active tab. Collapsed by default so a noisy bucket (e.g.
-            // dependabot chores with red CI) never blocks the browse list below it.
-            needsHumanSection
+            // "Needs a Human" HEADER — GLOBAL (tab-agnostic) chrome. Always
+            // pinned (non-scrolling); its count derives from `manager.needsHumanPRs`
+            // so it equals the menu-bar badge on either tab. Collapsed by default.
+            needsHumanHeaderSection
 
-            // Browse list: PRs for the selected tab + scope + drafts filter.
-            content
+            // The SINGLE scrollable body: the Needs-a-Human rows (only when
+            // expanded) followed by the tabbed browse deck. One ScrollView, sized
+            // to its MEASURED content clamped to `regionCap`, so the panel follows
+            // content up to the max and scrolls only when it overflows. Replaces the
+            // old two independently-fixed nested ScrollViews (the crash source).
+            scrollableBody
 
             Divider()
 
@@ -70,6 +79,13 @@ struct MenuBarView: View {
         }
         .frame(width: 360)
         .padding(.vertical, 4)
+        .onPreferenceChange(BodyHeightKey.self) { newValue in
+            // Store the measured natural body height so the scroll region can size
+            // to content up to the cap. Guarded finite/non-negative at the source
+            // (bodyHeightReader); clamp again defensively here.
+            let v = newValue.isFinite ? max(0, newValue) : 0
+            if abs(v - measuredBodyHeight) > 0.5 { measuredBodyHeight = v }
+        }
         .onAppear {
             manager.snoozeStore.clearExpired()
             // Delay slightly so user can glance at unread indicators before they clear
@@ -150,33 +166,47 @@ struct MenuBarView: View {
         manager.prs.filter { $0.tabs.contains(.created) && countsTowardTabs($0) }.count
     }
 
-    // MARK: - Height budget
+    // MARK: - Height budget (content-sized, capped, crash-proof)
     //
     // A MenuBarExtra(.window) popover has NO external height constraint: it sizes
     // to its SwiftUI content and macOS clips (does NOT scroll) anything past the
-    // screen. So we bound the scrollable regions to the REAL available on-screen
-    // height. The invariant we maintain:
+    // screen. The OLD design nested TWO independently FIXED-height ScrollViews
+    // (the browse list at `browseHeight` and the Needs-a-Human rows at
+    // `maxExpandedHeight`) whose floors (150 + 140) could SUM to more than the
+    // post-chrome budget. On expand the declared height jumped by ~300pt at once;
+    // that oversized/animated resize reached NSHostingView mid-CATransaction and
+    // aborted (invalidateSafeAreaInsets → setFrameSize: → uncaught NSException).
+    // See the redesign below — a SINGLE scroll region, sized to MEASURED content
+    // clamped to a finite cap, with every dimension guarded finite and >= 0.
     //
-    //     chromeReserve + needsHumanHeight + browseHeight <= available <= screen
-    //
-    // where `needsHumanHeight` is 0 when the bucket is collapsed (or empty) and
-    // the expanded value otherwise. When collapsed the browse list receives the
-    // entire post-chrome budget; when expanded the needs-human list takes the
-    // majority and the browse list keeps a usable floor.
-    //
-    // `chromeReserve` counts every always-present fixed element conservatively
-    // (over-, never under-counting — under-counting is what caused the overrun /
-    // clipped footer). The collapsed needs-human HEADER (40pt) is part of
-    // `chromeReserve` regardless of expansion. Both ScrollViews get a FIXED
-    // `.frame(height:)`, not `maxHeight`, so overflow always scrolls and the
-    // total declared height stays within `available`.
+    // New invariant (defensive): chromeReserve + scrollRegionHeight <= cap <=
+    // screen, where `scrollRegionHeight = clamp(measuredBody, floor, regionCap)`
+    // and `regionCap = max(cap - chromeReserve, floor)`. `panelHeight` is now the
+    // MAXIMUM total budget, not a fixed height: with few PRs the region shrinks to
+    // the measured content, so the panel is short; it only grows to `regionCap`
+    // (and scrolls) once content exceeds the budget.
 
-    /// Conservative on-screen budget: the smaller of the user's preferred panel
-    /// height and the real space below the menu bar (visibleFrame minus a small
-    /// guard for the menu bar / popover arrow).
-    private var availableHeight: CGFloat {
-        min(CGFloat(settings.panelHeight),
-            (NSScreen.main?.visibleFrame.height ?? 800) - 40)
+    /// Guards any computed dimension before it reaches a `.frame`: never NaN, never
+    /// infinite, never negative. Falls back to `fallback` for non-finite input.
+    private func safe(_ value: CGFloat, fallback: CGFloat = 0) -> CGFloat {
+        guard value.isFinite else { return max(0, fallback) }
+        return max(0, value)
+    }
+
+    /// Absolute floor for the scroll region so it is never a zero/one-pixel sliver.
+    private let regionFloor: CGFloat = 120
+
+    /// The MAXIMUM total budget for the whole panel: the smaller of the user's
+    /// preferred `panelHeight` and the real space below the menu bar (visibleFrame
+    /// minus a small guard for the menu bar / popover arrow). Guaranteed finite and
+    /// at least a 240pt floor so a tiny/garbage setting can never collapse the panel
+    /// or feed a bad value downstream.
+    private var cap: CGFloat {
+        let screen = NSScreen.main?.visibleFrame.height
+        let screenBudget: CGFloat = (screen?.isFinite == true ? (screen! - 40) : 800)
+        let requested = CGFloat(settings.panelHeight)
+        let raw = min(requested.isFinite ? requested : 800, screenBudget)
+        return max(safe(raw, fallback: 240), 240)
     }
 
     /// Fixed reserve for the always-present (non-scrolling) chrome. Summed from
@@ -190,49 +220,27 @@ struct MenuBarView: View {
         return base + forMeFilter
     }
 
-    /// Post-chrome budget: the space left after the always-present fixed chrome.
-    /// Shared basis for both scroll regions.
-    private var postChrome: CGFloat {
-        max(availableHeight - chromeReserve, 0)
+    /// The maximum height the single scroll region may occupy: the cap minus the
+    /// fixed chrome, floored so it is always usable. Finite and >= 0 by
+    /// construction (cap and chromeReserve are both finite; `safe` guards the rest).
+    private var regionCap: CGFloat {
+        max(safe(cap - chromeReserve, fallback: regionFloor), regionFloor)
     }
 
-    /// Height for the "Needs a Human" ScrollView.
-    ///
-    /// - Collapsed, empty, or no token: 0 — the section contributes only its
-    ///   header (already counted in `chromeReserve`) and the browse list gets the
-    ///   whole `postChrome` budget.
-    /// - Expanded (with items): the MAJORITY of the budget — ~60% of `postChrome`,
-    ///   clamped to a floor of 160 (so it is never a zero/one-pixel sliver) and a
-    ///   ceiling of `postChrome - 150` (so the browse list keeps its 150pt floor).
-    ///   The floor itself is clamped not to exceed the ceiling on very short
-    ///   screens, and a hard 140pt minimum guarantees a genuinely useful list.
-    private var needsHumanMaxHeight: CGFloat {
-        let hasBucket = manager.hasToken && !globalNeedsHuman.isEmpty
-        guard hasBucket && needsHumanExpanded else { return 0 }
-
-        let target = (postChrome * 0.6).rounded()
-        let ceiling = max(postChrome - 150, 160)
-        let floor: CGFloat = 160
-        let clamped = min(max(target, floor), ceiling)
-        // Never a sliver: guarantee at least ~140pt whenever expanded with items.
-        return max(clamped, min(140, postChrome))
-    }
-
-    /// FIXED height for the tabbed browse ScrollView. Gets the entire post-chrome
-    /// budget when the needs-human list is collapsed/empty; otherwise `postChrome`
-    /// minus the expanded needs-human height. Floored at 150 so it stays usable
-    /// even when the bucket is expanded, and at 200 when it has the whole budget.
-    /// A fixed height (not maxHeight) guarantees a taller list scrolls and the
-    /// footer stays on-screen. Together with `needsHumanMaxHeight` this preserves
-    /// `needsHumanMaxHeight + browseHeight <= postChrome` whenever the budget
-    /// allows (both floors can only grow the panel on very short screens, where
-    /// the browse list's own ScrollView still scrolls).
-    private var browseHeight: CGFloat {
-        let nh = needsHumanMaxHeight
-        if nh <= 0 {
-            return max(200, postChrome)
-        }
-        return max(150, postChrome - nh)
+    /// FINAL height for the single scroll region — the crux of the redesign.
+    /// Sizes to the MEASURED natural height of its content (`measuredBodyHeight`)
+    /// clamped between `regionFloor` and `regionCap`, so:
+    ///   - few PRs  → short region (panel follows content, no huge empty area),
+    ///   - many PRs → region caps at `regionCap` and scrolls within it.
+    /// Every input is guarded finite/non-negative, so no NaN/∞/negative can ever
+    /// reach the `.frame` on the ScrollView (the crash precondition).
+    private var scrollRegionHeight: CGFloat {
+        let measured = safe(measuredBodyHeight, fallback: regionFloor)
+        // Before the first measurement lands, `measured` is 0 — fall back to the
+        // cap so the region is usable on first render, then it settles to content.
+        let effective = measured > 0 ? measured : regionCap
+        let clamped = min(max(effective, regionFloor), regionCap)
+        return safe(clamped, fallback: regionFloor)
     }
 
     // MARK: - Header
@@ -455,22 +463,17 @@ struct MenuBarView: View {
         manager.needsHumanPRs
     }
 
-    /// The GLOBAL "Needs a Human" bucket. Collapsed by default (see
-    /// `NeedsHumanView`) so a noisy bucket never blocks the browse list below it.
-    /// Both `needsHumanPRs` and `handledCount` are tab-agnostic (from the manager)
-    /// so the header count matches the menu-bar badge on every tab.
+    /// The GLOBAL "Needs a Human" HEADER — always-pinned chrome. Renders only the
+    /// tappable disclosure header (+ the "N handled" summary); the ROWS live in the
+    /// shared scroll region below (`scrollableBody`). Header count is tab-agnostic
+    /// so it matches the menu-bar badge on every tab.
     @ViewBuilder
-    private var needsHumanSection: some View {
+    private var needsHumanHeaderSection: some View {
         let bucket = globalNeedsHuman
         if manager.hasToken && !bucket.isEmpty {
-            NeedsHumanView(
-                needsHumanPRs: bucket,
+            NeedsHumanHeaderView(
+                needsHumanCount: bucket.count,
                 handledCount: manager.handledCount,
-                myLogin: settings.githubUsername,
-                includeConflicts: settings.includeConflictsInNeedsHuman,
-                maxExpandedHeight: needsHumanMaxHeight,
-                metrics: RowMetrics.forCompact(settings.compactRows),
-                trustLedger: trustLedger,
                 expanded: $needsHumanExpanded
             )
             .padding(.vertical, 4)
@@ -479,30 +482,79 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Content (tabbed browse list)
+    // MARK: - Scrollable body (SINGLE region: needs-human rows + browse deck)
 
+    /// The one and only scroll region. It contains the Needs-a-Human rows (only
+    /// when the bucket is expanded) followed by the tabbed browse deck. Its height
+    /// is the MEASURED natural height of that content clamped to `regionCap`, so
+    /// the panel is short with few PRs and scrolls only when content overflows.
+    ///
+    /// A `GeometryReader` background measures the natural content height and reports
+    /// it via `BodyHeightKey`; `onPreferenceChange` stores it in `measuredBodyHeight`.
+    /// The `.frame(height:)` uses `scrollRegionHeight`, which is guarded finite and
+    /// clamped — no NaN/∞/negative can reach the hosting view.
     @ViewBuilder
-    private var content: some View {
+    private var scrollableBody: some View {
         if !manager.hasToken || manager.prs.isEmpty {
-            emptyState
+            // Empty / no-token: still show the needs-human rows if expanded, else
+            // the empty state. No fixed frame needed — content is small chrome.
+            if needsHumanExpanded && !globalNeedsHuman.isEmpty {
+                ScrollView {
+                    bodyContent
+                        .background(bodyHeightReader)
+                }
+                .frame(height: scrollRegionHeight)
+            } else {
+                emptyState
+            }
         } else {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    // The single browse list — keyboard-navigable triage deck
-                    // grouped into collapsible per-state sections, scoped to the
-                    // selected tab. This does NOT render its own Needs-a-Human
-                    // bucket; that global bucket lives above the tabs.
-                    TriageDeckView(
-                        prs: visiblePRs,
-                        manager: manager,
-                        settings: settings
-                    )
-                }
+                bodyContent
+                    .background(bodyHeightReader)
             }
-            // FIXED height (not maxHeight): guarantees a taller list scrolls and
-            // the footer below stays on-screen. Sized so
-            // chromeReserve + needsHumanHeight + browseHeight <= available <= screen.
-            .frame(height: browseHeight)
+            .frame(height: scrollRegionHeight)
+        }
+    }
+
+    /// The measured content: Needs-a-Human rows (when expanded) + the browse deck.
+    @ViewBuilder
+    private var bodyContent: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            // Needs-a-Human ROWS — rendered here (inside the shared scroll region)
+            // only when the bucket is expanded and non-empty.
+            if needsHumanExpanded && !globalNeedsHuman.isEmpty {
+                NeedsHumanRowsView(
+                    needsHumanPRs: globalNeedsHuman,
+                    myLogin: settings.githubUsername,
+                    includeConflicts: settings.includeConflictsInNeedsHuman,
+                    metrics: RowMetrics.forCompact(settings.compactRows),
+                    trustLedger: trustLedger
+                )
+                Divider()
+            }
+
+            // The keyboard-navigable triage deck, grouped into collapsible
+            // per-state sections, scoped to the selected tab. Does NOT render its
+            // own Needs-a-Human bucket; that global bucket lives above.
+            if manager.hasToken && !manager.prs.isEmpty {
+                TriageDeckView(
+                    prs: visiblePRs,
+                    manager: manager,
+                    settings: settings
+                )
+            }
+        }
+    }
+
+    /// Transparent background that measures the natural height of the body content
+    /// and publishes it via `BodyHeightKey`. Guarded to a finite, non-negative
+    /// value before it is ever read into a frame.
+    private var bodyHeightReader: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: BodyHeightKey.self,
+                value: safe(proxy.size.height, fallback: 0)
+            )
         }
     }
 
@@ -605,4 +657,19 @@ struct MenuBarView: View {
 
 extension Notification.Name {
     static let openSettings = Notification.Name("MainlineOpenSettings")
+}
+
+// MARK: - Body height measurement
+
+/// Carries the measured natural height of the scrollable body up to `MenuBarView`
+/// so the panel can size its single scroll region to content, clamped to the cap.
+/// The reduce keeps the largest reported height (the fullest layout pass).
+private struct BodyHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        // Defensive: never let a non-finite/negative measurement propagate.
+        let safeNext = next.isFinite ? max(0, next) : 0
+        value = max(value, safeNext)
+    }
 }

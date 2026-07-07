@@ -198,7 +198,7 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack {
-                    Text("Panel height (pt)")
+                    Text("Max panel height (pt)")
                     Spacer()
                     TextField("", value: $panelHeightDraft, formatter: Self.panelHeightFormatter)
                         .textFieldStyle(.roundedBorder)
@@ -209,7 +209,7 @@ struct SettingsView: View {
                         .labelsHidden()
                         .onChange(of: panelHeightDraft) { _ in commitPanelHeight() }
                 }
-                Label("Capped to the display height — very large values make the panel as tall as the screen allows.",
+                Label("The MAXIMUM height — the panel sizes to its content and only grows up to this (scrolling beyond it). Capped to the display height, so very large values just let it fill the screen.",
                       systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)

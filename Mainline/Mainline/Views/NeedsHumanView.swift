@@ -1,35 +1,96 @@
 import SwiftUI
 
-// MARK: - NeedsHumanView
+// MARK: - NeedsHumanHeaderView
 
-/// Displays the "Needs a Human" derived bucket at the top of the panel.
-/// Shows PR rows for each triage trigger, then collapses the rest to
-/// "N handled by agents".
-struct NeedsHumanView: View {
-    /// The tab-agnostic "needs a human" set, computed once on `PRManager`
-    /// (scope + drafts + conflicts applied). Passing it in — rather than
-    /// recomputing from a tab-scoped list — guarantees this bucket's header
-    /// count equals the menu-bar badge.
-    let needsHumanPRs: [PRSnapshot]
+/// The always-pinned "Needs a Human" chrome: the tappable disclosure header and
+/// the "N handled by agents" summary. Rendered OUTSIDE the shared scroll region
+/// (as fixed chrome) by `MenuBarView`; the bucket ROWS live in the scroll region
+/// (`NeedsHumanRowsView`). Splitting header from rows lets a single scroll region
+/// own all scrolling — the two independently-fixed nested ScrollViews that caused
+/// the expand crash are gone.
+struct NeedsHumanHeaderView: View {
+    /// Bucket size — shown in the header pill. Tab-agnostic (from `PRManager`) so
+    /// it equals the menu-bar badge on either tab.
+    let needsHumanCount: Int
     /// Count of the scope+draft-filtered population that is NOT in the bucket.
     let handledCount: Int
+    /// Whether the bucket is expanded. Owned by `MenuBarView`; the shared scroll
+    /// region shows the rows when this is true.
+    @Binding var expanded: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader
+            if handledCount > 0 {
+                handledSummaryRow
+            }
+        }
+    }
+
+    /// The header doubles as the collapse/expand control. It reads
+    /// "Needs a Human · N" and toggles `expanded`.
+    private var sectionHeader: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color(nsColor: .systemOrange))
+                    .font(.caption)
+                Text("Needs a Human")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text("\(needsHumanCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, expanded ? 2 : 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(expanded ? "Hide the Needs-a-Human list" : "Show \(needsHumanCount) PRs that need a human")
+    }
+
+    private var handledSummaryRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Color(nsColor: .systemGreen))
+                .frame(width: 20, height: 20)
+            Text("\(handledCount) handled by agents")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - NeedsHumanRowsView
+
+/// The "Needs a Human" bucket ROWS. Rendered INSIDE the shared scroll region by
+/// `MenuBarView` — it is a plain `LazyVStack` with NO ScrollView and NO fixed
+/// frame, so it contributes its natural height to the single measured scroll
+/// region and can never declare an independent (potentially oversized) frame.
+struct NeedsHumanRowsView: View {
+    /// The tab-agnostic "needs a human" set, computed once on `PRManager`.
+    let needsHumanPRs: [PRSnapshot]
     let myLogin: String
     /// Whether merge conflicts count toward the bucket. Sourced from settings.
     let includeConflicts: Bool
-    /// Max height for the expanded (scrolling) rows region. Bounds the section so
-    /// a large bucket can never push the tabs/footer off screen.
-    let maxExpandedHeight: CGFloat
-    /// Shared row layout metrics (compact vs comfortable). Computed once by
-    /// `MenuBarView` from `settings.compactRows` so this list matches the deck.
+    /// Shared row layout metrics (compact vs comfortable).
     let metrics: RowMetrics
     @ObservedObject var trustLedger: TrustLedgerStore
-
-    /// Whether the bucket is expanded into a bounded ScrollView. Owned by
-    /// `MenuBarView` and passed down as a Binding so the panel's height math can
-    /// react to expansion (collapsed → the whole budget goes to the browse list;
-    /// expanded → the needs-human list gets a real, scrolling height). Collapsed
-    /// by default so the section never blocks the browse list below it.
-    @Binding var expanded: Bool
 
     // MARK: - Derived data
 
@@ -47,73 +108,12 @@ struct NeedsHumanView: View {
     // MARK: - Body
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !sortedNeedsHuman.isEmpty {
-                sectionHeader
-                // Collapsed by default so a noisy bucket (e.g. dependabot chores
-                // with red CI) never blocks the browse list. Tap the header to
-                // reveal the bounded, scrolling rows.
-                if expanded {
-                    bucketRows
-                }
-            }
-
-            if handledCount > 0 {
-                handledSummaryRow
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(sortedNeedsHuman, id: \.nodeId) { pr in
+                needsHumanRow(pr)
+                Divider().padding(.leading, metrics.dividerLeadingInset)
             }
         }
-    }
-
-    /// The rows region — shown only when expanded. Every row lives inside a
-    /// ScrollView bounded to `maxExpandedHeight` so the section can never grow
-    /// unbounded.
-    private var bucketRows: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(sortedNeedsHuman, id: \.nodeId) { pr in
-                    needsHumanRow(pr)
-                    Divider().padding(.leading, metrics.dividerLeadingInset)
-                }
-            }
-        }
-        .frame(maxHeight: maxExpandedHeight)
-    }
-
-    // MARK: - Section header (tappable disclosure)
-
-    /// The header doubles as the collapse/expand control. Collapsed, it is the
-    /// only thing this section renders — a compact one-line summary that stays
-    /// out of the way. It reads "Needs a Human · N".
-    private var sectionHeader: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Color(nsColor: .systemOrange))
-                    .font(.caption)
-                Text("Needs a Human")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                Text("\(needsHumanPRs.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(.quaternary, in: Capsule())
-                Spacer()
-                Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, expanded ? 2 : 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(expanded ? "Hide the Needs-a-Human list" : "Show \(needsHumanPRs.count) PRs that need a human")
     }
 
     // MARK: - PR row
@@ -245,19 +245,4 @@ struct NeedsHumanView: View {
         }
     }
 
-    // MARK: - Handled summary
-
-    private var handledSummaryRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(Color(nsColor: .systemGreen))
-                .frame(width: 20, height: 20)
-            Text("\(handledCount) handled by agents")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-    }
 }
