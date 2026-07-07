@@ -74,6 +74,7 @@ final class MainlineSettings: ObservableObject {
         static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
         static let showDrafts           = "showDrafts"
+        static let splitDrafts          = "splitDrafts"
         static let forMeReviewFilter    = "forMeReviewFilter"
     }
 
@@ -178,6 +179,14 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(showDrafts, forKey: Keys.showDrafts) }
     }
 
+    /// Whether shown draft PRs get their own "Draft" section. Default OFF — drafts
+    /// are mixed into their real state group (Open/Approved/etc.) and stay visually
+    /// distinct via the Draft badge + dimmed row. Independent of `showDrafts`
+    /// (show/hide); this only controls grouping of drafts that are already shown.
+    @Published var splitDrafts: Bool {
+        didSet { defaults.set(splitDrafts, forKey: Keys.splitDrafts) }
+    }
+
     /// Sub-filter for the "For me" tab. Default `.all` (show direct + team).
     @Published var forMeReviewFilter: ForMeReviewFilter {
         didSet { defaults.set(forMeReviewFilter.rawValue, forKey: Keys.forMeReviewFilter) }
@@ -270,6 +279,8 @@ final class MainlineSettings: ObservableObject {
         includeConflictsInNeedsHuman = defaults.bool(forKey: Keys.includeConflictsInNeedsHuman)
         // Drafts — default OFF (calmer view)
         showDrafts = defaults.bool(forKey: Keys.showDrafts)
+        // Split drafts into their own section — default OFF (mixed inline)
+        splitDrafts = defaults.bool(forKey: Keys.splitDrafts)
 
         // For-me review sub-filter — default All (show direct + team)
         forMeReviewFilter = defaults.string(forKey: Keys.forMeReviewFilter)

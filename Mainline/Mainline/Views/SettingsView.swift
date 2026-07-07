@@ -127,6 +127,13 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Toggle("Group drafts in their own section", isOn: $settings.splitDrafts)
+                Label("When off, shown drafts are mixed into their real state group (Open, Approved, …) and marked with a Draft badge.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Toggle("Route merge conflicts to \"Needs a Human\"", isOn: $settings.includeConflictsInNeedsHuman)
                 Label("When off, the Needs-a-Human bucket focuses on failing CI; conflicts still show as a tag on rows but don't route PRs into the bucket.",
                       systemImage: "info.circle")

@@ -213,6 +213,23 @@ struct PRSnapshot: Codable, Equatable {
         }
     }
 
+    /// Classify the PR into a display bucket while IGNORING `isDraft` — same
+    /// branch logic as `classifiedState`, minus the draft short-circuit. Used for
+    /// mixed grouping so a shown draft lands in its real state group (Open,
+    /// Approved, etc.) rather than a separate Draft section. Does NOT replace
+    /// `classifiedState`, which other code (needs-human, triageOrder) still uses.
+    var underlyingState: PRState {
+        if merged { return .merged }
+        if closed { return .closed }        // closed && !merged (merged handled above)
+        switch reviewDecision {
+        case .approved:         return .approved
+        case .changesRequested: return .inReview
+        case .reviewRequired, .none:
+            // No decision yet. If reviews exist but no formal decision, treat as In Review.
+            return reviewState == .changesRequested ? .inReview : .open
+        }
+    }
+
     /// Why this PR is in the "For me" set, from the point of view of `myLogin`.
     /// `.direct` when the user is personally a requested reviewer; `.team` when
     /// only a team the user belongs to is requested (the PR was pulled in by a

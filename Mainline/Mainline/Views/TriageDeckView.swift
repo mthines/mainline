@@ -119,19 +119,31 @@ struct TriageDeckView: View {
         prs.sorted(by: PRSnapshot.triageOrder)
     }
 
-    /// Maps a canonical `classifiedState` to the state used for DISPLAY grouping.
-    /// `.inReview` folds into `.open` so both render under one "Open" section; this
-    /// is a display-only mapping and does NOT change `classifiedState` semantics
-    /// (the classifier / trust / needs-human logic keeps using the real state).
+    /// Folds a display bucket state for grouping: `.inReview` folds into `.open`
+    /// so both render under one "Open" section. This is a display-only mapping and
+    /// does NOT change `classifiedState` semantics (the classifier / trust /
+    /// needs-human logic keeps using the real state).
     private func displayState(_ state: PRState) -> PRState {
         state == .inReview ? .open : state
     }
 
+    /// The section a PR is grouped under for DISPLAY.
+    ///   - `splitDrafts && isDraft` → `.draft` (its own section, legacy behavior).
+    ///   - else → the in-review-folded mapping applied to `underlyingState`, so a
+    ///     shown draft mixes into its real state group (an otherwise-open draft
+    ///     lands in Open, an approved draft in Approved, etc.).
+    private func groupState(for pr: PRSnapshot) -> PRState {
+        if settings.splitDrafts && pr.isDraft { return .draft }
+        return displayState(pr.underlyingState)
+    }
+
     /// Grouped sections in canonical state order, excluding empty ones. `.inReview`
     /// PRs are folded into the "Open" section (see `displayState`); the "Open"
-    /// header count therefore equals open + in-review PRs combined.
+    /// header count therefore equals open + in-review PRs combined. Drafts either
+    /// form their own "Draft" section (`splitDrafts`) or mix into their real state
+    /// group (default) — see `groupState`.
     private var sections: [(state: PRState, prs: [PRSnapshot])] {
-        let grouped = Dictionary(grouping: orderedPRs, by: { displayState($0.classifiedState) })
+        let grouped = Dictionary(grouping: orderedPRs, by: { groupState(for: $0) })
         return PRState.allCases
             .filter { $0 != .inReview }   // never render In Review as its own section
             .sorted { $0.sortIndex < $1.sortIndex }
@@ -202,7 +214,7 @@ struct TriageDeckView: View {
     private func deckRow(pr: PRSnapshot, index: Int) -> some View {
         let isFocused = index == selectedIndex
         let isSelected = selectedPRs.contains(pr.nodeId)
-        let isDraft = pr.classifiedState == .draft
+        let isDraft = pr.isDraft
         return Button {
             handleRowClick(pr: pr, index: index)
         } label: {
