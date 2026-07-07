@@ -18,32 +18,40 @@ enum TriageTrigger: Equatable {
 enum TriageClassifier {
 
     /// Returns true if the PR needs human intervention for any reason.
+    ///
+    /// - Parameter includeConflicts: when true, an unmergeable PR (merge
+    ///   conflict) also routes into the bucket. Default `false` — conflicts are
+    ///   low-urgency and shown as an informational tag only, keeping the bucket
+    ///   focused on CI health.
     static func needsHuman(
         _ pr: PRSnapshot,
         myLogin: String,
-        trustTier: TrustTier
+        trustTier: TrustTier,
+        includeConflicts: Bool = false
     ) -> Bool {
-        !triggers(pr, myLogin: myLogin, trustTier: trustTier).isEmpty
+        !triggers(pr, myLogin: myLogin, trustTier: trustTier, includeConflicts: includeConflicts).isEmpty
     }
 
     /// Returns the full list of triage triggers that apply to this PR.
     static func triggers(
         _ pr: PRSnapshot,
         myLogin: String,
-        trustTier: TrustTier
+        trustTier: TrustTier,
+        includeConflicts: Bool = false
     ) -> [TriageTrigger] {
         var result: [TriageTrigger] = []
 
-        // CI failure on a known trusted agent's PR (not fresh/unknown authors)
-        if (pr.ciStatus == .failure || pr.ciStatus == .error) && trustTier != .probation {
-            // Only flag if this is someone else's PR (agent's work)
-            if pr.author != myLogin {
-                result.append(.failingCIOnTrustedAgent)
-            }
+        // Failing CI is the PRIMARY trigger: any non-draft PR with red CI
+        // surfaces, regardless of trust tier or authorship. Red CI must always
+        // be visible.
+        if pr.classifiedState != .draft && (pr.ciStatus == .failure || pr.ciStatus == .error) {
+            result.append(.failingCIOnTrustedAgent)
         }
 
-        // Merge conflict — GitHub computes this lazily; nil = unknown, treat as clear
-        if pr.mergeable == false {
+        // Merge conflict — gated behind an opt-in setting so conflicts don't
+        // dominate the bucket. GitHub computes mergeability lazily; nil =
+        // unknown, treated as clear.
+        if includeConflicts && pr.mergeable == false {
             result.append(.mergeConflict)
         }
 

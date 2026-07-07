@@ -8,6 +8,8 @@ import SwiftUI
 struct NeedsHumanView: View {
     let prs: [PRSnapshot]
     let myLogin: String
+    /// Whether merge conflicts count toward the bucket. Sourced from settings.
+    let includeConflicts: Bool
     @ObservedObject var trustLedger: TrustLedgerStore
 
     // MARK: - Derived data
@@ -15,9 +17,15 @@ struct NeedsHumanView: View {
     private var needsHumanPRs: [PRSnapshot] {
         prs.filter { pr in
             let tier = trustLedger.tier(for: pr.author)
-            return TriageClassifier.needsHuman(pr, myLogin: myLogin, trustTier: tier)
+            return TriageClassifier.needsHuman(pr, myLogin: myLogin, trustTier: tier, includeConflicts: includeConflicts)
         }
-        .sorted(by: PRSnapshot.triageOrder)
+        // CI-failure rows first, then the rest in canonical triage order.
+        .sorted { lhs, rhs in
+            let lhsCI = (lhs.ciStatus == .failure || lhs.ciStatus == .error)
+            let rhsCI = (rhs.ciStatus == .failure || rhs.ciStatus == .error)
+            if lhsCI != rhsCI { return lhsCI }
+            return PRSnapshot.triageOrder(lhs, rhs)
+        }
     }
 
     private var handledCount: Int {
@@ -104,15 +112,16 @@ struct NeedsHumanView: View {
     @ViewBuilder
     private func triggerIcon(for pr: PRSnapshot) -> some View {
         let tier = trustLedger.tier(for: pr.author)
-        let triggers = TriageClassifier.triggers(pr, myLogin: myLogin, trustTier: tier)
-        if triggers.contains(.mergeConflict) {
-            Image(systemName: "arrow.triangle.merge")
-                .foregroundStyle(Color(nsColor: .systemRed))
-                .accessibilityLabel("Merge conflict")
-        } else if triggers.contains(.failingCIOnTrustedAgent) {
+        let triggers = TriageClassifier.triggers(pr, myLogin: myLogin, trustTier: tier, includeConflicts: includeConflicts)
+        // CI failure is the primary trigger — show it before conflict.
+        if triggers.contains(.failingCIOnTrustedAgent) {
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(Color(nsColor: .systemRed))
                 .accessibilityLabel("Failing CI")
+        } else if triggers.contains(.mergeConflict) {
+            Image(systemName: "arrow.triangle.merge")
+                .foregroundStyle(Color(nsColor: .systemRed))
+                .accessibilityLabel("Merge conflict")
         } else {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(Color(nsColor: .systemOrange))
@@ -120,10 +129,21 @@ struct NeedsHumanView: View {
         }
     }
 
+    /// Triggers to render as row tags. Always includes an informational
+    /// `conflict` tag when the PR is unmergeable, even if conflicts are not
+    /// routing PRs into the bucket (includeConflicts == false).
+    private func displayTriggers(for pr: PRSnapshot) -> [TriageTrigger] {
+        let tier = trustLedger.tier(for: pr.author)
+        var triggers = TriageClassifier.triggers(pr, myLogin: myLogin, trustTier: tier, includeConflicts: includeConflicts)
+        if pr.mergeable == false && !triggers.contains(.mergeConflict) {
+            triggers.append(.mergeConflict)
+        }
+        return triggers
+    }
+
     @ViewBuilder
     private func triggerLabels(for pr: PRSnapshot) -> some View {
-        let tier = trustLedger.tier(for: pr.author)
-        let triggers = TriageClassifier.triggers(pr, myLogin: myLogin, trustTier: tier)
+        let triggers = displayTriggers(for: pr)
         HStack(spacing: 2) {
             ForEach(Array(triggers.enumerated()), id: \.offset) { _, trigger in
                 triggerTag(trigger)

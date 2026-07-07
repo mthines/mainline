@@ -102,6 +102,23 @@ struct SettingsView: View {
                 }
             }
 
+            // MARK: - Triage Focus
+            Section("Triage") {
+                Toggle("Show draft PRs", isOn: $settings.showDrafts)
+                Label("When off, drafts are hidden from the list, sections, counts, and the Needs-a-Human bucket. Toggle in the panel with the Drafts chip or ⌘D.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("Route merge conflicts to \"Needs a Human\"", isOn: $settings.includeConflictsInNeedsHuman)
+                Label("When off, the Needs-a-Human bucket focuses on failing CI; conflicts still show as a tag on rows but don't route PRs into the bucket.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // MARK: - Attention Policy
             Section("Attention Policy") {
                 Text("Control how interrupting each event is.")

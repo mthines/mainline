@@ -52,6 +52,8 @@ final class MainlineSettings: ObservableObject {
         static let panelHeight          = "panelHeight"
         static let menuBarMetric        = "menuBarMetric"
         static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
+        static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
+        static let showDrafts           = "showDrafts"
     }
 
     // MARK: - Persisted properties
@@ -142,6 +144,19 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(menuBarScopeFollowsSelection, forKey: Keys.menuBarScopeFollows) }
     }
 
+    /// Whether merge conflicts route a PR into the "Needs a Human" bucket.
+    /// Default OFF — the focus is CI health; conflicts are shown as an
+    /// informational tag but do not dominate the bucket.
+    @Published var includeConflictsInNeedsHuman: Bool {
+        didSet { defaults.set(includeConflictsInNeedsHuman, forKey: Keys.includeConflictsInNeedsHuman) }
+    }
+
+    /// Whether draft PRs are included in the visible list, sections, counts,
+    /// and the "Needs a Human" bucket. Default OFF for a calmer view.
+    @Published var showDrafts: Bool {
+        didSet { defaults.set(showDrafts, forKey: Keys.showDrafts) }
+    }
+
     /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
     @Published var snoozeMap: [String: Date] {
         didSet {
@@ -224,6 +239,11 @@ final class MainlineSettings: ObservableObject {
         menuBarScopeFollowsSelection = defaults.object(forKey: Keys.menuBarScopeFollows) == nil
             ? true
             : defaults.bool(forKey: Keys.menuBarScopeFollows)
+
+        // Needs-a-Human focus — default OFF (CI-focused, conflicts don't dominate)
+        includeConflictsInNeedsHuman = defaults.bool(forKey: Keys.includeConflictsInNeedsHuman)
+        // Drafts — default OFF (calmer view)
+        showDrafts = defaults.bool(forKey: Keys.showDrafts)
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {
