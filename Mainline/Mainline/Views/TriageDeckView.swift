@@ -300,7 +300,11 @@ struct TriageDeckView: View {
         // the Needs-a-Human header. Replaces DisclosureGroup so tapping the text or
         // count — not just the triangle — expands/collapses.
         Button {
-            withAnimation(.easeInOut(duration: 0.15)) { expansion.wrappedValue.toggle() }
+            // No withAnimation: animating the expand makes the body height change
+            // every frame, which the GeometryReader/BodyHeightKey → .frame(height:)
+            // path re-measures every frame → per-frame popover resize → layout loop
+            // → beachball. Toggle instantly so height changes in a single step.
+            expansion.wrappedValue.toggle()
         } label: {
             HStack(spacing: 6) {
                 Text(group.title)

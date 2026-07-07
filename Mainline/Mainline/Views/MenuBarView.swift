@@ -74,7 +74,12 @@ struct MenuBarView: View {
             // to content up to the cap. Guarded finite/non-negative at the source
             // (bodyHeightReader); clamp again defensively here.
             let v = newValue.isFinite ? max(0, newValue) : 0
-            if abs(v - measuredBodyHeight) > 0.5 { measuredBodyHeight = v }
+            // Apply on the NEXT runloop tick, not synchronously inside this layout
+            // pass: writing the state here can re-enter layout → re-measure → loop.
+            // Combined with instant (non-animated) section toggles, this keeps the
+            // measured-height → frame path from ping-ponging (the expand freeze).
+            guard abs(v - measuredBodyHeight) > 1 else { return }
+            DispatchQueue.main.async { measuredBodyHeight = v }
         }
         .onAppear {
             manager.snoozeStore.clearExpired()
