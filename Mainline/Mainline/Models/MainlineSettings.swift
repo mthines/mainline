@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import Carbon.HIToolbox
 
 // MARK: - MenuBarMetric
 
@@ -117,11 +118,12 @@ final class MainlineSettings: ObservableObject {
 
     // MARK: - Global shortcut defaults
 
-    /// Virtual key code for "P" (`kVK_ANSI_P`).
-    static let defaultShortcutKeyCode = 0x23
-    /// Default modifier mask: ⇧⌃⌥ (shift + control + option).
+    /// Virtual key code for the ISO section key (`kVK_ISO_Section`), i.e. the
+    /// physical key left of "1" that produces "$" on a Danish layout.
+    static let defaultShortcutKeyCode = 0x0A
+    /// Default modifier mask: ⇧⌃ (shift + control).
     static let defaultShortcutModifiers: UInt = {
-        NSEvent.ModifierFlags([.shift, .control, .option]).rawValue
+        NSEvent.ModifierFlags([.shift, .control]).rawValue
     }()
 
     // MARK: - Persisted properties
@@ -354,7 +356,7 @@ final class MainlineSettings: ObservableObject {
         return out
     }
 
-    /// Reset the global shortcut to the default (⇧⌃⌥P).
+    /// Reset the global shortcut to the default (⇧⌃ + ISO section key).
     func resetGlobalShortcutToDefault() {
         globalShortcutKeyCode   = Self.defaultShortcutKeyCode
         globalShortcutModifiers = Self.defaultShortcutModifiers
@@ -400,7 +402,50 @@ final class MainlineSettings: ObservableObject {
         if let c = Self.keyCodeToCharacter[keyCode] {
             return c
         }
+        // Keys not in the ANSI map (e.g. the ISO section key, 0x0A) vary by
+        // layout — ask the active keyboard layout for the character it emits.
+        if let c = characterForCurrentLayout(keyCode: keyCode) {
+            return c
+        }
         return "?"
+    }
+
+    /// Translate a virtual key code to the character produced by the currently
+    /// active keyboard layout (no modifiers applied). Returns nil if the layout
+    /// can't be queried or the key produces no character. Used as a fallback for
+    /// keys absent from the layout-independent ANSI map, so non-US physical keys
+    /// (e.g. the ISO section key → "$" on Danish) render their real glyph.
+    private static func characterForCurrentLayout(keyCode: Int) -> String? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let layoutData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        else { return nil }
+
+        let data = Unmanaged<CFData>.fromOpaque(layoutData).takeUnretainedValue() as Data
+        var chars = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        var deadKeyState: UInt32 = 0
+
+        let status = data.withUnsafeBytes { raw -> OSStatus in
+            guard let ptr = raw.bindMemory(to: UCKeyboardLayout.self).baseAddress else {
+                return OSStatus(paramErr)
+            }
+            return UCKeyTranslate(
+                ptr,
+                UInt16(keyCode),
+                UInt16(kUCKeyActionDisplay),
+                0, // no modifiers
+                UInt32(LMGetKbdType()),
+                OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                &deadKeyState,
+                chars.count,
+                &length,
+                &chars
+            )
+        }
+
+        guard status == noErr, length > 0 else { return nil }
+        let s = String(utf16CodeUnits: chars, count: length)
+        return s.isEmpty ? nil : s.uppercased()
     }
 
     /// ANSI key code → uppercase character. Layout-independent (physical keys),
@@ -525,7 +570,7 @@ final class MainlineSettings: ObservableObject {
         // Needs-a-Human expanded — default collapsed (false); persisted on change
         needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
 
-        // Global shortcut — default ON, ⇧⌃⌘P
+        // Global shortcut — default ON, ⇧⌃ + ISO section key ("$" on Danish)
         globalShortcutEnabled = defaults.object(forKey: Keys.globalShortcutEnabled) == nil
             ? true
             : defaults.bool(forKey: Keys.globalShortcutEnabled)
