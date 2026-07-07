@@ -137,41 +137,62 @@ struct MenuBarView: View {
         manager.prs.filter { $0.tabs.contains(.created) && countsTowardTabs($0) }.count
     }
 
-    /// Fixed (non-scrolling) chrome the panel always renders around the two
-    /// scrolling regions: header, dividers, scope filter, tab picker, optional
-    /// For-me sub-filter, and footer. Reserved so the OVERALL panel stays within
-    /// the screen guard.
-    private static let panelChromeHeight: CGFloat = 260
+    // MARK: - Height budget
+    //
+    // A MenuBarExtra(.window) popover has NO external height constraint: it sizes
+    // to its SwiftUI content and macOS clips (does NOT scroll) anything past the
+    // screen. So we bound the ONE scrollable browse region to the REAL available
+    // on-screen height. The invariant we maintain:
+    //
+    //     chromeReserve + needsHumanHeight + browseHeight <= available <= screen
+    //
+    // `chromeReserve` counts every always-present fixed element conservatively
+    // (over-, never under-counting — under-counting is what caused the overrun /
+    // clipped footer). The browse ScrollView gets a FIXED `.frame(height:)`, not
+    // `maxHeight`, so overflow always scrolls and the total declared height stays
+    // within `available`.
 
-    /// Dynamic panel content height — the total scrolling budget shared between
-    /// the "Needs a Human" box (when expanded) and the tabbed browse list below
-    /// it. Bounded so `panelChromeHeight + panelContentHeight` never exceeds the
-    /// `screenHeight * 0.80` guard.
-    private var panelContentHeight: CGFloat {
-        let preferred = CGFloat(settings.panelHeight)
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
-        let maxAllowed = screenHeight * 0.80 - Self.panelChromeHeight
-        return max(min(preferred, maxAllowed), 280)
+    /// Conservative on-screen budget: the smaller of the user's preferred panel
+    /// height and the real space below the menu bar (visibleFrame minus a small
+    /// guard for the menu bar / popover arrow).
+    private var availableHeight: CGFloat {
+        min(CGFloat(settings.panelHeight),
+            (NSScreen.main?.visibleFrame.height ?? 800) - 40)
     }
 
-    /// Max height for the expanded "Needs a Human" ScrollView. At most half the
-    /// content budget, hard-capped at 320, and always leaving the browse list a
-    /// usable minimum so the two regions together never exceed the budget.
-    /// Collapsed, the section is short (top ~5 rows) regardless.
+    /// Fixed reserve for the always-present (non-scrolling) chrome. Summed from
+    /// the real elements so it is not under-counted:
+    ///   header ~44 + tab picker ~44 + scope/drafts row ~44 +
+    ///   collapsed needs-human header ~40 + footer ~48 + dividers/padding ~30
+    ///   (+ For-me sub-filter ~36 only when the For-me tab is active).
+    private var chromeReserve: CGFloat {
+        let base: CGFloat = 44 + 44 + 44 + 40 + 48 + 30   // = 250
+        let forMeFilter: CGFloat = settings.selectedTab == .forMe ? 36 : 0
+        return base + forMeFilter
+    }
+
+    /// Max height for the EXPANDED "Needs a Human" ScrollView. Capped so that,
+    /// even when expanded, `chromeReserve + needsHumanHeight + browseHeight`
+    /// stays within `available`: at most a third of the post-chrome budget,
+    /// hard-capped at 260, and never so large the browse list drops below its
+    /// 200pt floor. Collapsed, the section adds nothing here (its header is part
+    /// of `chromeReserve`).
     private var needsHumanMaxHeight: CGFloat {
-        let browseMinimum: CGFloat = 200
-        let byBudget = min(panelContentHeight * 0.5, 320)
-        // Never reserve so much that the browse list drops below its minimum.
-        return min(byBudget, max(panelContentHeight - browseMinimum, 0))
+        let postChrome = max(availableHeight - chromeReserve, 0)
+        let byBudget = min(postChrome / 3, 260)
+        return min(byBudget, max(postChrome - 200, 0))
     }
 
-    /// Height budget for the tabbed browse list — the remainder of the content
-    /// budget after reserving room for the Needs-a-Human box (only when the
-    /// bucket is non-empty). Guarantees needs-human + browse <= budget.
-    private var browseListHeight: CGFloat {
+    /// FIXED height for the tabbed browse ScrollView. `available` minus the fixed
+    /// chrome, floored at 200 so it stays usable on short screens. A fixed height
+    /// (not maxHeight) guarantees content taller than it scrolls and the footer
+    /// stays on-screen. When the needs-human bucket exists we also subtract its
+    /// expanded reserve so the two scrolling regions plus chrome never exceed
+    /// `available`.
+    private var browseHeight: CGFloat {
         let hasBucket = !globalNeedsHuman.isEmpty
         let reserved = hasBucket ? needsHumanMaxHeight : 0
-        return panelContentHeight - reserved
+        return max(200, availableHeight - chromeReserve - reserved)
     }
 
     // MARK: - Header
@@ -382,11 +403,10 @@ struct MenuBarView: View {
                     )
                 }
             }
-            // Bound the browse list to its share of the content budget so the
-            // Needs-a-Human box + browse list + chrome stay within the screen
-            // guard. `maxHeight` lets a short list shrink (no forced empty
-            // space) while still capping a long one.
-            .frame(maxHeight: browseListHeight)
+            // FIXED height (not maxHeight): guarantees a taller list scrolls and
+            // the footer below stays on-screen. Sized so
+            // chromeReserve + needsHumanHeight + browseHeight <= available <= screen.
+            .frame(height: browseHeight)
         }
     }
 
