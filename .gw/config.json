@@ -21,28 +21,21 @@
   // ----------------------------------------------------------------------------
   // Files/directories to automatically copy when creating new worktrees.
   // Useful for environment files, secrets, and local configuration.
-  // "autoCopyFiles": [
-  //   ".env",              // Environment variables
-  //   ".env.local",        // Local overrides
-  //   "config/secrets/",   // Secrets directory
-  //   "node_modules/"      // Dependencies (if not using symlinks)
-  // ],
+  "autoCopyFiles": [
+    ".mcp.json", // MCP server configuration (local, not committed)
+  ],
 
   // Hooks
   // ----------------------------------------------------------------------------
   // Commands to run before/after gw operations.
   // Available variables: {worktree}, {worktreePath}, {gitRoot}, {branch}
-  // "hooks": {
-  //   "checkout": {
-  //     "pre": [
-  //       "echo 'Creating worktree: {worktree}'"
-  //     ],
-  //     "post": [
-  //       "cd {worktreePath} && npm install",
-  //       "cd {worktreePath} && npm run build"
-  //     ]
-  //   }
-  // },
+  "hooks": {
+    "checkout": {
+      "post": [
+        "cd {worktreePath} && pnpm install", // Install dependencies in the new worktree
+      ],
+    },
+  },
 
   // Advanced Options
   // ----------------------------------------------------------------------------
