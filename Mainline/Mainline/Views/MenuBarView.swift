@@ -23,12 +23,25 @@ struct MenuBarView: View {
 
             Divider()
 
-            tabPicker
-
+            // Global filter row: scope chips + Drafts toggle. These are global
+            // filters that apply to BOTH the needs-human bucket and the tabbed
+            // browse list, so they sit above the tab selector.
             scopeFilter
 
             Divider()
 
+            // Global "Needs a Human" bucket — tab-agnostic and cross-cutting
+            // (spans authored + review-requested). Fed by `manager.needsHumanPRs`
+            // so its header count always equals the menu-bar badge. Lives ABOVE
+            // the tabs so switching tabs never changes it.
+            needsHumanSection
+
+            Divider()
+
+            // Tab picker governs ONLY the browse list below it.
+            tabPicker
+
+            // Browse list: PRs for the selected tab + scope + drafts filter.
             content
 
             Divider()
@@ -249,7 +262,28 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Content
+    // MARK: - Global "Needs a Human" section
+
+    /// The cross-cutting "Needs a Human" bucket. Tab-agnostic — it shows the
+    /// shared scope+draft+conflict-filtered set from PRManager (NOT the
+    /// tab-scoped `visiblePRs`), so its header count always equals the menu-bar
+    /// badge. Rendered above the tab selector; switching tabs does not change it.
+    @ViewBuilder
+    private var needsHumanSection: some View {
+        let bucket = manager.needsHumanPRs
+        if manager.hasToken && (!bucket.isEmpty || manager.handledCount > 0) {
+            NeedsHumanView(
+                needsHumanPRs: bucket,
+                handledCount: manager.handledCount,
+                myLogin: settings.githubUsername,
+                includeConflicts: settings.includeConflictsInNeedsHuman,
+                trustLedger: trustLedger
+            )
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: - Content (tabbed browse list)
 
     @ViewBuilder
     private var content: some View {
@@ -258,28 +292,10 @@ struct MenuBarView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // Layer C: Needs-a-Human bucket at top. Tab-agnostic — it
-                    // shows the shared scope+draft+conflict-filtered set from
-                    // PRManager (NOT the tab-scoped `visiblePRs`), so its header
-                    // count always equals the menu-bar badge. The For me /
-                    // Created selector only filters the list BELOW this bucket.
-                    let bucket = manager.needsHumanPRs
-                    if !bucket.isEmpty || manager.handledCount > 0 {
-                        NeedsHumanView(
-                            needsHumanPRs: bucket,
-                            handledCount: manager.handledCount,
-                            myLogin: settings.githubUsername,
-                            includeConflicts: settings.includeConflictsInNeedsHuman,
-                            trustLedger: trustLedger
-                        )
-                        Divider()
-                    }
-
-                    // Layer B: the single main list — keyboard-navigable triage
-                    // deck grouped into collapsible per-state sections. This is
-                    // the ONLY place PRs render below the Needs-a-Human bucket;
-                    // the previously separate ungrouped deck + grouped section
-                    // list have been consolidated here to avoid duplicate rows.
+                    // The single browse list — keyboard-navigable triage deck
+                    // grouped into collapsible per-state sections, scoped to the
+                    // selected tab. This does NOT render its own Needs-a-Human
+                    // bucket; that global bucket lives above the tabs.
                     TriageDeckView(
                         prs: visiblePRs,
                         manager: manager,
