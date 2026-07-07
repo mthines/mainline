@@ -537,15 +537,13 @@ struct TriageDeckView: View {
             .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.vertical, m.rowVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isFocused ? Color.accentColor.opacity(0.08) : .clear)
+            .background(isFocused ? Color.accentColor.opacity(0.22) : .clear)
             // Focus / multi-select indication rendered as a leading accent bar in
             // the row's leading padding, so it never consumes a layout column and
             // the shared LeadingColumn stays aligned with the Needs-a-Human rows.
             .overlay(alignment: .leading) {
                 Rectangle()
-                    .fill(isSelected
-                          ? Color.accentColor
-                          : (isFocused ? Color.accentColor.opacity(0.4) : Color.clear))
+                    .fill(isSelected || isFocused ? Color.accentColor : Color.clear)
                     .frame(width: 3)
             }
             .contentShape(Rectangle())
@@ -890,8 +888,15 @@ struct TriageDeckView: View {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let cmd = event.modifierFlags.contains(.command)
 
-        // Don't intercept keys while the diff overlay is showing (it handles its own).
-        if showDiff { return event }
+        // While the diff overlay is showing, Space (the key that opened it) or Esc
+        // closes it again; swallow everything else so deck verbs don't fire behind it.
+        if showDiff {
+            if chars == " " || event.keyCode == 53 {   // Space or Esc
+                showDiff = false
+                return nil
+            }
+            return event
+        }
 
         switch (chars, cmd) {
         // Navigation
