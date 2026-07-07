@@ -6,7 +6,13 @@ import SwiftUI
 /// Shows PR rows for each triage trigger, then collapses the rest to
 /// "N handled by agents".
 struct NeedsHumanView: View {
-    let prs: [PRSnapshot]
+    /// The tab-agnostic "needs a human" set, computed once on `PRManager`
+    /// (scope + drafts + conflicts applied). Passing it in — rather than
+    /// recomputing from a tab-scoped list — guarantees this bucket's header
+    /// count equals the menu-bar badge.
+    let needsHumanPRs: [PRSnapshot]
+    /// Count of the scope+draft-filtered population that is NOT in the bucket.
+    let handledCount: Int
     let myLogin: String
     /// Whether merge conflicts count toward the bucket. Sourced from settings.
     let includeConflicts: Bool
@@ -14,13 +20,10 @@ struct NeedsHumanView: View {
 
     // MARK: - Derived data
 
-    private var needsHumanPRs: [PRSnapshot] {
-        prs.filter { pr in
-            let tier = trustLedger.tier(for: pr.author)
-            return TriageClassifier.needsHuman(pr, myLogin: myLogin, trustTier: tier, includeConflicts: includeConflicts)
-        }
-        // CI-failure rows first, then the rest in canonical triage order.
-        .sorted { lhs, rhs in
+    /// Bucket rows in display order: CI-failure rows first, then canonical
+    /// triage order. `needsHumanPRs` is already filtered upstream.
+    private var sortedNeedsHuman: [PRSnapshot] {
+        needsHumanPRs.sorted { lhs, rhs in
             let lhsCI = (lhs.ciStatus == .failure || lhs.ciStatus == .error)
             let rhsCI = (rhs.ciStatus == .failure || rhs.ciStatus == .error)
             if lhsCI != rhsCI { return lhsCI }
@@ -28,17 +31,13 @@ struct NeedsHumanView: View {
         }
     }
 
-    private var handledCount: Int {
-        prs.count - needsHumanPRs.count
-    }
-
     // MARK: - Body
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !needsHumanPRs.isEmpty {
+            if !sortedNeedsHuman.isEmpty {
                 sectionHeader
-                ForEach(needsHumanPRs, id: \.nodeId) { pr in
+                ForEach(sortedNeedsHuman, id: \.nodeId) { pr in
                     needsHumanRow(pr)
                     Divider().padding(.leading, 36)
                 }

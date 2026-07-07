@@ -258,10 +258,16 @@ struct MenuBarView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // Layer C: Needs-a-Human bucket at top
-                    if !visiblePRs.isEmpty {
+                    // Layer C: Needs-a-Human bucket at top. Tab-agnostic — it
+                    // shows the shared scope+draft+conflict-filtered set from
+                    // PRManager (NOT the tab-scoped `visiblePRs`), so its header
+                    // count always equals the menu-bar badge. The For me /
+                    // Created selector only filters the list BELOW this bucket.
+                    let bucket = manager.needsHumanPRs
+                    if !bucket.isEmpty || manager.handledCount > 0 {
                         NeedsHumanView(
-                            prs: visiblePRs,
+                            needsHumanPRs: bucket,
+                            handledCount: manager.handledCount,
                             myLogin: settings.githubUsername,
                             includeConflicts: settings.includeConflictsInNeedsHuman,
                             trustLedger: trustLedger

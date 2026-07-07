@@ -50,10 +50,33 @@ final class PRManager: ObservableObject {
 
     // MARK: - Triage Cockpit computed properties
 
-    /// PRs that need human attention based on TriageClassifier.
+    /// The tab-agnostic PR population that both the badge and the panel's
+    /// "Needs a Human" bucket are computed from. Spans both For-me and Created
+    /// tabs (deduped by nodeId via the store), narrowed by the selected scope,
+    /// and — when `settings.showDrafts` is off — excludes drafts. Every badge
+    /// metric reads from this set so the badge and the panel stay consistent.
+    var scopedFilteredPRs: [PRSnapshot] {
+        let scopeFiltered: [PRSnapshot]
+        if settings.menuBarScopeFollowsSelection, let scope = scopeStore.selectedScope {
+            scopeFiltered = prs.filter { pr in
+                switch scope {
+                case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
+                case .repo(let r): return pr.repoFullName == r
+                }
+            }
+        } else {
+            scopeFiltered = prs
+        }
+        guard !settings.showDrafts else { return scopeFiltered }
+        return scopeFiltered.filter { $0.classifiedState != .draft }
+    }
+
+    /// PRs that need human attention based on TriageClassifier. Tab-agnostic:
+    /// derived from `scopedFilteredPRs` so the panel's bucket header count and
+    /// the menu-bar badge (`.needsAHuman`) reflect the SAME population.
     var needsHumanPRs: [PRSnapshot] {
         let myLogin = settings.githubUsername
-        return prs.filter { pr in
+        return scopedFilteredPRs.filter { pr in
             let tier = trustLedger.tier(for: pr.author)
             return TriageClassifier.needsHuman(
                 pr,
@@ -64,6 +87,10 @@ final class PRManager: ObservableObject {
         }
         .sorted(by: PRSnapshot.triageOrder)
     }
+
+    /// Count of PRs that need a human. Single source of truth for the badge
+    /// (`.needsAHuman`) and the panel bucket header.
+    var needsHumanCount: Int { needsHumanPRs.count }
 
     /// Count of PRs the user personally needs to act on (Layer A badge logic).
     /// - Authored PR with failing CI  → merge blocker
@@ -82,44 +109,27 @@ final class PRManager: ObservableObject {
         }.count
     }
 
-    /// Count of PRs that have been "handled" (not in needs-human bucket).
+    /// Count of PRs that have been "handled" (in the scope+draft-filtered
+    /// population but not in the needs-human bucket). Matches the bucket's
+    /// denominator so "N handled" is consistent with the bucket header.
     var handledCount: Int {
-        prs.count - needsHumanPRs.count
+        scopedFilteredPRs.count - needsHumanPRs.count
     }
 
     // MARK: - Menu-bar badge (scope-aware + configurable — Bug 2 / 5)
 
-    /// PRs the menu-bar badge should consider — all PRs, optionally narrowed to
-    /// the currently selected scope when `menuBarScopeFollowsSelection` is on.
-    private var badgeScopedPRs: [PRSnapshot] {
-        guard settings.menuBarScopeFollowsSelection,
-              let scope = scopeStore.selectedScope else { return prs }
-        return prs.filter { pr in
-            switch scope {
-            case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
-            case .repo(let r): return pr.repoFullName == r
-            }
-        }
-    }
-
-    /// The badge for the menu-bar icon, computed from the configured metric and
-    /// scope. Colorblind-safe: encodes shape + tint (see `MenuBarBadge`).
+    /// The badge for the menu-bar icon, computed from the configured metric.
+    /// Reads from `scopedFilteredPRs` (scope + draft filter applied) so every
+    /// metric stays consistent with the panel. Colorblind-safe: encodes shape +
+    /// tint (see `MenuBarBadge`).
     var menuBarBadge: MenuBarBadge {
-        let scoped = badgeScopedPRs
+        let scoped = scopedFilteredPRs
         let myLogin = settings.githubUsername
 
         switch settings.menuBarMetric {
         case .needsAHuman:
-            let count = scoped.filter { pr in
-                let tier = trustLedger.tier(for: pr.author)
-                return TriageClassifier.needsHuman(
-                    pr,
-                    myLogin: myLogin,
-                    trustTier: tier,
-                    includeConflicts: settings.includeConflictsInNeedsHuman
-                )
-            }.count
-            return .attention(count)
+            // Reuses the exact same set the panel's bucket shows.
+            return .attention(needsHumanCount)
 
         case .failingCI:
             let count = scoped.filter { pr in

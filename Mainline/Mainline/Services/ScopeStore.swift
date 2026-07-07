@@ -81,8 +81,12 @@ final class ScopeStore: ObservableObject {
         availableScopes = sorted
         scopeCounts = counts
 
-        // Invalidate selectedScope if it's no longer in the available list
-        if let sel = selectedScope, !sorted.contains(sel) {
+        // Invalidate selectedScope only when the derived list is non-empty AND
+        // genuinely lacks the selection. An early launch poll can call rebuild
+        // with an empty/partial PR list (sorted == []); nulling then would wipe
+        // the user's persisted choice before it can ever match. Guard on
+        // non-empty so we never null while the list is still loading.
+        if !sorted.isEmpty, let sel = selectedScope, !sorted.contains(sel) {
             selectedScope = nil
         }
     }
