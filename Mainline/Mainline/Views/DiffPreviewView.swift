@@ -20,7 +20,7 @@ struct DiffPreviewView: View {
             HStack {
                 Image(systemName: "doc.plaintext")
                     .foregroundStyle(.secondary)
-                Text("\(pr.repoFullName) #\(pr.number)")
+                Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
                     .font(.headline)
                 Spacer()
                 Button {

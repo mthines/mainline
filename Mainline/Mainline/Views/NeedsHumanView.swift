@@ -132,7 +132,7 @@ struct NeedsHumanView: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
-                        Text("\(pr.repoFullName) #\(pr.number)")
+                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         TrustBadgeView(tier: trustTier)
