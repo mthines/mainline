@@ -23,28 +23,29 @@ struct MenuBarView: View {
 
             Divider()
 
-            // Global filter row: scope chips + Drafts toggle. These are global
-            // filters that apply to BOTH the needs-human bucket and the tabbed
-            // browse list, so they sit above the tab selector.
-            scopeFilter
-
-            Divider()
-
-            // Global "Needs a Human" bucket — tab-agnostic and cross-cutting
-            // (spans authored + review-requested). Fed by `manager.needsHumanPRs`
-            // so its header count always equals the menu-bar badge. Lives ABOVE
-            // the tabs so switching tabs never changes it.
-            needsHumanSection
-
-            Divider()
-
-            // Tab picker governs ONLY the browse list below it.
+            // Tab picker is the PRIMARY axis — it sits at the top and EVERYTHING
+            // below it (scope filter, Needs-a-Human, browse list) respects the
+            // selected tab.
             tabPicker
 
             // For-me sub-filter (Direct / Team) — only visible on the For-me tab.
             if settings.selectedTab == .forMe {
                 forMeReviewFilterPicker
             }
+
+            Divider()
+
+            // Filter row: scope chips + Drafts toggle. Applies within the
+            // selected tab.
+            scopeFilter
+
+            Divider()
+
+            // "Needs a Human" bucket — now scoped to the selected tab so it
+            // never mixes in PRs the current tab wouldn't show. Collapsed by
+            // default so a noisy bucket (e.g. dependabot chores with red CI)
+            // never blocks the relevant list below it.
+            needsHumanSection
 
             // Browse list: PRs for the selected tab + scope + drafts filter.
             content
@@ -167,7 +168,7 @@ struct MenuBarView: View {
     /// budget after reserving room for the Needs-a-Human box (only when the
     /// bucket is non-empty). Guarantees needs-human + browse <= budget.
     private var browseListHeight: CGFloat {
-        let hasBucket = !manager.needsHumanPRs.isEmpty
+        let hasBucket = !tabScopedNeedsHuman.isEmpty
         let reserved = hasBucket ? needsHumanMaxHeight : 0
         return panelContentHeight - reserved
     }
@@ -328,25 +329,45 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Global "Needs a Human" section
+    // MARK: - "Needs a Human" section (tab-scoped)
 
-    /// The cross-cutting "Needs a Human" bucket. Tab-agnostic — it shows the
-    /// shared scope+draft+conflict-filtered set from PRManager (NOT the
-    /// tab-scoped `visiblePRs`), so its header count always equals the menu-bar
-    /// badge. Rendered above the tab selector; switching tabs does not change it.
+    /// The "Needs a Human" bucket for the CURRENTLY selected tab. Derived from
+    /// `visiblePRs` (tab + scope + drafts + For-me sub-filter already applied)
+    /// so it respects the same axis as everything else in the panel. Ordered
+    /// CI-failures first, then canonical triage order.
+    private var tabScopedNeedsHuman: [PRSnapshot] {
+        let myLogin = settings.githubUsername
+        return visiblePRs.filter { pr in
+            let tier = manager.trustLedger.tier(for: pr.author)
+            return TriageClassifier.needsHuman(
+                pr,
+                myLogin: myLogin,
+                trustTier: tier,
+                includeConflicts: settings.includeConflictsInNeedsHuman
+            )
+        }
+    }
+
+    /// The "Needs a Human" bucket, scoped to the selected tab. Collapsed by
+    /// default (see `NeedsHumanView`) so a noisy bucket never blocks the browse
+    /// list below it. `handledCount` here is the tab-scoped remainder so the
+    /// "N handled" line stays consistent with the tab.
     @ViewBuilder
     private var needsHumanSection: some View {
-        let bucket = manager.needsHumanPRs
-        if manager.hasToken && (!bucket.isEmpty || manager.handledCount > 0) {
+        let bucket = tabScopedNeedsHuman
+        if manager.hasToken && !bucket.isEmpty {
+            let handled = visiblePRs.count - bucket.count
             NeedsHumanView(
                 needsHumanPRs: bucket,
-                handledCount: manager.handledCount,
+                handledCount: max(handled, 0),
                 myLogin: settings.githubUsername,
                 includeConflicts: settings.includeConflictsInNeedsHuman,
                 maxExpandedHeight: needsHumanMaxHeight,
                 trustLedger: trustLedger
             )
             .padding(.vertical, 4)
+
+            Divider()
         }
     }
 
