@@ -1,6 +1,6 @@
 cask "mainline" do
-  version "1.1.0"
-  sha256 "fc1b3bcf4ca3c3522d6c2efb7f9397e5958dbfcf73efcb1a0b2b41e80aae27be"
+  version "1.2.0"
+  sha256 "e2ecb6ec87c1ed293938e86a8f3a2ebd2dbe80197ebd6b1c3127b4500b8d634c"
 
   url "https://github.com/mthines/mainline/releases/download/v#{version}/Mainline-v#{version}-macOS.zip"
   name "Mainline"
