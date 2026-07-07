@@ -77,6 +77,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             name: .openSettings,
             object: nil
         )
+
+        // Kick off fetching the moment the app launches — independent of whether
+        // the popover is ever opened. The MenuBarLabel `.task` also calls
+        // `start()`, but that only fires once SwiftUI renders the scene; this
+        // launch-time path guarantees the FIRST poll begins right away. `start()`
+        // is idempotent (guarded by `didStart`), so the two paths never double-poll.
+        startManagerAtLaunch()
+    }
+
+    /// Triggers `PRManager.start()` at launch via the nonisolated bridge. The
+    /// bridge is populated when the SwiftUI scene initialises the manager, which
+    /// may be slightly after `applicationDidFinishLaunching`; retry briefly until
+    /// it is available (mirrors `openSettingsWindow`'s wait).
+    private func startManagerAtLaunch(attempt: Int = 0) {
+        guard let manager = ManagerBridge.instance else {
+            guard attempt < 20 else { return }   // give up after ~2s
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.startManagerAtLaunch(attempt: attempt + 1)
+            }
+            return
+        }
+        Task { await manager.start() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -32,6 +32,9 @@ final class PRPoller {
         stop()
         pollingTask = Task { [weak self] in
             guard let self else { return }
+            // First poll runs IMMEDIATELY — the sleep is at the END of the loop,
+            // never before the first fetch — so launching the app begins fetching
+            // right away and populates without the user pressing Refresh.
             while !Task.isCancelled {
                 await self.poll(token: token)
                 let interval = Double(self.settings.pollIntervalSeconds)
