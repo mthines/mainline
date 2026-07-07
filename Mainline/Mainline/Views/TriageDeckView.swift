@@ -202,6 +202,7 @@ struct TriageDeckView: View {
     private func deckRow(pr: PRSnapshot, index: Int) -> some View {
         let isFocused = index == selectedIndex
         let isSelected = selectedPRs.contains(pr.nodeId)
+        let isDraft = pr.classifiedState == .draft
         return Button {
             handleRowClick(pr: pr, index: index)
         } label: {
@@ -238,6 +239,9 @@ struct TriageDeckView: View {
                         Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if isDraft {
+                            DraftBadge()
+                        }
                         TrustBadgeView(tier: manager.trustLedger.tier(for: pr.author))
                         if settings.selectedTab == .forMe {
                             ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
@@ -246,6 +250,9 @@ struct TriageDeckView: View {
                     }
                 }
             }
+            // Drafts read as lower-priority: mute the whole row while keeping
+            // it fully clickable/openable.
+            .opacity(isDraft ? 0.6 : 1.0)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -511,6 +518,25 @@ struct TriageDeckView: View {
     /// Returns the PRs currently in the multi-select set, in display order.
     private var selectedPRList: [PRSnapshot] {
         prs.filter { selectedPRs.contains($0.nodeId) }
+    }
+}
+
+// MARK: - DraftBadge
+
+/// Compact gray/secondary pill marking a PR as a draft. Rendered on the
+/// repo/#number metadata line alongside the trust/feedback/trigger tags, using
+/// the same visual style so drafts are obvious while scrolling. Shared by the
+/// triage deck rows and the Needs-a-Human rows.
+struct DraftBadge: View {
+    var body: some View {
+        Text("Draft")
+            .font(.caption2)
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Color(nsColor: .secondaryLabelColor).opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Draft")
     }
 }
 

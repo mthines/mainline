@@ -122,6 +122,7 @@ struct NeedsHumanView: View {
             }
         } label: {
             let trustTier: TrustTier = trustLedger.tier(for: pr.author)
+            let isDraft = pr.classifiedState == .draft
             HStack(alignment: .top, spacing: 8) {
                 triggerIcon(for: pr)
                     .frame(width: 20, height: 20)
@@ -135,6 +136,9 @@ struct NeedsHumanView: View {
                         Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if isDraft {
+                            DraftBadge()
+                        }
                         TrustBadgeView(tier: trustTier)
                         ReviewSourceBadge(pr: pr, myLogin: myLogin)
                         FeedbackBadge(pr: pr)
@@ -142,6 +146,9 @@ struct NeedsHumanView: View {
                     }
                 }
             }
+            // Drafts read as lower-priority: mute the whole row while keeping
+            // it fully clickable/openable.
+            .opacity(isDraft ? 0.6 : 1.0)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
