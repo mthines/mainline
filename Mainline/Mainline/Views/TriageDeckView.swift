@@ -113,26 +113,86 @@ struct TriageDeckView: View {
 
     /// PRs in canonical triage order — Open/InReview/Approved above Draft,
     /// then most-recently-updated first. Drafts never appear above open PRs.
+    /// This flat order is the index space that J/K keyboard navigation walks,
+    /// even though rows are displayed grouped into collapsible sections.
     private var orderedPRs: [PRSnapshot] {
         prs.sorted(by: PRSnapshot.triageOrder)
     }
 
+    /// Grouped sections in canonical state order, excluding empty ones.
+    private var sections: [(state: PRState, prs: [PRSnapshot])] {
+        let grouped = Dictionary(grouping: orderedPRs, by: { $0.classifiedState })
+        return PRState.allCases
+            .sorted { $0.sortIndex < $1.sortIndex }
+            .compactMap { state in
+                guard let prs = grouped[state], !prs.isEmpty else { return nil }
+                return (state, prs.sorted(by: PRSnapshot.triageOrder))
+            }
+    }
+
+    /// The single main list: the keyboard-navigable deck grouped into
+    /// collapsible per-state sections. Row focus indices map back into the flat
+    /// `orderedPRs` array so J/K navigation is unaffected by grouping.
     private var prList: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(orderedPRs.enumerated()), id: \.element.nodeId) { index, pr in
-                    deckRow(pr: pr, index: index)
-                    Divider().padding(.leading, 36)
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(sections, id: \.state) { section in
+                    sectionView(state: section.state, prs: section.prs)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func sectionView(state: PRState, prs sectionPRs: [PRSnapshot]) -> some View {
+        DisclosureGroup(isExpanded: expansionBinding(for: state)) {
+            ForEach(sectionPRs, id: \.nodeId) { pr in
+                deckRow(pr: pr, index: flatIndex(of: pr))
+                Divider().padding(.leading, 36)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(state.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text("\(sectionPRs.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+    }
+
+    /// Index of a PR within the flat `orderedPRs` array (keyboard index space).
+    private func flatIndex(of pr: PRSnapshot) -> Int {
+        orderedPRs.firstIndex(where: { $0.nodeId == pr.nodeId }) ?? 0
+    }
+
+    /// Collapse state persisted to MainlineSettings.
+    private func expansionBinding(for state: PRState) -> Binding<Bool> {
+        Binding(
+            get: { !settings.collapsedSections.contains(state) },
+            set: { expanded in
+                var collapsed = settings.collapsedSections
+                if expanded { collapsed.remove(state) } else { collapsed.insert(state) }
+                settings.collapsedSections = collapsed
+            }
+        )
     }
 
     private func deckRow(pr: PRSnapshot, index: Int) -> some View {
         let isFocused = index == selectedIndex
         let isSelected = selectedPRs.contains(pr.nodeId)
         return Button {
-            selectedIndex = index
+            handleRowClick(pr: pr, index: index)
         } label: {
             HStack(alignment: .top, spacing: 8) {
                 // Selection / focus indicator
@@ -146,6 +206,17 @@ struct TriageDeckView: View {
                     }
                 }
                 .frame(width: 20, height: 20, alignment: .center)
+
+                if manager.unreadPRIds.contains(pr.nodeId) {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 7, height: 7)
+                        .padding(.top, 6)
+                        .accessibilityLabel("Unread")
+                }
+
+                ciIcon(for: pr.ciStatus)
+                    .frame(width: 20, height: 20)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(pr.title)
@@ -167,6 +238,53 @@ struct TriageDeckView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// A mouse click focuses the row and — unless multi-select is active —
+    /// opens the PR in the browser, matching the other row lists. In
+    /// multi-select mode a click toggles membership instead of opening.
+    /// Keyboard J/K only moves focus (never opens); that path never calls this.
+    private func handleRowClick(pr: PRSnapshot, index: Int) {
+        selectedIndex = index
+        if multiSelectMode {
+            if selectedPRs.contains(pr.nodeId) {
+                selectedPRs.remove(pr.nodeId)
+            } else {
+                selectedPRs.insert(pr.nodeId)
+            }
+        } else {
+            if let url = URL(string: pr.htmlUrl) {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
+    // MARK: - CI icon (accessibilityLabel on every state)
+
+    @ViewBuilder
+    private func ciIcon(for ciStatus: CIStatus) -> some View {
+        switch ciStatus {
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityLabel("CI passed")
+        case .failure:
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.red)
+                .accessibilityLabel("CI failed")
+        case .error:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.red)
+                .accessibilityLabel("CI error")
+        case .pending:
+            Image(systemName: "clock.fill")
+                .foregroundStyle(.orange)
+                .accessibilityLabel("CI pending")
+        case .unknown:
+            Image(systemName: "circle.dashed")
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("CI status unknown")
+        }
     }
 
     // MARK: - Empty state

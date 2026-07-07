@@ -54,48 +54,52 @@ struct MenuBarView: View {
                     .keyboardShortcut(KeyEquivalent("]"), modifiers: [])
                     .frame(width: 0, height: 0)
                     .opacity(0)
+                Button("") { settings.showDrafts.toggle() }
+                    .keyboardShortcut(KeyEquivalent("d"), modifiers: [.command])
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
             }
         }
     }
 
     // MARK: - Derived data
 
-    /// PRs belonging to the currently selected tab, filtered by scope.
+    /// PRs belonging to the currently selected tab, filtered by scope and (when
+    /// `showDrafts` is off) excluding draft PRs. This is the single source of
+    /// truth for the visible list, the sections, the Needs-a-Human bucket, and
+    /// every count derived below.
     private var visiblePRs: [PRSnapshot] {
         let tabFiltered = manager.prs.filter { $0.tabs.contains(settings.selectedTab) }
+        let draftFiltered = settings.showDrafts
+            ? tabFiltered
+            : tabFiltered.filter { $0.classifiedState != .draft }
         let scopeFiltered: [PRSnapshot]
         if let scope = scopeStore.selectedScope {
-            scopeFiltered = tabFiltered.filter { pr in
+            scopeFiltered = draftFiltered.filter { pr in
                 switch scope {
                 case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
                 case .repo(let r): return pr.repoFullName == r
                 }
             }
         } else {
-            scopeFiltered = tabFiltered
+            scopeFiltered = draftFiltered
         }
         return scopeFiltered.sorted(by: PRSnapshot.triageOrder)
     }
 
+    /// Whether a PR should count toward the tab labels, honouring the draft toggle.
+    private func countsTowardTabs(_ pr: PRSnapshot) -> Bool {
+        settings.showDrafts || pr.classifiedState != .draft
+    }
+
     /// Count for the For-me tab label.
     private var forMeCount: Int {
-        manager.prs.filter { $0.tabs.contains(.forMe) }.count
+        manager.prs.filter { $0.tabs.contains(.forMe) && countsTowardTabs($0) }.count
     }
 
     /// Count for the Created tab label.
     private var createdCount: Int {
-        manager.prs.filter { $0.tabs.contains(.created) }.count
-    }
-
-    /// Sections in canonical order, each with its PRs, excluding empty ones.
-    private var sections: [(state: PRState, prs: [PRSnapshot])] {
-        let grouped = Dictionary(grouping: visiblePRs, by: { $0.classifiedState })
-        return PRState.allCases
-            .sorted { $0.sortIndex < $1.sortIndex }
-            .compactMap { state in
-                guard let prs = grouped[state], !prs.isEmpty else { return nil }
-                return (state, prs.sorted(by: PRSnapshot.triageOrder))
-            }
+        manager.prs.filter { $0.tabs.contains(.created) && countsTowardTabs($0) }.count
     }
 
     /// Dynamic panel content height — generous default, capped to screen.
@@ -160,20 +164,46 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var scopeFilter: some View {
-        if !scopeStore.availableScopes.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                if !scopeStore.availableScopes.isEmpty {
                     scopeChip(label: "All", scope: nil)
                     ForEach(scopeStore.availableScopes, id: \.rawValue) { scope in
                         let count = scopeStore.scopeCounts[scope] ?? 0
                         scopeChip(label: "\(scope.displayName) \(count)", scope: scope)
                     }
+                    Divider().frame(height: 16)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                draftsChip
             }
-            .frame(height: 36)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
         }
+        .frame(height: 36)
+    }
+
+    /// Compact toggle to include/exclude draft PRs. Mirrors ⌘D shortcut below.
+    private var draftsChip: some View {
+        Button {
+            settings.showDrafts.toggle()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: settings.showDrafts ? "eye" : "eye.slash")
+                    .font(.caption2)
+                Text("Drafts")
+                    .font(.caption)
+                    .fontWeight(settings.showDrafts ? .semibold : .regular)
+            }
+            .foregroundStyle(settings.showDrafts ? .primary : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                settings.showDrafts ? AnyShapeStyle(.blue.opacity(0.15)) : AnyShapeStyle(.quaternary),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+        .help(settings.showDrafts ? "Hide draft PRs (⌘D)" : "Show draft PRs (⌘D)")
     }
 
     private func scopeChip(label: String, scope: PRScope?) -> some View {
@@ -233,21 +263,22 @@ struct MenuBarView: View {
                         NeedsHumanView(
                             prs: visiblePRs,
                             myLogin: settings.githubUsername,
+                            includeConflicts: settings.includeConflictsInNeedsHuman,
                             trustLedger: trustLedger
                         )
                         Divider()
                     }
 
-                    // Layer B: keyboard triage deck
+                    // Layer B: the single main list — keyboard-navigable triage
+                    // deck grouped into collapsible per-state sections. This is
+                    // the ONLY place PRs render below the Needs-a-Human bucket;
+                    // the previously separate ungrouped deck + grouped section
+                    // list have been consolidated here to avoid duplicate rows.
                     TriageDeckView(
                         prs: visiblePRs,
                         manager: manager,
                         settings: settings
                     )
-
-                    ForEach(sections, id: \.state) { section in
-                        sectionView(state: section.state, prs: section.prs)
-                    }
                 }
             }
             // Give the scroll content a concrete height so the self-sizing
@@ -310,123 +341,6 @@ struct MenuBarView: View {
         switch settings.selectedTab {
         case .forMe:   return "Nothing to review"
         case .created: return "No PRs created"
-        }
-    }
-
-    // MARK: - Section (collapsible, persisted — AC-22)
-
-    @ViewBuilder
-    private func sectionView(state: PRState, prs: [PRSnapshot]) -> some View {
-        DisclosureGroup(
-            isExpanded: expansionBinding(for: state)
-        ) {
-            ForEach(prs, id: \.nodeId) { pr in
-                prRow(pr)
-                Divider().padding(.leading, 36)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Text(state.title)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                Text("\(prs.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(.quaternary, in: Capsule())
-                Spacer()
-            }
-            .contentShape(Rectangle())
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
-    }
-
-    /// Collapse state persisted to MainlineSettings (AC-22).
-    private func expansionBinding(for state: PRState) -> Binding<Bool> {
-        Binding(
-            get: { !settings.collapsedSections.contains(state) },
-            set: { expanded in
-                var collapsed = settings.collapsedSections
-                if expanded {
-                    collapsed.remove(state)
-                } else {
-                    collapsed.insert(state)
-                }
-                settings.collapsedSections = collapsed
-            }
-        )
-    }
-
-    // MARK: - PR row
-
-    private func prRow(_ pr: PRSnapshot) -> some View {
-        Button {
-            if let url = URL(string: pr.htmlUrl) {
-                NSWorkspace.shared.open(url)
-            }
-        } label: {
-            HStack(alignment: .top, spacing: 8) {
-                if manager.unreadPRIds.contains(pr.nodeId) {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 7, height: 7)
-                        .padding(.top, 6)
-                        .accessibilityLabel("Unread")
-                }
-                ciIcon(for: pr.ciStatus)
-                    .frame(width: 20, height: 20)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(pr.title)
-                        .font(.callout)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    HStack(spacing: 4) {
-                        Text("\(pr.repoFullName) #\(pr.number)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        // Layer D: trust badge
-                        TrustBadgeView(tier: trustLedger.tier(for: pr.author))
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - CI icon (AC-17: accessibilityLabel on every state)
-
-    @ViewBuilder
-    private func ciIcon(for ciStatus: CIStatus) -> some View {
-        switch ciStatus {
-        case .success:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .accessibilityLabel("CI passed")
-        case .failure:
-            Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(.red)
-                .accessibilityLabel("CI failed")
-        case .error:
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.red)
-                .accessibilityLabel("CI error")
-        case .pending:
-            Image(systemName: "clock.fill")
-                .foregroundStyle(.orange)
-                .accessibilityLabel("CI pending")
-        case .unknown:
-            Image(systemName: "circle.dashed")
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("CI status unknown")
         }
     }
 
