@@ -129,6 +129,13 @@ struct PRSnapshot: Codable, Equatable {
     /// nil = not yet fetched; [] = fetched but none sensitive.
     var sensitivePathFlags: [String]?
 
+    /// Number of unresolved review threads (open conversations) on this PR,
+    /// sampled from GraphQL `reviewThreads(first: 20)`. > 0 means someone left a
+    /// comment/conversation that hasn't been resolved yet — a signal the PR still
+    /// needs the author. Distinct from `commentCount` (which counts issue-level
+    /// comments and never resolves).
+    var unresolvedThreadCount: Int
+
     /// Total lines changed in this PR.
     var totalLines: Int { linesAdded + linesDeleted }
 
@@ -155,7 +162,8 @@ struct PRSnapshot: Codable, Equatable {
         headRefName: String = "",
         linesAdded: Int = 0,
         linesDeleted: Int = 0,
-        sensitivePathFlags: [String]? = nil
+        sensitivePathFlags: [String]? = nil,
+        unresolvedThreadCount: Int = 0
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -180,6 +188,7 @@ struct PRSnapshot: Codable, Equatable {
         self.linesAdded = linesAdded
         self.linesDeleted = linesDeleted
         self.sensitivePathFlags = sensitivePathFlags
+        self.unresolvedThreadCount = unresolvedThreadCount
     }
 
     // MARK: - Canonical ordering

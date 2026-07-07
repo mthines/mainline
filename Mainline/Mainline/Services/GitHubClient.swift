@@ -77,6 +77,15 @@ private struct GraphQLNode: Decodable {
     let additions: Int?
     let deletions: Int?
     let reviewRequests: GraphQLReviewRequests?
+    let reviewThreads: GraphQLReviewThreads?
+}
+
+private struct GraphQLReviewThreads: Decodable {
+    let nodes: [GraphQLReviewThreadNode]
+}
+
+private struct GraphQLReviewThreadNode: Decodable {
+    let isResolved: Bool?
 }
 
 private struct GraphQLReviewRequests: Decodable {
@@ -274,6 +283,12 @@ final class GitHubClient {
             return reviewer?.slug ?? reviewer?.name
         } ?? []
 
+        // Count unresolved review threads (open conversations). Sampled at first:20;
+        // a PR with >20 threads still surfaces as needing attention on any unresolved.
+        let unresolvedThreadCount: Int = node.reviewThreads?.nodes.filter {
+            $0.isResolved == false
+        }.count ?? 0
+
         return PRSnapshot(
             nodeId:             nodeId,
             number:             number,
@@ -296,7 +311,8 @@ final class GitHubClient {
             mergeable:          mergeableBool,
             headRefName:        node.headRefName ?? "",
             linesAdded:         node.additions ?? 0,
-            linesDeleted:       node.deletions ?? 0
+            linesDeleted:       node.deletions ?? 0,
+            unresolvedThreadCount: unresolvedThreadCount
         )
     }
 
@@ -344,6 +360,9 @@ final class GitHubClient {
                   ... on Team { slug name }
                 }
               }
+            }
+            reviewThreads(first: 20) {
+              nodes { isResolved }
             }
             commits(last: 1) {
               nodes {
