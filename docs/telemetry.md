@@ -31,7 +31,7 @@ MainlineSettings.telemetryEnabled (UserDefaults)
 **Single entry point:** `TelemetryService.shared` is a private-init singleton.
 `configure()` is called from:
 - `MainlineSettings.telemetryEnabled.didSet` (on enable)
-- `NotificationService.applicationDidFinishLaunching` (at launch, if already enabled)
+- `AppDelegate.applicationDidFinishLaunching` in `MainlineApp.swift` (at launch, if already enabled)
 
 `shutdown()` is called from `AppDelegate.applicationWillTerminate`.
 
