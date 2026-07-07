@@ -1,15 +1,67 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Settings categories
+
+/// The sidebar categories for the settings window. Raw value drives the
+/// SF Symbol; `title` is the human-readable label shown in the sidebar and as
+/// the detail-pane heading.
+private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case github
+    case notifications
+    case menuBar
+    case appearance
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .github:        return "GitHub"
+        case .notifications: return "Notifications"
+        case .menuBar:       return "Menu Bar"
+        case .appearance:    return "Appearance"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .github:        return "key.fill"
+        case .notifications: return "bell.fill"
+        case .menuBar:       return "menubar.rectangle"
+        case .appearance:    return "slider.horizontal.3"
+        }
+    }
+}
+
+// MARK: - SettingsView
+
 struct SettingsView: View {
     @ObservedObject var manager: PRManager
     @ObservedObject private var settings: MainlineSettings
+
+    @State private var selection: SettingsCategory? = .github
 
     @State private var patDraft: String = ""
     @State private var patSaved: Bool = false
     @State private var importError: String? = nil
     @State private var isImporting: Bool = false
     @State private var hasStoredToken: Bool = false
+    @State private var panelHeightDraft: Int = 560
+
+    // Panel-height bounds. The setting may store a large number; the render path
+    // in MenuBarView clamps it to the usable screen height, so a big value just
+    // makes the panel as tall as the display allows.
+    static let panelHeightMin = 300
+    static let panelHeightMax = 2000
+
+    static let panelHeightFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .none
+        f.allowsFloats = false
+        f.minimum = NSNumber(value: panelHeightMin)
+        f.maximum = NSNumber(value: panelHeightMax)
+        return f
+    }()
 
     init(manager: PRManager) {
         self.manager  = manager
@@ -17,87 +69,271 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            // MARK: - GitHub Token
-            Section("GitHub Token") {
-                SecureField(
-                    hasStoredToken ? "A token is stored — paste a new one to replace" : "Personal Access Token",
-                    text: $patDraft
-                )
-                .textFieldStyle(.roundedBorder)
-
-                if hasStoredToken && !patSaved {
-                    Label("A token is stored", systemImage: "key.fill")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
-
-                HStack {
-                    Button("Save Token") {
-                        saveToken()
-                    }
-                    .disabled(patDraft.isEmpty)
-
-                    Button("Import from gh") {
-                        importFromGH()
-                    }
-                    .disabled(isImporting)
-
-                    if isImporting {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-
-                if patSaved {
-                    Label("Token saved", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.caption)
-                }
-
-                if let importError {
-                    Label(importError, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        NavigationSplitView {
+            List(SettingsCategory.allCases, selection: $selection) { category in
+                Label(category.title, systemImage: category.systemImage)
+                    .tag(category)
             }
-
-            // MARK: - Poll Interval
-            Section("Polling") {
-                Stepper(
-                    "Poll interval: \(settings.pollIntervalSeconds)s",
-                    value: $settings.pollIntervalSeconds,
-                    in: 30...3600,
-                    step: 30
-                )
-            }
-
-            // MARK: - Search Queries
-            Section("Search Queries") {
-                TextField("Author query", text: $settings.searchQueryAuthor)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Reviewer query", text: $settings.searchQueryReviewer)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            // MARK: - Notification Toggles
-            Section("Notifications") {
-                Toggle("New PR", isOn: $settings.notifyNewPR)
-                Toggle("Ready for Review", isOn: $settings.notifyReadyForReview)
-                Toggle("CI Status Changed", isOn: $settings.notifyCIChange)
-                Toggle("New Review / Comment", isOn: $settings.notifyReviewComment)
-            }
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+        } detail: {
+            detailPane(for: selection ?? .github)
+                .navigationSplitViewColumnWidth(min: 440, ideal: 520)
         }
-        .formStyle(.grouped)
-        .padding()
-        .frame(width: 420, height: 480)
+        .frame(minWidth: 640, minHeight: 480)
         .onAppear {
             loadToken()
+            panelHeightDraft = settings.panelHeight
+        }
+    }
+
+    // MARK: - Detail pane routing
+
+    @ViewBuilder
+    private func detailPane(for category: SettingsCategory) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(category.title)
+                .font(.title2.weight(.semibold))
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 4)
+
+            Form {
+                switch category {
+                case .github:        githubSection
+                case .notifications: notificationsSection
+                case .menuBar:       menuBarSection
+                case .appearance:    appearanceSection
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: - GitHub
+
+    @ViewBuilder
+    private var githubSection: some View {
+        Section("GitHub Token") {
+            SecureField(
+                hasStoredToken ? "A token is stored — paste a new one to replace" : "Personal Access Token",
+                text: $patDraft
+            )
+            .textFieldStyle(.roundedBorder)
+
+            if hasStoredToken && !patSaved {
+                Label("A token is stored", systemImage: "key.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+
+            HStack {
+                Button("Save Token") {
+                    saveToken()
+                }
+                .disabled(patDraft.isEmpty)
+
+                Button("Import from gh") {
+                    importFromGH()
+                }
+                .disabled(isImporting)
+
+                if isImporting {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if patSaved {
+                Label("Token saved", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            }
+
+            if let importError {
+                Label(importError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        Section("Search Queries") {
+            TextField("Author query", text: $settings.searchQueryAuthor)
+                .textFieldStyle(.roundedBorder)
+            TextField("Reviewer query", text: $settings.searchQueryReviewer)
+                .textFieldStyle(.roundedBorder)
+        }
+
+        Section("Polling") {
+            Stepper(
+                "Poll interval: \(settings.pollIntervalSeconds)s",
+                value: $settings.pollIntervalSeconds,
+                in: 30...3600,
+                step: 30
+            )
+        }
+
+        Section("Write Actions") {
+            Toggle("Enable write actions (Approve, Merge, Request Changes)", isOn: $settings.writeActionsEnabled)
+            if settings.writeActionsEnabled {
+                Toggle("Enable autopilot auto-approve (advanced)", isOn: $settings.autopilotEnabled)
+                if settings.autopilotEnabled {
+                    Label("Auto-approve fires when author is autopilot tier, CI green, and < 50 LOC changed.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Notifications
+
+    @ViewBuilder
+    private var notificationsSection: some View {
+        Section("Attention Policy") {
+            Text("Control how interrupting each event is.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(PREvent.allCases, id: \.rawValue) { event in
+                HStack {
+                    Text(event.displayName)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { settings.level(for: event) },
+                        set: { newLevel in
+                            var policy = settings.attentionPolicy
+                            policy[event.rawValue] = newLevel.rawValue
+                            settings.attentionPolicy = policy
+                        }
+                    )) {
+                        Text("Notify").tag(AttentionLevel.notify)
+                        Text("Quiet").tag(AttentionLevel.quiet)
+                        Text("Off").tag(AttentionLevel.off)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 200)
+                }
+            }
+        }
+
+        Section("Comments") {
+            Toggle("Only notify for comments from people (ignore bots)",
+                   isOn: $settings.notifyOnlyHumanComments)
+            Label("Skips the \"New review or comment\" banner when the latest comment or review is from a bot or app (CodeRabbit, Vercel, dependabot, Claude review bots, …). Unread and badge counts are unaffected.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Menu Bar
+
+    @ViewBuilder
+    private var menuBarSection: some View {
+        Section("Badge") {
+            Picker("Badge counts", selection: $settings.menuBarMetric) {
+                ForEach(MenuBarMetric.allCases) { metric in
+                    Text(metric.displayName).tag(metric)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Toggle("Follow current view (tab, scope & drafts)", isOn: $settings.menuBarScopeFollowsSelection)
+
+            Label("The badge counts the chosen metric" +
+                  (settings.menuBarScopeFollowsSelection ? " over exactly what the panel shows — the selected tab, scope, and drafts filter." : " across all repositories, ignoring the selected tab, scope, and drafts."),
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Section("Global Shortcut") {
+            Toggle("Open Mainline with a global shortcut", isOn: $settings.globalShortcutEnabled)
+
+            HStack {
+                Text("Shortcut")
+                Spacer()
+                ShortcutRecorder(settings: settings)
+                    .disabled(!settings.globalShortcutEnabled)
+                Button("Reset to default (\(MainlineSettings.defaultGlobalShortcutDisplayString))") {
+                    settings.resetGlobalShortcutToDefault()
+                }
+                .disabled(!settings.globalShortcutEnabled)
+            }
+
+            Label("Press this key combination from any app to open the Mainline popover. Requires at least one modifier key.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Appearance
+
+    @ViewBuilder
+    private var appearanceSection: some View {
+        Section("Panel") {
+            HStack {
+                Text("Max panel height (pt)")
+                Spacer()
+                TextField("", value: $panelHeightDraft, formatter: Self.panelHeightFormatter)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 70)
+                    .onSubmit { commitPanelHeight() }
+                Stepper("", value: $panelHeightDraft, in: Self.panelHeightMin...Self.panelHeightMax, step: 20)
+                    .labelsHidden()
+                    .onChange(of: panelHeightDraft) { _ in commitPanelHeight() }
+            }
+            Label("The MAXIMUM height — the panel sizes to its content and only grows up to this (scrolling beyond it). Capped to the display height, so very large values just let it fill the screen.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Compact rows", isOn: $settings.compactRows)
+            Label("Single-line titles, tighter spacing — fit more PRs.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Section("Drafts") {
+            Toggle("Show draft PRs", isOn: $settings.showDrafts)
+            Label("When off, drafts are hidden from the list, sections, counts, and the Needs-a-Human bucket. Toggle in the panel with the Drafts chip or ⌘D.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Group drafts in their own section", isOn: $settings.splitDrafts)
+            Label("When off, shown drafts are mixed into their real state group (Open, Approved, …) and marked with a Draft badge.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     // MARK: - Actions
+
+    /// Clamp the typed/stepped draft to the allowed range and persist it. Keeps
+    /// the setting from going below ~300 or above the max; MenuBarView further
+    /// bounds it to the usable screen height at render time.
+    private func commitPanelHeight() {
+        let clamped = min(max(panelHeightDraft, Self.panelHeightMin), Self.panelHeightMax)
+        if clamped != panelHeightDraft {
+            panelHeightDraft = clamped
+        }
+        if settings.panelHeight != clamped {
+            settings.panelHeight = clamped
+        }
+    }
 
     private func loadToken() {
         Task {
@@ -229,5 +465,70 @@ struct SettingsView: View {
                 return "gh auth token failed: \(msg)"
             }
         }
+    }
+}
+
+// MARK: - ShortcutRecorder
+
+/// A button that displays the current global shortcut and, when clicked, enters
+/// "recording" mode to capture the next key-down (macOS 13-safe via a local
+/// `NSEvent` monitor). Requires at least one modifier; Escape cancels.
+private struct ShortcutRecorder: View {
+    @ObservedObject var settings: MainlineSettings
+    @State private var isRecording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        Button(action: toggleRecording) {
+            Text(isRecording ? "Press keys…" : settings.globalShortcutDisplayString)
+                .font(.system(.body, design: .monospaced))
+                .frame(minWidth: 90)
+        }
+        .buttonStyle(.bordered)
+        .tint(isRecording ? .accentColor : nil)
+        .help(isRecording ? "Press a key combination, or Escape to cancel" : "Click to record a new shortcut")
+        .onDisappear(perform: stopRecording)
+    }
+
+    private func toggleRecording() {
+        if isRecording {
+            stopRecording()
+        } else {
+            startRecording()
+        }
+    }
+
+    private func startRecording() {
+        isRecording = true
+        // Capture the NEXT key-down locally. Returning nil swallows the event so
+        // it doesn't reach other controls while recording.
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            handleKeyDown(event)
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        isRecording = false
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    private func handleKeyDown(_ event: NSEvent) {
+        // Escape cancels recording without changing the shortcut.
+        if event.keyCode == 0x35 { // Escape
+            stopRecording()
+            return
+        }
+
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Require at least one modifier so the combo is a safe global hotkey.
+        guard !mods.isEmpty else { return }
+
+        settings.globalShortcutKeyCode   = Int(event.keyCode)
+        settings.globalShortcutModifiers = mods.rawValue
+        stopRecording()
     }
 }

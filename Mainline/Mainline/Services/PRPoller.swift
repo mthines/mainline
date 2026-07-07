@@ -14,6 +14,13 @@ final class PRPoller {
     /// Human-readable status for the menu bar.
     @Published private(set) var statusMessage: String = "Not started"
 
+    /// Sink for the DISPLAY-ONLY "Done" set (recently merged/closed PRs), fetched
+    /// alongside the open sets each poll but stored SEPARATELY by the caller
+    /// (`PRManager.donePRs`). These NEVER pass through `PRStateStore` /
+    /// `PRDiffEngine` / notifications, so a merged PR can't fire a "new PR" banner.
+    /// Set by `PRManager`; nil = no Done fetch performed.
+    var onDonePRs: (([PRSnapshot]) -> Void)?
+
     init(
         client:        GitHubClient,
         store:         PRStateStore,
@@ -32,6 +39,9 @@ final class PRPoller {
         stop()
         pollingTask = Task { [weak self] in
             guard let self else { return }
+            // First poll runs IMMEDIATELY — the sleep is at the END of the loop,
+            // never before the first fetch — so launching the app begins fetching
+            // right away and populates without the user pressing Refresh.
             while !Task.isCancelled {
                 await self.poll(token: token)
                 let interval = Double(self.settings.pollIntervalSeconds)
@@ -45,9 +55,22 @@ final class PRPoller {
         pollingTask = nil
     }
 
+    // MARK: - Public one-shot poll (used by Refresh button)
+
+    /// Runs a single poll without interfering with the scheduled loop.
+    func pollOnce(token: String) async {
+        await poll(token: token)
+    }
+
     // MARK: - Single poll
 
     private func poll(token: String) async {
+        // Prune expired snoozes on every poll so postponed PRs silently return to
+        // their normal group the moment their wake time passes — even while the
+        // panel is closed. Render-time filtering already compares to `Date()`; this
+        // keeps the persisted map from growing unbounded. Cheap, main-actor, local.
+        SnoozeStore(settings: settings).clearExpired()
+
         // Always poll both tabs so notifications fire regardless of which tab
         // is currently visible. Each query is tagged with the tab that sourced it.
         let queries: [(tab: ReviewTab, query: String)] = [
@@ -64,6 +87,18 @@ final class PRPoller {
             } catch GitHubAPIError.notModified {
                 // 304 — keep existing state, no notification
                 continue
+            } catch GitHubAPIError.cancelled {
+                // Popover closed mid-request; SwiftUI cancelled the `.task`.
+                // Benign — keep prior state/counts and do not surface an error.
+                return
+            } catch is CancellationError {
+                // Task cancellation — benign, keep prior state.
+                return
+            } catch GitHubAPIError.serverError {
+                // Transient GitHub 5xx (500/502/503/504). Treat like cancellation:
+                // keep the last successful data/counts and do NOT surface an error
+                // banner. The next scheduled poll retries automatically.
+                return
             } catch GitHubAPIError.rateLimited(let seconds) {
                 await MainActor.run { self.statusMessage = "Rate limited — wait \(seconds)s" }
                 try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
@@ -73,6 +108,10 @@ final class PRPoller {
                 stop()
                 return
             } catch {
+                // Defense in depth: never surface cancellation as a visible error.
+                if (error as? URLError)?.code == .cancelled || error is CancellationError {
+                    return
+                }
                 await MainActor.run { self.statusMessage = "Error: \(error.localizedDescription)" }
                 return
             }
@@ -94,9 +133,81 @@ final class PRPoller {
         let unique = order.compactMap { merged[$0] }
 
         let myLogin = settings.githubUsername
-        let transitions = store.update(new: unique, myLogin: myLogin)
-        notifications.fireTransitions(transitions, settings: settings)
+        let transitions = store.update(
+            new: unique,
+            myLogin: myLogin,
+            notifyOnlyHumanComments: settings.notifyOnlyHumanComments
+        )
+        notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
+
+        // ALL transitions (notify + quiet) mark the PR as unread
+        let allTransitionNodeIds: [String] = transitions.compactMap { transition in
+            switch transition {
+            case .newPR(let pr), .readyForReview(let pr),
+                 .ciStatusChanged(let pr, _, _), .newReviewOrComment(let pr):
+                return pr.nodeId
+            }
+        }
+        let unreadCandidates = Array(Set(allTransitionNodeIds))
+        if !unreadCandidates.isEmpty {
+            NotificationCenter.default.post(
+                name: .mainlineQuietTransitions,
+                object: nil,
+                userInfo: ["nodeIds": unreadCandidates]
+            )
+        }
 
         statusMessage = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
+
+        // DISPLAY-ONLY Done fetch — recently merged/closed PRs for both tabs.
+        // Runs AFTER the open path so it never blocks notifications, and its errors
+        // are all swallowed benignly (the Done section is non-critical). Results
+        // are pushed to the caller's separate `donePRs` collection and NEVER go
+        // through the diff engine / notifications.
+        await fetchDonePRs(token: token)
     }
+
+    /// Fetches the recently-completed (merged/closed) PRs for both tabs, dedupes by
+    /// nodeId (unioning tab membership), and hands the result to `onDonePRs`. All
+    /// errors — 304, cancellation, transient 5xx, auth, decoding — are handled the
+    /// same benign way as the open fetch: they never surface a banner and never
+    /// clear a previously-loaded Done set (on error we simply skip the update).
+    private func fetchDonePRs(token: String) async {
+        guard let onDonePRs else { return }
+
+        let tabs: [ReviewTab] = [.created, .forMe]
+        var collected: [PRSnapshot] = []
+
+        for tab in tabs {
+            do {
+                let (snapshots, _) = try await client.searchDonePRs(tab: tab, token: token)
+                collected.append(contentsOf: snapshots)
+            } catch {
+                // 304 (notModified), cancellation, transient 5xx, auth, decoding —
+                // all non-critical for the display-only Done section. Skip this tab
+                // and keep whatever we already have; the next poll retries.
+                continue
+            }
+        }
+
+        // De-duplicate by nodeId (a PR can appear in both tabs), unioning tabs.
+        var merged: [String: PRSnapshot] = [:]
+        var order: [String] = []
+        for snapshot in collected {
+            if var existing = merged[snapshot.nodeId] {
+                existing.tabs.formUnion(snapshot.tabs)
+                merged[snapshot.nodeId] = existing
+            } else {
+                merged[snapshot.nodeId] = snapshot
+                order.append(snapshot.nodeId)
+            }
+        }
+        let unique = order.compactMap { merged[$0] }
+
+        onDonePRs(unique)
+    }
+}
+
+extension Notification.Name {
+    static let mainlineQuietTransitions = Notification.Name("MainlineQuietTransitions")
 }

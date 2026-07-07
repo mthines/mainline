@@ -35,46 +35,67 @@ final class NotificationService {
 
     // MARK: - Fire transitions
 
-    /// Fires one notification per transition, respecting the notification toggles.
-    func fireTransitions(_ transitions: [PRTransition], settings: MainlineSettings) {
+    /// Fires notifications per the per-event attention policy.
+    /// Returns the nodeIds of events processed at `.quiet` level —
+    /// these should be added to unread without a banner.
+    @discardableResult
+    func fireTransitions(_ transitions: [PRTransition], settings: MainlineSettings, myLogin: String = "") -> [String] {
+        var quietNodeIds: [String] = []
+
         for transition in transitions {
-            switch transition {
-            case .newPR(let pr):
-                guard settings.notifyNewPR else { continue }
-                fire(
-                    id:    "mainline.new_pr.\(pr.nodeId)",
-                    title: "New PR",
-                    body:  "\(pr.repoFullName): \(pr.title)",
-                    url:   pr.htmlUrl
-                )
+            guard let (event, pr, notifArgs) = resolveTransition(transition, myLogin: myLogin)
+            else { continue }
 
-            case .readyForReview(let pr):
-                guard settings.notifyReadyForReview else { continue }
-                fire(
-                    id:    "mainline.ready.\(pr.nodeId)",
-                    title: "Ready for Review",
-                    body:  "\(pr.repoFullName): \(pr.title)",
-                    url:   pr.htmlUrl
-                )
-
-            case .ciStatusChanged(let pr, _, let to):
-                guard settings.notifyCIChange else { continue }
-                fire(
-                    id:    "mainline.ci.\(pr.nodeId)",
-                    title: "CI Status Changed",
-                    body:  "\(pr.repoFullName): \(pr.title) — \(to.rawValue)",
-                    url:   pr.htmlUrl
-                )
-
-            case .newReviewOrComment(let pr):
-                guard settings.notifyReviewComment else { continue }
-                fire(
-                    id:    "mainline.comment.\(pr.nodeId)",
-                    title: "New Review/Comment",
-                    body:  "\(pr.repoFullName): \(pr.title)",
-                    url:   pr.htmlUrl
-                )
+            let level = settings.level(for: event)
+            switch level {
+            case .off:    continue
+            case .quiet:  quietNodeIds.append(pr.nodeId)
+            case .notify: fire(id: notifArgs.id, title: notifArgs.title, body: notifArgs.body, url: notifArgs.url)
             }
+        }
+
+        return quietNodeIds
+    }
+
+    /// Resolve a transition into an event + notification args tuple.
+    /// Returns nil when no event should fire (e.g., someone else's CI change).
+    private func resolveTransition(
+        _ transition: PRTransition,
+        myLogin: String
+    ) -> (PREvent, PRSnapshot, (id: String, title: String, body: String, url: String))? {
+        switch transition {
+        case .newPR(let pr):
+            let event: PREvent
+            let title: String
+            if !myLogin.isEmpty && pr.author == myLogin {
+                event = .newPRByMe
+                title = "New PR"
+            } else if pr.reviewRequestSource(myLogin: myLogin) == .team {
+                // Team pulled this into the For-me set — quiet by default.
+                event = .reviewRequestedTeam
+                title = "Team review requested"
+            } else {
+                event = .reviewRequested
+                title = "New PR"
+            }
+            let args = (id: "mainline.new_pr.\(pr.nodeId)", title: title,
+                        body: "\(pr.repoFullName): \(pr.title)", url: pr.htmlUrl)
+            return (event, pr, args)
+        case .readyForReview(let pr):
+            let event: PREvent = (pr.isDraft == false) ? .readyForReview : .draftCreated
+            let args = (id: "mainline.ready.\(pr.nodeId)", title: "Ready for Review",
+                        body: "\(pr.repoFullName): \(pr.title)", url: pr.htmlUrl)
+            return (event, pr, args)
+        case .ciStatusChanged(let pr, _, let to):
+            guard !myLogin.isEmpty, pr.author == myLogin else { return nil }
+            let event: PREvent = (to == .success) ? .ciPassedOnMyPR : .ciFailedOnMyPR
+            let args = (id: "mainline.ci.\(pr.nodeId)", title: "CI Status Changed",
+                        body: "\(pr.repoFullName): \(pr.title) — \(to.rawValue)", url: pr.htmlUrl)
+            return (event, pr, args)
+        case .newReviewOrComment(let pr):
+            let args = (id: "mainline.comment.\(pr.nodeId)", title: "New Review/Comment",
+                        body: "\(pr.repoFullName): \(pr.title)", url: pr.htmlUrl)
+            return (.newReviewOrComment, pr, args)
         }
     }
 

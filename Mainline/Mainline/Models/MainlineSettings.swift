@@ -1,5 +1,49 @@
 import Foundation
 import Combine
+import AppKit
+
+// MARK: - MenuBarMetric
+
+/// What the menu-bar badge counts. User-configurable in Settings.
+enum MenuBarMetric: String, CaseIterable, Identifiable {
+    case needsAHuman        // PRs in the "Needs a Human" bucket (default)
+    case failingCI          // open PRs with failing/errored CI
+    case reviewRequests     // PRs where the user is a requested reviewer
+    case unread             // PRs the user hasn't looked at yet
+    case totalOpen          // all open (non-merged, non-closed) PRs
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .needsAHuman:    return "Needs attention"
+        case .failingCI:      return "Failing CI"
+        case .reviewRequests: return "Review Requests"
+        case .unread:         return "Unread"
+        case .totalOpen:      return "Total Open"
+        }
+    }
+}
+
+// MARK: - ForMeReviewFilter
+
+/// Sub-filter for the "For me" tab: narrow the visible PRs by how the review
+/// was requested. Default `.all` shows both direct and team requests.
+enum ForMeReviewFilter: String, CaseIterable, Identifiable {
+    case all
+    case direct
+    case team
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all:    return "All"
+        case .direct: return "Direct"
+        case .team:   return "Team"
+        }
+    }
+}
 
 /// All non-secret app settings backed by UserDefaults.
 final class MainlineSettings: ObservableObject {
@@ -17,9 +61,39 @@ final class MainlineSettings: ObservableObject {
         static let notifyReadyForReview = "notifyReadyForReview"
         static let notifyCIChange       = "notifyCIChange"
         static let notifyReviewComment  = "notifyReviewComment"
+        static let notifyOnlyHumanComments = "notifyOnlyHumanComments"
         static let githubUsername       = "githubUsername"
         static let selectedTab          = "selectedTab"
+        // Triage Cockpit additions
+        static let writeActionsEnabled  = "writeActionsEnabled"
+        static let autopilotEnabled     = "autopilotEnabled"
+        static let collapsedSectionsRaw = "collapsedSectionsRaw"
+        static let snoozeMapData        = "snoozeMapData"
+        static let attentionPolicy      = "attentionPolicy"
+        static let unreadPRIds          = "unreadPRIds"
+        static let panelHeight          = "panelHeight"
+        static let menuBarMetric        = "menuBarMetric"
+        static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
+        static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
+        static let showDrafts           = "showDrafts"
+        static let splitDrafts          = "splitDrafts"
+        static let forMeReviewFilter    = "forMeReviewFilter"
+        static let compactRows          = "compactRows"
+        static let needsHumanExpanded   = "needsHumanExpanded"
+        // Global shortcut
+        static let globalShortcutEnabled   = "globalShortcutEnabled"
+        static let globalShortcutKeyCode   = "globalShortcutKeyCode"
+        static let globalShortcutModifiers = "globalShortcutModifiers"
     }
+
+    // MARK: - Global shortcut defaults
+
+    /// Virtual key code for "P" (`kVK_ANSI_P`).
+    static let defaultShortcutKeyCode = 0x23
+    /// Default modifier mask: ⇧⌃⌥ (shift + control + option).
+    static let defaultShortcutModifiers: UInt = {
+        NSEvent.ModifierFlags([.shift, .control, .option]).rawValue
+    }()
 
     // MARK: - Persisted properties
 
@@ -51,6 +125,14 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(notifyReviewComment, forKey: Keys.notifyReviewComment) }
     }
 
+    /// When true, the "new review or comment" notification fires only for
+    /// human-authored comments/reviews — bot/app activity (CodeRabbit, Vercel,
+    /// dependabot, Claude review bots, etc.) is ignored. Default true.
+    /// Affects notifications only; unread/badge state is unaffected.
+    @Published var notifyOnlyHumanComments: Bool {
+        didSet { defaults.set(notifyOnlyHumanComments, forKey: Keys.notifyOnlyHumanComments) }
+    }
+
     @Published var githubUsername: String {
         didSet { defaults.set(githubUsername, forKey: Keys.githubUsername) }
     }
@@ -58,6 +140,225 @@ final class MainlineSettings: ObservableObject {
     /// Last-selected Reviews tab ("For me" / "Created").
     @Published var selectedTab: ReviewTab {
         didSet { defaults.set(selectedTab.rawValue, forKey: Keys.selectedTab) }
+    }
+
+    // MARK: - Triage Cockpit settings
+
+    /// Whether write actions (Approve, Merge, Request Changes) are enabled. Default OFF.
+    @Published var writeActionsEnabled: Bool {
+        didSet { defaults.set(writeActionsEnabled, forKey: Keys.writeActionsEnabled) }
+    }
+
+    /// Whether autopilot auto-approve is active. Requires writeActionsEnabled. Default OFF.
+    @Published var autopilotEnabled: Bool {
+        didSet { defaults.set(autopilotEnabled, forKey: Keys.autopilotEnabled) }
+    }
+
+    /// Section raw values that are collapsed. Stored as [String] in UserDefaults.
+    @Published var collapsedSectionsRaw: [String] {
+        didSet { defaults.set(collapsedSectionsRaw, forKey: Keys.collapsedSectionsRaw) }
+    }
+
+    /// Typed accessor for collapsed sections, keyed by the actionability
+    /// `ActionGroup`. Old stored values keyed by the legacy `PRState` raw strings
+    /// (e.g. "open", "inReview", "approved") simply don't decode to any
+    /// `ActionGroup` case and are silently dropped — the affected sections start
+    /// expanded, which is the intended migration fallback (no crash on old data).
+    var collapsedSections: Set<ActionGroup> {
+        get { Set(collapsedSectionsRaw.compactMap { ActionGroup(rawValue: $0) }) }
+        set { collapsedSectionsRaw = newValue.map { $0.rawValue } }
+    }
+
+    /// Per-event attention policy: [PREvent.rawValue: AttentionLevel.rawValue].
+    /// Defaults to `PREvent.defaults` when a key is absent.
+    @Published var attentionPolicy: [String: String] {
+        didSet { defaults.set(attentionPolicy, forKey: Keys.attentionPolicy) }
+    }
+
+    /// PRs the user hasn't looked at yet (persisted nodeIds).
+    @Published var unreadPRIdsList: [String] {
+        didSet { defaults.set(unreadPRIdsList, forKey: Keys.unreadPRIds) }
+    }
+
+    /// Preferred panel content height. Options: 400/480/560/640. Default 560.
+    @Published var panelHeight: Int {
+        didSet { defaults.set(panelHeight, forKey: Keys.panelHeight) }
+    }
+
+    /// What the menu-bar badge counts. Default `needsAHuman`.
+    @Published var menuBarMetric: MenuBarMetric {
+        didSet { defaults.set(menuBarMetric.rawValue, forKey: Keys.menuBarMetric) }
+    }
+
+    /// Whether the menu-bar badge follows the currently selected scope. Default true.
+    @Published var menuBarScopeFollowsSelection: Bool {
+        didSet { defaults.set(menuBarScopeFollowsSelection, forKey: Keys.menuBarScopeFollows) }
+    }
+
+    /// Whether merge conflicts route a PR into the "Needs a Human" bucket.
+    /// Default OFF — the focus is CI health; conflicts are shown as an
+    /// informational tag but do not dominate the bucket.
+    @Published var includeConflictsInNeedsHuman: Bool {
+        didSet { defaults.set(includeConflictsInNeedsHuman, forKey: Keys.includeConflictsInNeedsHuman) }
+    }
+
+    /// Whether draft PRs are included in the visible list, sections, counts,
+    /// and the "Needs a Human" bucket. Default OFF for a calmer view.
+    @Published var showDrafts: Bool {
+        didSet { defaults.set(showDrafts, forKey: Keys.showDrafts) }
+    }
+
+    /// Whether shown draft PRs get their own "Draft" section. Default OFF — drafts
+    /// are mixed into their real state group (Open/Approved/etc.) and stay visually
+    /// distinct via the Draft badge + dimmed row. Independent of `showDrafts`
+    /// (show/hide); this only controls grouping of drafts that are already shown.
+    @Published var splitDrafts: Bool {
+        didSet { defaults.set(splitDrafts, forKey: Keys.splitDrafts) }
+    }
+
+    /// Sub-filter for the "For me" tab. Default `.all` (show direct + team).
+    @Published var forMeReviewFilter: ForMeReviewFilter {
+        didSet { defaults.set(forMeReviewFilter.rawValue, forKey: Keys.forMeReviewFilter) }
+    }
+
+    /// Whether PR rows use the compact (single-line, tighter) density. Default ON
+    /// so more PRs fit per screen. When off, rows use the comfortable two-line
+    /// layout. Drives `RowMetrics` shared by the triage deck and Needs-a-Human rows.
+    @Published var compactRows: Bool {
+        didSet { defaults.set(compactRows, forKey: Keys.compactRows) }
+    }
+
+    /// LEGACY (unused): formerly whether the separate top "Needs a Human" section
+    /// was expanded. That bucket was removed — the browse list's "Needs attention"
+    /// group is now the single "needs attention" view — so nothing reads this. The
+    /// field is retained (harmless) so an existing stored value decodes without
+    /// crashing; it can be removed in a later cleanup. Default `false`.
+    @Published var needsHumanExpanded: Bool {
+        didSet { defaults.set(needsHumanExpanded, forKey: Keys.needsHumanExpanded) }
+    }
+
+    // MARK: - Global shortcut
+
+    /// Whether a system-wide keyboard shortcut opens the Mainline popover. Default ON.
+    @Published var globalShortcutEnabled: Bool {
+        didSet { defaults.set(globalShortcutEnabled, forKey: Keys.globalShortcutEnabled) }
+    }
+
+    /// Virtual key code of the global shortcut. Default `0x23` (P).
+    @Published var globalShortcutKeyCode: Int {
+        didSet { defaults.set(globalShortcutKeyCode, forKey: Keys.globalShortcutKeyCode) }
+    }
+
+    /// Modifier flags for the global shortcut, stored as `NSEvent.ModifierFlags.rawValue`.
+    /// Default `[.command, .shift, .control]`.
+    @Published var globalShortcutModifiers: UInt {
+        didSet { defaults.set(globalShortcutModifiers, forKey: Keys.globalShortcutModifiers) }
+    }
+
+    /// Typed accessor for the stored modifier flags, masked to the device-
+    /// independent modifier set so stray flags never leak in.
+    var globalShortcutModifierFlags: NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: globalShortcutModifiers)
+            .intersection(.deviceIndependentFlagsMask)
+    }
+
+    /// Human-readable rendering of the shortcut, e.g. "⇧⌃⌘P". Modifier glyphs are
+    /// emitted in the conventional Cocoa order (⌃⌥⇧⌘) followed by the key glyph.
+    var globalShortcutDisplayString: String {
+        var out = ""
+        let flags = globalShortcutModifierFlags
+        // Order chosen to match the default display "⇧⌃⌘P".
+        if flags.contains(.shift)   { out += "⇧" }
+        if flags.contains(.control) { out += "⌃" }
+        if flags.contains(.option)  { out += "⌥" }
+        if flags.contains(.command) { out += "⌘" }
+        out += Self.keyGlyph(for: globalShortcutKeyCode)
+        return out
+    }
+
+    /// Reset the global shortcut to the default (⇧⌃⌥P).
+    func resetGlobalShortcutToDefault() {
+        globalShortcutKeyCode   = Self.defaultShortcutKeyCode
+        globalShortcutModifiers = Self.defaultShortcutModifiers
+    }
+
+    /// Human-readable rendering of the DEFAULT shortcut, derived from the same
+    /// `defaultShortcutKeyCode` + `defaultShortcutModifiers` constants used by
+    /// first-run init and `resetGlobalShortcutToDefault()`. Kept as the single
+    /// source for UI labels so the default, the reset, and the label never drift.
+    static var defaultGlobalShortcutDisplayString: String {
+        var out = ""
+        let flags = NSEvent.ModifierFlags(rawValue: defaultShortcutModifiers)
+            .intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.shift)   { out += "⇧" }
+        if flags.contains(.control) { out += "⌃" }
+        if flags.contains(.option)  { out += "⌥" }
+        if flags.contains(.command) { out += "⌘" }
+        out += keyGlyph(for: defaultShortcutKeyCode)
+        return out
+    }
+
+    /// Map a virtual key code to a display glyph/character. Covers letters,
+    /// digits, and common special keys; unknown codes fall back to "?".
+    static func keyGlyph(for keyCode: Int) -> String {
+        // Special (non-character) keys.
+        switch keyCode {
+        case 0x24: return "↩"   // Return
+        case 0x30: return "⇥"   // Tab
+        case 0x31: return "Space"
+        case 0x33: return "⌫"   // Delete (backspace)
+        case 0x35: return "⎋"   // Escape
+        case 0x75: return "⌦"   // Forward delete
+        case 0x7B: return "←"
+        case 0x7C: return "→"
+        case 0x7D: return "↓"
+        case 0x7E: return "↑"
+        case 0x73: return "↖"   // Home
+        case 0x77: return "↘"   // End
+        case 0x74: return "⇞"   // Page Up
+        case 0x79: return "⇟"   // Page Down
+        default: break
+        }
+        if let c = Self.keyCodeToCharacter[keyCode] {
+            return c
+        }
+        return "?"
+    }
+
+    /// ANSI key code → uppercase character. Layout-independent (physical keys),
+    /// which matches how the recorder captures `event.keyCode`.
+    private static let keyCodeToCharacter: [Int: String] = [
+        0x00: "A", 0x0B: "B", 0x08: "C", 0x02: "D", 0x0E: "E", 0x03: "F",
+        0x05: "G", 0x04: "H", 0x22: "I", 0x26: "J", 0x28: "K", 0x25: "L",
+        0x2E: "M", 0x2D: "N", 0x1F: "O", 0x23: "P", 0x0C: "Q", 0x0F: "R",
+        0x01: "S", 0x11: "T", 0x20: "U", 0x09: "V", 0x0D: "W", 0x07: "X",
+        0x10: "Y", 0x06: "Z",
+        0x1D: "0", 0x12: "1", 0x13: "2", 0x14: "3", 0x15: "4", 0x17: "5",
+        0x16: "6", 0x1A: "7", 0x1C: "8", 0x19: "9",
+        0x18: "=", 0x1B: "-", 0x21: "[", 0x1E: "]", 0x2A: "\\",
+        0x29: ";", 0x27: "'", 0x2B: ",", 0x2F: ".", 0x2C: "/", 0x32: "`"
+    ]
+
+    /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
+    @Published var snoozeMap: [String: Date] {
+        didSet {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            if let data = try? encoder.encode(snoozeMap) {
+                defaults.set(data, forKey: Keys.snoozeMapData)
+            }
+        }
+    }
+
+    // MARK: - Attention policy helper
+
+    /// Returns the attention level for a given event, falling back to the default.
+    func level(for event: PREvent) -> AttentionLevel {
+        if let raw = attentionPolicy[event.rawValue],
+           let level = AttentionLevel(rawValue: raw) {
+            return level
+        }
+        return PREvent.defaults[event] ?? .notify
     }
 
     // MARK: - ETag helpers
@@ -95,11 +396,71 @@ final class MainlineSettings: ObservableObject {
         notifyReadyForReview = defaults.object(forKey: Keys.notifyReadyForReview) == nil ? true : defaults.bool(forKey: Keys.notifyReadyForReview)
         notifyCIChange       = defaults.object(forKey: Keys.notifyCIChange) == nil       ? true : defaults.bool(forKey: Keys.notifyCIChange)
         notifyReviewComment  = defaults.object(forKey: Keys.notifyReviewComment) == nil  ? true : defaults.bool(forKey: Keys.notifyReviewComment)
+        // Ignore bot-authored comments by default — the user's stated intent.
+        notifyOnlyHumanComments = defaults.object(forKey: Keys.notifyOnlyHumanComments) == nil ? true : defaults.bool(forKey: Keys.notifyOnlyHumanComments)
 
         githubUsername = defaults.string(forKey: Keys.githubUsername) ?? ""
 
         // Selected tab — default "For me"
         selectedTab = defaults.string(forKey: Keys.selectedTab)
             .flatMap { ReviewTab(rawValue: $0) } ?? .forMe
+
+        // Triage Cockpit — default OFF for write actions and autopilot
+        writeActionsEnabled = defaults.bool(forKey: Keys.writeActionsEnabled)
+        autopilotEnabled    = defaults.bool(forKey: Keys.autopilotEnabled)
+
+        // Collapsed sections — default: none collapsed
+        collapsedSectionsRaw = defaults.stringArray(forKey: Keys.collapsedSectionsRaw) ?? []
+
+        // Attention policy — defaults are baked into PREvent.defaults
+        attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
+        unreadPRIdsList = defaults.stringArray(forKey: Keys.unreadPRIds) ?? []
+        panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 560 : defaults.integer(forKey: Keys.panelHeight)
+
+        // Menu-bar badge — default: count "Needs a Human", follow selected scope
+        menuBarMetric = defaults.string(forKey: Keys.menuBarMetric)
+            .flatMap { MenuBarMetric(rawValue: $0) } ?? .needsAHuman
+        menuBarScopeFollowsSelection = defaults.object(forKey: Keys.menuBarScopeFollows) == nil
+            ? true
+            : defaults.bool(forKey: Keys.menuBarScopeFollows)
+
+        // Needs-a-Human focus — default OFF (CI-focused, conflicts don't dominate)
+        includeConflictsInNeedsHuman = defaults.bool(forKey: Keys.includeConflictsInNeedsHuman)
+        // Drafts — default OFF (calmer view)
+        showDrafts = defaults.bool(forKey: Keys.showDrafts)
+        // Split drafts into their own section — default OFF (mixed inline)
+        splitDrafts = defaults.bool(forKey: Keys.splitDrafts)
+
+        // For-me review sub-filter — default All (show direct + team)
+        forMeReviewFilter = defaults.string(forKey: Keys.forMeReviewFilter)
+            .flatMap { ForMeReviewFilter(rawValue: $0) } ?? .all
+
+        // Compact rows — default ON (denser list, more PRs per screen)
+        compactRows = defaults.object(forKey: Keys.compactRows) == nil
+            ? true
+            : defaults.bool(forKey: Keys.compactRows)
+
+        // Needs-a-Human expanded — default collapsed (false); persisted on change
+        needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
+
+        // Global shortcut — default ON, ⇧⌃⌘P
+        globalShortcutEnabled = defaults.object(forKey: Keys.globalShortcutEnabled) == nil
+            ? true
+            : defaults.bool(forKey: Keys.globalShortcutEnabled)
+        globalShortcutKeyCode = defaults.object(forKey: Keys.globalShortcutKeyCode) == nil
+            ? Self.defaultShortcutKeyCode
+            : defaults.integer(forKey: Keys.globalShortcutKeyCode)
+        globalShortcutModifiers = defaults.object(forKey: Keys.globalShortcutModifiers) == nil
+            ? Self.defaultShortcutModifiers
+            : UInt(defaults.integer(forKey: Keys.globalShortcutModifiers))
+
+        // Snooze map — decode from JSON data; default empty
+        if let data = defaults.data(forKey: Keys.snoozeMapData) {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            snoozeMap = (try? decoder.decode([String: Date].self, from: data)) ?? [:]
+        } else {
+            snoozeMap = [:]
+        }
     }
 }
