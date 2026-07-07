@@ -428,26 +428,32 @@ struct TriageDeckView: View {
                     .allowsHitTesting(!isHovered)
                 }
             }
-            // The title/content now extends the FULL row width — no reserved space
-            // for the Later button. The hover actions are drawn as a trailing
-            // overlay on top, with a readable background + leading fade so they
-            // blend over the title rather than hard-clipping it.
+            // Drafts read as lower-priority: mute the row CONTENT only. Applied
+            // HERE — before the hover overlay — so the draft dim never reaches the
+            // hover action cluster; Later/Merge stay full-opacity on draft rows.
+            .opacity(isDraft ? 0.6 : 1.0)
+            // The title/content extends the FULL row width — no reserved space for
+            // the Later button. The hover actions are drawn as a trailing overlay
+            // on top, vertically CENTERED within the row content and compact so the
+            // capsule sits on its OWN row with no vertical bleed into neighbours.
+            // Attached to the row content HStack — BEFORE the row's vertical padding
+            // and BEFORE the section's trailing Divider — so its bounds equal the
+            // visible row content and never include the divider's height. Placed
+            // AFTER the draft opacity so the cluster always renders fully opaque.
             .overlay(alignment: .trailing) {
                 if isHovered {
                     hoverActionsCluster(for: pr)
                         .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.12), value: hoveredRowID)
+            // Near-instant fade in/out so the hover reveal feels snappy.
+            .animation(.easeOut(duration: 0.05), value: hoveredRowID)
             // Track the hovered row so its Later button reveals on hover. Clearing
             // only when THIS row was the hovered one avoids a late "mouse exited"
             // from a previous row wiping a newer row's hover state.
             .onHover { hovering in
                 hoveredRowID = hovering ? pr.nodeId : (hoveredRowID == pr.nodeId ? nil : hoveredRowID)
             }
-            // Drafts read as lower-priority: mute the whole row while keeping
-            // it fully clickable/openable.
-            .opacity(isDraft ? 0.6 : 1.0)
             .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.vertical, m.rowVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -478,15 +484,20 @@ struct TriageDeckView: View {
     /// labels stay readable over whatever title is behind them.
     @ViewBuilder
     private func hoverActionsCluster(for pr: PRSnapshot) -> some View {
+        // Compact fixed height for the whole cluster so it matches the button
+        // capsule — NOT the full row+divider height — and stays vertically
+        // centered within the row content, never bleeding into neighbours.
+        let clusterHeight: CGFloat = 24
         HStack(spacing: 6) {
             // Leading fade: clear → the row's material, so the title dissolves
-            // under the cluster rather than being cut off abruptly.
+            // under the cluster rather than being cut off abruptly. Same height as
+            // the capsule so the fade aligns with the cluster, not the whole row.
             LinearGradient(
                 colors: [Color.clear, Color(nsColor: .windowBackgroundColor)],
                 startPoint: .leading,
                 endPoint: .trailing
             )
-            .frame(width: 24)
+            .frame(width: 24, height: clusterHeight)
 
             HStack(spacing: 6) {
                 LaterButton(onPostpone: { duration in postpone(pr, for: duration) })
@@ -502,9 +513,13 @@ struct TriageDeckView: View {
             }
             .padding(.leading, 4)
             .padding(.trailing, 6)
-            .padding(.vertical, 2)
+            .frame(height: clusterHeight)
             .background(.regularMaterial, in: Capsule())
         }
+        // Fixed compact height keeps the capsule on its own row; `.center`
+        // alignment in the enclosing `.overlay(alignment: .trailing)` then centres
+        // it vertically within the row content.
+        .frame(height: clusterHeight)
         .padding(.trailing, 4)
         .fixedSize()
     }
