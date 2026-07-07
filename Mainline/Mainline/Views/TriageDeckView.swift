@@ -119,10 +119,21 @@ struct TriageDeckView: View {
         prs.sorted(by: PRSnapshot.triageOrder)
     }
 
-    /// Grouped sections in canonical state order, excluding empty ones.
+    /// Maps a canonical `classifiedState` to the state used for DISPLAY grouping.
+    /// `.inReview` folds into `.open` so both render under one "Open" section; this
+    /// is a display-only mapping and does NOT change `classifiedState` semantics
+    /// (the classifier / trust / needs-human logic keeps using the real state).
+    private func displayState(_ state: PRState) -> PRState {
+        state == .inReview ? .open : state
+    }
+
+    /// Grouped sections in canonical state order, excluding empty ones. `.inReview`
+    /// PRs are folded into the "Open" section (see `displayState`); the "Open"
+    /// header count therefore equals open + in-review PRs combined.
     private var sections: [(state: PRState, prs: [PRSnapshot])] {
-        let grouped = Dictionary(grouping: orderedPRs, by: { $0.classifiedState })
+        let grouped = Dictionary(grouping: orderedPRs, by: { displayState($0.classifiedState) })
         return PRState.allCases
+            .filter { $0 != .inReview }   // never render In Review as its own section
             .sorted { $0.sortIndex < $1.sortIndex }
             .compactMap { state in
                 guard let prs = grouped[state], !prs.isEmpty else { return nil }
@@ -231,6 +242,7 @@ struct TriageDeckView: View {
                         if settings.selectedTab == .forMe {
                             ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
                         }
+                        FeedbackBadge(pr: pr)
                     }
                 }
             }
@@ -499,6 +511,51 @@ struct TriageDeckView: View {
     /// Returns the PRs currently in the multi-select set, in display order.
     private var selectedPRList: [PRSnapshot] {
         prs.filter { selectedPRs.contains($0.nodeId) }
+    }
+}
+
+// MARK: - FeedbackBadge
+
+/// Compact per-row badge flagging review feedback on a PR. Rendered on the
+/// repo/#number metadata line alongside the trust and review-source badges.
+///
+/// Priority:
+///   1. `reviewDecision == .changesRequested` → red "changes" tag (a reviewer
+///      formally requested changes — needs your attention).
+///   2. else if review activity exists — `reviewState == .changesRequested`
+///      (reviews present but no aggregate decision) OR `commentCount > 0` →
+///      a subtle secondary comment badge (bubble icon + count, count omitted
+///      when 0).
+///   3. else → nothing.
+struct FeedbackBadge: View {
+    let pr: PRSnapshot
+
+    var body: some View {
+        if pr.reviewDecision == .changesRequested {
+            Text("changes")
+                .font(.caption2)
+                .lineLimit(1)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color(nsColor: .systemRed).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+                .foregroundStyle(Color(nsColor: .systemRed))
+                .accessibilityLabel("Changes requested")
+        } else if pr.reviewState == .changesRequested || pr.commentCount > 0 {
+            HStack(spacing: 2) {
+                Image(systemName: "bubble.left")
+                    .font(.caption2)
+                if pr.commentCount > 0 {
+                    Text("\(pr.commentCount)")
+                        .font(.caption2)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(
+                pr.commentCount > 0
+                    ? "\(pr.commentCount) comment\(pr.commentCount == 1 ? "" : "s")"
+                    : "Has review feedback"
+            )
+        }
     }
 }
 
