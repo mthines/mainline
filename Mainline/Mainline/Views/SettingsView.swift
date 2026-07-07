@@ -177,6 +177,14 @@ struct SettingsView: View {
         Section("Write Actions") {
             Toggle("Enable write actions (Approve, Merge, Request Changes)", isOn: $settings.writeActionsEnabled)
             if settings.writeActionsEnabled {
+                Picker("Merge method", selection: $settings.mergeMethodPreference) {
+                    ForEach(MergeMethodPreference.allCases) { method in
+                        Text(method.displayName).tag(method)
+                    }
+                }
+                Label("Auto picks the repo's allowed method (squash → rebase → merge commit).", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle("Enable autopilot auto-approve (advanced)", isOn: $settings.autopilotEnabled)
                 if settings.autopilotEnabled {
                     Label("Auto-approve fires when author is autopilot tier, CI green, and < 50 LOC changed.", systemImage: "info.circle")
