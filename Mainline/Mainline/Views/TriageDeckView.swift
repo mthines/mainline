@@ -852,13 +852,30 @@ struct TriageDeckView: View {
     // MARK: - Key monitor (macOS 13 compatible)
 
     private func installKeyMonitor() {
-        // Force first-responder so key events reach the panel
-        DispatchQueue.main.async {
-            NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
-        }
+        focusPanelForKeyboard()
 
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
             return self.handleKeyDown(event)
+        }
+    }
+
+    /// Make the menu-bar popover the active, key window and take first responder so
+    /// the local key monitor receives J/K/arrow presses.
+    ///
+    /// Opening via the global shortcut calls `NSApp.activate` (see
+    /// `MenuBarPopoverOpener`), so keyboard nav works there. But clicking the menu
+    /// bar icon does NOT activate an accessory app — `NSApp.keyWindow` is then nil,
+    /// `makeFirstResponder` no-ops, and keyDown never reaches the monitor, so J/K and
+    /// arrows do nothing. Activate here too. Retry briefly: right after `onAppear`
+    /// the popover may not yet be the key window in the first runloop tick.
+    private func focusPanelForKeyboard(attempt: Int = 0) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let key = NSApp.keyWindow {
+            key.makeFirstResponder(key.contentView)
+        } else if attempt < 10 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                focusPanelForKeyboard(attempt: attempt + 1)
+            }
         }
     }
 
