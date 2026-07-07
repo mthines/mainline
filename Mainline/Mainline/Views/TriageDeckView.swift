@@ -388,7 +388,14 @@ struct TriageDeckView: View {
                     metrics: m,
                     isUnread: manager.unreadPRIds.contains(pr.nodeId)
                 ) {
-                    ciIcon(for: pr.ciStatus)
+                    // Drafts show a muted grey draft glyph in the status-icon slot
+                    // instead of the CI-status icon, reinforcing the Draft badge +
+                    // dimmed row. Non-draft PRs keep the CI icon exactly as-is.
+                    if isDraft {
+                        draftIcon
+                    } else {
+                        ciIcon(for: pr.ciStatus)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: m.titleMetadataSpacing) {
@@ -607,6 +614,17 @@ struct TriageDeckView: View {
                 NSWorkspace.shared.open(url)
             }
         }
+    }
+
+    // MARK: - Draft icon
+
+    /// Muted grey draft glyph shown in the leading status-icon slot for draft PRs,
+    /// in place of the CI-status icon. Framed by `LeadingColumn` to the shared
+    /// `leadingIconSize`, so alignment with non-draft rows is unchanged.
+    private var draftIcon: some View {
+        Image(systemName: "pencil.circle")
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Draft")
     }
 
     // MARK: - CI icon (accessibilityLabel on every state)
