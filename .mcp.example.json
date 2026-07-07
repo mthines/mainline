@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "dash0-dev": {
+      "type": "http",
+      "url": "https://ingress.europe-west4.gcp.dash0-dev.com/mcp",
+      "headers": {
+        "Authorization": "Bearer auth_xxx"
+      }
+    }
+  }
+}

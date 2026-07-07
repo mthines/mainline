@@ -20,6 +20,8 @@ Icon?
 .VolumeIcon.icns
 .com.apple.timemachine.donotpresent
 
+.mcp.json
+
 # Xcode
 build/
 DerivedData/
