@@ -111,6 +111,24 @@
         "cwd": "{projectRoot}"
       },
       "cache": false
+    },
+    "release": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bash scripts/release.sh",
+        "cwd": "{projectRoot}"
+      },
+      "inputs": ["swift-sources", "project-config", "scripts", "cask"],
+      "cache": false
+    },
+    "setup-tap": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bash scripts/setup-tap.sh",
+        "cwd": "{projectRoot}"
+      },
+      "inputs": ["cask"],
+      "cache": false
     }
   }
 }

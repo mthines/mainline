@@ -24,7 +24,7 @@ A lightweight macOS menu bar app that notifies you about GitHub pull requests.
 ## Building from Source
 
 ```bash
-git clone https://github.com/yourusername/mainline.git
+git clone https://github.com/mthines/mainline.git
 cd mainline
 xcodebuild -scheme Mainline -configuration Debug -destination "platform=macOS" build
 ```
@@ -66,9 +66,49 @@ To distribute outside your machine:
 
 <!-- TODO: Add screenshots after first working build -->
 
+## Releasing / Homebrew
+
+Mainline is distributed via a Homebrew tap at `mthines/homebrew-mainline`.
+
+### Install (stable)
+
+```bash
+brew tap mthines/mainline
+brew install --cask mainline
+```
+
+### Install (beta)
+
+Beta builds are published for every non-draft pull request.
+
+```bash
+brew tap mthines/mainline
+
+# Latest beta
+brew install --cask --force mthines/mainline/mainline-beta
+
+# A specific pinned beta version
+brew install --cask --force mthines/mainline/mainline-beta@1.2.3-beta.42.1
+```
+
+> `--force` is required because beta and stable share `/Applications/Mainline.app`.
+> To roll back to stable: `brew install --cask --force mthines/mainline/mainline`.
+
+### Release automation
+
+Releases are fully automated via GitHub Actions (`.github/workflows/ci.yml`):
+
+- Push to `main` → stable release
+- Non-draft PR → beta release (tagged, published, PR comment with install instructions)
+- `workflow_dispatch` → manual trigger (stable from `main`, beta from a branch with open PR)
+
+See [`docs/release.md`](docs/release.md) for required secrets, one-time tap setup, and
+optional signing/notarization.
+
 ## Distribution
 
-A Homebrew cask formula is scaffolded at `Homebrew/mainline.rb` — update the `url` and `sha256` fields after creating a release.
+The Homebrew cask lives at `Casks/mainline.rb` (stable) and `Casks/mainline-beta.rb`
+(beta template). Both are updated automatically by the release pipeline.
 
 ## License
 
