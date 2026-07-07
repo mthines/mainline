@@ -76,6 +76,7 @@ final class MainlineSettings: ObservableObject {
         static let showDrafts           = "showDrafts"
         static let splitDrafts          = "splitDrafts"
         static let forMeReviewFilter    = "forMeReviewFilter"
+        static let compactRows          = "compactRows"
     }
 
     // MARK: - Persisted properties
@@ -192,6 +193,13 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(forMeReviewFilter.rawValue, forKey: Keys.forMeReviewFilter) }
     }
 
+    /// Whether PR rows use the compact (single-line, tighter) density. Default ON
+    /// so more PRs fit per screen. When off, rows use the comfortable two-line
+    /// layout. Drives `RowMetrics` shared by the triage deck and Needs-a-Human rows.
+    @Published var compactRows: Bool {
+        didSet { defaults.set(compactRows, forKey: Keys.compactRows) }
+    }
+
     /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
     @Published var snoozeMap: [String: Date] {
         didSet {
@@ -285,6 +293,11 @@ final class MainlineSettings: ObservableObject {
         // For-me review sub-filter — default All (show direct + team)
         forMeReviewFilter = defaults.string(forKey: Keys.forMeReviewFilter)
             .flatMap { ForMeReviewFilter(rawValue: $0) } ?? .all
+
+        // Compact rows — default ON (denser list, more PRs per screen)
+        compactRows = defaults.object(forKey: Keys.compactRows) == nil
+            ? true
+            : defaults.bool(forKey: Keys.compactRows)
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {

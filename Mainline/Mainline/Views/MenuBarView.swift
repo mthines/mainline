@@ -469,6 +469,7 @@ struct MenuBarView: View {
                 myLogin: settings.githubUsername,
                 includeConflicts: settings.includeConflictsInNeedsHuman,
                 maxExpandedHeight: needsHumanMaxHeight,
+                metrics: RowMetrics.forCompact(settings.compactRows),
                 trustLedger: trustLedger,
                 expanded: $needsHumanExpanded
             )

@@ -19,6 +19,9 @@ struct NeedsHumanView: View {
     /// Max height for the expanded (scrolling) rows region. Bounds the section so
     /// a large bucket can never push the tabs/footer off screen.
     let maxExpandedHeight: CGFloat
+    /// Shared row layout metrics (compact vs comfortable). Computed once by
+    /// `MenuBarView` from `settings.compactRows` so this list matches the deck.
+    let metrics: RowMetrics
     @ObservedObject var trustLedger: TrustLedgerStore
 
     /// Whether the bucket is expanded into a bounded ScrollView. Owned by
@@ -69,7 +72,7 @@ struct NeedsHumanView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(sortedNeedsHuman, id: \.nodeId) { pr in
                     needsHumanRow(pr)
-                    Divider().padding(.leading, 36)
+                    Divider().padding(.leading, metrics.dividerLeadingInset)
                 }
             }
         }
@@ -123,14 +126,16 @@ struct NeedsHumanView: View {
         } label: {
             let trustTier: TrustTier = trustLedger.tier(for: pr.author)
             let isDraft = pr.classifiedState == .draft
-            HStack(alignment: .top, spacing: 8) {
+            let m = metrics
+            HStack(alignment: .top, spacing: m.rowHStackSpacing) {
                 triggerIcon(for: pr)
-                    .frame(width: 20, height: 20)
+                    .frame(width: m.leadingIconSize, height: m.leadingIconSize)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: m.titleMetadataSpacing) {
                     Text(pr.title)
                         .font(.callout)
-                        .lineLimit(2)
+                        .lineLimit(m.titleLineLimit)
+                        .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
                         Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
@@ -150,7 +155,7 @@ struct NeedsHumanView: View {
             // it fully clickable/openable.
             .opacity(isDraft ? 0.6 : 1.0)
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.vertical, metrics.rowVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }

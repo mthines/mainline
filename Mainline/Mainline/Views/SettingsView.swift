@@ -190,6 +190,13 @@ struct SettingsView: View {
 
             // MARK: - Panel
             Section("Panel") {
+                Toggle("Compact rows", isOn: $settings.compactRows)
+                Label("Single-line titles, tighter spacing — fit more PRs.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 HStack {
                     Text("Panel height (pt)")
                     Spacer()

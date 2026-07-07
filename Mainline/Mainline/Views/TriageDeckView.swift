@@ -1,6 +1,56 @@
 import SwiftUI
 import AppKit
 
+// MARK: - RowMetrics
+
+/// Shared layout metrics for PR rows, driven by `settings.compactRows`. Used by
+/// both `TriageDeckView` deck rows and `NeedsHumanView` rows so the two lists
+/// stay visually consistent at either density.
+struct RowMetrics {
+    /// Title line limit (1 = single-line truncating tail; 2 = comfortable).
+    let titleLineLimit: Int
+    /// Vertical padding applied to each row.
+    let rowVerticalPadding: CGFloat
+    /// Spacing between the title and the metadata line.
+    let titleMetadataSpacing: CGFloat
+    /// Square frame size for the leading icon (CI / trigger / focus indicator).
+    let leadingIconSize: CGFloat
+    /// Spacing between the leading icons and the text column.
+    let rowHStackSpacing: CGFloat
+    /// Leading inset applied to row dividers (keeps them aligned under the text).
+    let dividerLeadingInset: CGFloat
+    /// Top padding for per-state section headers.
+    let sectionHeaderTopPadding: CGFloat
+    /// Bottom padding for per-state section headers.
+    let sectionHeaderBottomPadding: CGFloat
+
+    static let compact = RowMetrics(
+        titleLineLimit: 1,
+        rowVerticalPadding: 3,
+        titleMetadataSpacing: 1,
+        leadingIconSize: 16,
+        rowHStackSpacing: 6,
+        dividerLeadingInset: 28,
+        sectionHeaderTopPadding: 4,
+        sectionHeaderBottomPadding: 2
+    )
+
+    static let comfortable = RowMetrics(
+        titleLineLimit: 2,
+        rowVerticalPadding: 6,
+        titleMetadataSpacing: 2,
+        leadingIconSize: 20,
+        rowHStackSpacing: 8,
+        dividerLeadingInset: 36,
+        sectionHeaderTopPadding: 8,
+        sectionHeaderBottomPadding: 2
+    )
+
+    static func forCompact(_ compact: Bool) -> RowMetrics {
+        compact ? .compact : .comfortable
+    }
+}
+
 // MARK: - TriageDeckView
 
 /// Keyboard-driven triage deck. Manages selection, key bindings,
@@ -166,13 +216,19 @@ struct TriageDeckView: View {
         }
     }
 
+    /// Row layout metrics for the current density.
+    private var metrics: RowMetrics {
+        RowMetrics.forCompact(settings.compactRows)
+    }
+
     @ViewBuilder
     private func sectionView(state: PRState, prs sectionPRs: [PRSnapshot]) -> some View {
-        DisclosureGroup(isExpanded: expansionBinding(for: state)) {
-            ForEach(sectionPRs, id: \.nodeId) { pr in
-                deckRow(pr: pr, index: flatIndex(of: pr))
-                Divider().padding(.leading, 36)
-            }
+        let expansion = expansionBinding(for: state)
+        // Whole-header tap toggles the section (label + count + chevron), matching
+        // the Needs-a-Human header. Replaces DisclosureGroup so tapping the text or
+        // count — not just the triangle — expands/collapses.
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { expansion.wrappedValue.toggle() }
         } label: {
             HStack(spacing: 6) {
                 Text(state.title)
@@ -186,12 +242,24 @@ struct TriageDeckView: View {
                     .padding(.vertical, 1)
                     .background(.quaternary, in: Capsule())
                 Spacer()
+                Image(systemName: expansion.wrappedValue ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
+            .padding(.horizontal, 12)
+            .padding(.top, metrics.sectionHeaderTopPadding)
+            .padding(.bottom, metrics.sectionHeaderBottomPadding)
             .contentShape(Rectangle())
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .buttonStyle(.plain)
+        .help(expansion.wrappedValue ? "Collapse \(state.title)" : "Expand \(state.title)")
+
+        if expansion.wrappedValue {
+            ForEach(sectionPRs, id: \.nodeId) { pr in
+                deckRow(pr: pr, index: flatIndex(of: pr))
+                Divider().padding(.leading, metrics.dividerLeadingInset)
+            }
+        }
     }
 
     /// Index of a PR within the flat `orderedPRs` array (keyboard index space).
@@ -215,10 +283,11 @@ struct TriageDeckView: View {
         let isFocused = index == selectedIndex
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
+        let m = metrics
         return Button {
             handleRowClick(pr: pr, index: index)
         } label: {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: m.rowHStackSpacing) {
                 // Selection / focus indicator
                 ZStack {
                     if isSelected {
@@ -229,7 +298,7 @@ struct TriageDeckView: View {
                         Circle().fill(Color.clear).frame(width: 8, height: 8)
                     }
                 }
-                .frame(width: 20, height: 20, alignment: .center)
+                .frame(width: m.leadingIconSize, height: m.leadingIconSize, alignment: .center)
 
                 if manager.unreadPRIds.contains(pr.nodeId) {
                     Circle()
@@ -240,12 +309,13 @@ struct TriageDeckView: View {
                 }
 
                 ciIcon(for: pr.ciStatus)
-                    .frame(width: 20, height: 20)
+                    .frame(width: m.leadingIconSize, height: m.leadingIconSize)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: m.titleMetadataSpacing) {
                     Text(pr.title)
                         .font(.callout)
-                        .lineLimit(2)
+                        .lineLimit(m.titleLineLimit)
+                        .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
                         Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
@@ -266,7 +336,7 @@ struct TriageDeckView: View {
             // it fully clickable/openable.
             .opacity(isDraft ? 0.6 : 1.0)
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.vertical, m.rowVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(isFocused ? Color.accentColor.opacity(0.08) : .clear)
             .contentShape(Rectangle())
