@@ -6,6 +6,7 @@ enum GitHubAPIError: Error, LocalizedError {
     case unauthorized
     case rateLimited(retryAfter: Int)   // seconds
     case notModified                    // 304 — no changes
+    case cancelled                      // request cancelled (popover closed) — benign
     case networkError(URLError)
     case decodingError(Error)
     case unknown(Int)                   // HTTP status code
@@ -18,6 +19,8 @@ enum GitHubAPIError: Error, LocalizedError {
             return "GitHub rate limit hit. Retry after \(seconds)s."
         case .notModified:
             return "No changes since last poll."
+        case .cancelled:
+            return "Request cancelled."
         case .networkError(let err):
             return "Network error: \(err.localizedDescription)"
         case .decodingError(let err):
@@ -509,7 +512,14 @@ final class GitHubClient {
     private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)
+        } catch is CancellationError {
+            // SwiftUI cancelled the in-flight `.task` (e.g. popover closed). Benign.
+            throw GitHubAPIError.cancelled
         } catch let error as URLError {
+            // URLError.cancelled fires routinely when the popover closes mid-request.
+            if error.code == .cancelled {
+                throw GitHubAPIError.cancelled
+            }
             throw GitHubAPIError.networkError(error)
         }
     }

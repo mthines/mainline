@@ -71,6 +71,13 @@ final class PRPoller {
             } catch GitHubAPIError.notModified {
                 // 304 — keep existing state, no notification
                 continue
+            } catch GitHubAPIError.cancelled {
+                // Popover closed mid-request; SwiftUI cancelled the `.task`.
+                // Benign — keep prior state/counts and do not surface an error.
+                return
+            } catch is CancellationError {
+                // Task cancellation — benign, keep prior state.
+                return
             } catch GitHubAPIError.rateLimited(let seconds) {
                 await MainActor.run { self.statusMessage = "Rate limited — wait \(seconds)s" }
                 try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
@@ -80,6 +87,10 @@ final class PRPoller {
                 stop()
                 return
             } catch {
+                // Defense in depth: never surface cancellation as a visible error.
+                if (error as? URLError)?.code == .cancelled || error is CancellationError {
+                    return
+                }
                 await MainActor.run { self.statusMessage = "Error: \(error.localizedDescription)" }
                 return
             }
