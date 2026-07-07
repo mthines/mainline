@@ -580,7 +580,7 @@ struct MenuBarView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
-                .truncationMode(.tail)
+                .minimumScaleFactor(0.75)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)

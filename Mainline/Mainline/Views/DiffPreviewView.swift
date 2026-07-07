@@ -22,7 +22,20 @@ struct DiffPreviewView: View {
                     .foregroundStyle(.secondary)
                 Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
                     .font(.headline)
-                Spacer()
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                Button {
+                    if let url = URL(string: pr.htmlUrl) {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Image(systemName: "safari")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open on GitHub")
+                .accessibilityLabel("Open on GitHub")
                 Button {
                     isPresented = false
                 } label: {
@@ -79,13 +92,18 @@ struct DiffPreviewView: View {
                     Text(diffText.isEmpty ? "(empty diff)" : diffText)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(8)
                 }
-                .frame(maxHeight: 400)
+                .frame(maxHeight: 360)
             }
         }
-        .frame(width: 560)
+        // Must fit inside the 360pt MenuBarExtra popover — a wider frame overflows
+        // the window and gets clipped on both sides. Long diff lines scroll
+        // horizontally inside the ScrollView above; "Open in Browser" is the path
+        // for comfortable full-width reading.
+        .frame(width: 344)
         // Opaque fill: `.background(.background)` resolves to a translucent
         // vibrancy material inside the MenuBarExtra(.window) popover, letting the
         // PR list bleed through. An explicit window-background color is opaque.
