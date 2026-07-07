@@ -84,6 +84,56 @@ enum PRState: String, Codable, Equatable, CaseIterable {
     }
 }
 
+// MARK: - ActionGroup
+
+/// Actionability grouping for the browse list — answers "does this PR still need
+/// me?" rather than raw review state. This is the primary section grouping for the
+/// deck; `PRState` is retained only for the trailing Merged/Closed sections and
+/// for ordering/legacy helpers.
+///
+/// The three open, non-draft buckets are mutually exclusive and evaluated
+/// first-match-wins in `PRSnapshot.actionGroup`:
+///   - `.needsAttention` — CI failing OR changes requested OR unresolved threads.
+///     Explicitly does NOT include merge conflicts (they happen constantly and
+///     aren't an attention driver).
+///   - `.readyToMerge` — approved && mergeable && CI green.
+///   - `.waiting` — everything else open (awaiting review, green, approved-but-
+///     not-mergeable, etc.). Nothing needed from the user right now.
+/// Plus the terminal buckets: `.draft` (only used when `splitDrafts` is on),
+/// `.merged`, `.closed`.
+enum ActionGroup: String, Codable, Equatable, CaseIterable {
+    case needsAttention
+    case readyToMerge
+    case waiting
+    case draft
+    case merged
+    case closed
+
+    /// Section header label.
+    var title: String {
+        switch self {
+        case .needsAttention: return "Needs attention"
+        case .readyToMerge:   return "Ready to merge"
+        case .waiting:        return "Waiting"
+        case .draft:          return "Draft"
+        case .merged:         return "Merged"
+        case .closed:         return "Closed"
+        }
+    }
+
+    /// Deterministic display order used to sort sections.
+    var sortIndex: Int {
+        switch self {
+        case .needsAttention: return 0
+        case .readyToMerge:   return 1
+        case .waiting:        return 2
+        case .draft:          return 3
+        case .merged:         return 4
+        case .closed:         return 5
+        }
+    }
+}
+
 // MARK: - PRSnapshot
 
 /// Canonical diff unit — one instance per PR, stored in PRStateStore.
@@ -251,6 +301,46 @@ struct PRSnapshot: Codable, Equatable {
             && !isDraft
             && !merged
             && !closed
+    }
+
+    /// Whether an OPEN, non-draft PR still needs the user's attention:
+    /// failing/erroring CI, changes formally requested, OR at least one unresolved
+    /// review thread (a pending/open conversation). Deliberately does NOT consider
+    /// `mergeable == false` — merge conflicts happen constantly and aren't an
+    /// attention driver. This is the single source of truth shared by the list's
+    /// "Needs attention" group and the "Needs a Human" bucket.
+    var needsAttention: Bool {
+        guard !merged, !closed, !isDraft else { return false }
+        if ciStatus == .failure || ciStatus == .error { return true }
+        if reviewDecision == .changesRequested { return true }
+        if unresolvedThreadCount > 0 { return true }
+        return false
+    }
+
+    /// The actionability section this PR belongs to (first match wins).
+    ///
+    /// - Parameter splitDrafts: when true, an open draft is routed to its own
+    ///   `.draft` group; when false, an open draft is placed in the actionability
+    ///   group implied by its non-draft signal (so it mixes in, distinguished only
+    ///   by the Draft badge + dimming).
+    func actionGroup(splitDrafts: Bool) -> ActionGroup {
+        if merged { return .merged }
+        if closed { return .closed }
+        if splitDrafts && isDraft { return .draft }
+
+        // For an open PR (draft or not) evaluate the actionability signal. Draft
+        // short-circuits are already handled above, and `needsAttention` /
+        // `readyToMerge` both guard on `!isDraft`; to classify a *shown* draft by
+        // its underlying signal we evaluate the same predicates ignoring draft.
+        if ciStatus == .failure || ciStatus == .error
+            || reviewDecision == .changesRequested
+            || unresolvedThreadCount > 0 {
+            return .needsAttention
+        }
+        if reviewDecision == .approved && mergeable == true && ciStatus == .success {
+            return .readyToMerge
+        }
+        return .waiting
     }
 
     /// Why this PR is in the "For me" set, from the point of view of `myLogin`.

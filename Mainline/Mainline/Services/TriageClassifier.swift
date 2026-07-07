@@ -5,6 +5,8 @@ import Foundation
 /// The specific reason a PR has been routed to the "Needs a Human" bucket.
 enum TriageTrigger: Equatable {
     case failingCIOnTrustedAgent
+    case changesRequested
+    case unresolvedThreads(Int)
     case mergeConflict
     case sensitivePathTouched([String])
     case agentVsAgentThread
@@ -41,16 +43,34 @@ enum TriageClassifier {
     ) -> [TriageTrigger] {
         var result: [TriageTrigger] = []
 
-        // Failing CI is the PRIMARY trigger: any non-draft PR with red CI
-        // surfaces, regardless of trust tier or authorship. Red CI must always
-        // be visible.
-        if pr.classifiedState != .draft && (pr.ciStatus == .failure || pr.ciStatus == .error) {
+        // The bucket is the SAME actionability signal as the list's "Needs
+        // attention" group: for open, non-draft PRs, the PRIMARY triggers are
+        // failing CI, changes requested, and unresolved review threads (pending
+        // comments). Merge conflicts are explicitly NOT a primary driver — they
+        // are gated behind an opt-in below.
+        let isDraft = pr.classifiedState == .draft
+
+        // Failing CI — any non-draft PR with red CI surfaces, regardless of trust
+        // tier or authorship. Red CI must always be visible.
+        if !isDraft && (pr.ciStatus == .failure || pr.ciStatus == .error) {
             result.append(.failingCIOnTrustedAgent)
         }
 
+        // Changes formally requested by a reviewer — the PR still needs the author.
+        if !isDraft && pr.reviewDecision == .changesRequested {
+            result.append(.changesRequested)
+        }
+
+        // Unresolved review threads (pending/open conversations) — the PR still
+        // needs a reply or a resolution.
+        if !isDraft && pr.unresolvedThreadCount > 0 {
+            result.append(.unresolvedThreads(pr.unresolvedThreadCount))
+        }
+
         // Merge conflict — gated behind an opt-in setting so conflicts don't
-        // dominate the bucket. GitHub computes mergeability lazily; nil =
-        // unknown, treated as clear.
+        // dominate the bucket (they happen constantly and aren't an attention
+        // driver). GitHub computes mergeability lazily; nil = unknown, treated
+        // as clear. Default OFF.
         if includeConflicts && pr.mergeable == false {
             result.append(.mergeConflict)
         }

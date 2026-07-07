@@ -136,9 +136,13 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(collapsedSectionsRaw, forKey: Keys.collapsedSectionsRaw) }
     }
 
-    /// Typed accessor for collapsed sections.
-    var collapsedSections: Set<PRState> {
-        get { Set(collapsedSectionsRaw.compactMap { PRState(rawValue: $0) }) }
+    /// Typed accessor for collapsed sections, keyed by the actionability
+    /// `ActionGroup`. Old stored values keyed by the legacy `PRState` raw strings
+    /// (e.g. "open", "inReview", "approved") simply don't decode to any
+    /// `ActionGroup` case and are silently dropped — the affected sections start
+    /// expanded, which is the intended migration fallback (no crash on old data).
+    var collapsedSections: Set<ActionGroup> {
+        get { Set(collapsedSectionsRaw.compactMap { ActionGroup(rawValue: $0) }) }
         set { collapsedSectionsRaw = newValue.map { $0.rawValue } }
     }
 

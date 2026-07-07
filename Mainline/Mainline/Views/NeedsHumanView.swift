@@ -197,11 +197,20 @@ struct NeedsHumanRowsView: View {
     private func triggerIcon(for pr: PRSnapshot) -> some View {
         let tier = trustLedger.tier(for: pr.author)
         let triggers = TriageClassifier.triggers(pr, myLogin: myLogin, trustTier: tier, includeConflicts: includeConflicts)
-        // CI failure is the primary trigger — show it before conflict.
+        // CI failure is the primary trigger — show it first, then changes
+        // requested / unresolved conversations, then conflict.
         if triggers.contains(.failingCIOnTrustedAgent) {
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(Color(nsColor: .systemRed))
                 .accessibilityLabel("Failing CI")
+        } else if triggers.contains(.changesRequested) {
+            Image(systemName: "arrow.uturn.backward.circle.fill")
+                .foregroundStyle(Color(nsColor: .systemRed))
+                .accessibilityLabel("Changes requested")
+        } else if triggers.contains(where: { if case .unresolvedThreads = $0 { return true } else { return false } }) {
+            Image(systemName: "bubble.left.and.exclamationmark.bubble.right.fill")
+                .foregroundStyle(Color(nsColor: .systemOrange))
+                .accessibilityLabel("Unresolved conversations")
         } else if triggers.contains(.mergeConflict) {
             Image(systemName: "arrow.triangle.merge")
                 .foregroundStyle(Color(nsColor: .systemRed))
@@ -216,9 +225,21 @@ struct NeedsHumanRowsView: View {
     /// Triggers to render as row tags. Always includes an informational
     /// `conflict` tag when the PR is unmergeable, even if conflicts are not
     /// routing PRs into the bucket (includeConflicts == false).
+    ///
+    /// `.changesRequested` and `.unresolvedThreads` are intentionally dropped here:
+    /// the shared `FeedbackBadge` (rendered on the same row) already surfaces both
+    /// (the red "changes" tag and the amber "N unresolved" tag), so re-emitting them
+    /// as trigger tags would double them up.
     private func displayTriggers(for pr: PRSnapshot) -> [TriageTrigger] {
         let tier = trustLedger.tier(for: pr.author)
-        var triggers = TriageClassifier.triggers(pr, myLogin: myLogin, trustTier: tier, includeConflicts: includeConflicts)
+        var triggers = TriageClassifier
+            .triggers(pr, myLogin: myLogin, trustTier: tier, includeConflicts: includeConflicts)
+            .filter { trigger in
+                switch trigger {
+                case .changesRequested, .unresolvedThreads: return false
+                default: return true
+                }
+            }
         if pr.mergeable == false && !triggers.contains(.mergeConflict) {
             triggers.append(.mergeConflict)
         }
@@ -252,6 +273,21 @@ struct NeedsHumanRowsView: View {
                 .padding(.vertical, 1)
                 .background(Color(nsColor: .systemRed).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
                 .foregroundStyle(Color(nsColor: .systemRed))
+        case .changesRequested:
+            Text("changes")
+                .font(.caption2)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color(nsColor: .systemRed).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+                .foregroundStyle(Color(nsColor: .systemRed))
+        case .unresolvedThreads(let count):
+            Text("\(count) unresolved")
+                .font(.caption2)
+                .lineLimit(1)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color(nsColor: .systemOrange).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+                .foregroundStyle(Color(nsColor: .systemOrange))
         case .sensitivePathTouched:
             Text("sensitive")
                 .font(.caption2)

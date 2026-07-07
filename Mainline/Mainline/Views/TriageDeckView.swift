@@ -234,48 +234,35 @@ struct TriageDeckView: View {
         prs.sorted(by: PRSnapshot.triageOrder)
     }
 
-    /// Folds a display bucket state for grouping: `.inReview` folds into `.open`
-    /// so both render under one "Open" section. This is a display-only mapping and
-    /// does NOT change `classifiedState` semantics (the classifier / trust /
-    /// needs-human logic keeps using the real state).
-    private func displayState(_ state: PRState) -> PRState {
-        state == .inReview ? .open : state
+    /// The actionability section a PR is grouped under for DISPLAY. Delegates to
+    /// `PRSnapshot.actionGroup(splitDrafts:)` — the single source of truth — so the
+    /// list groups by "does this still need me?" (Needs attention / Ready to merge /
+    /// Waiting) rather than raw review state. Drafts either form their own section
+    /// (`splitDrafts`) or mix into their actionability group (default).
+    private func groupFor(_ pr: PRSnapshot) -> ActionGroup {
+        pr.actionGroup(splitDrafts: settings.splitDrafts)
     }
 
-    /// The section a PR is grouped under for DISPLAY.
-    ///   - `splitDrafts && isDraft` → `.draft` (its own section, legacy behavior).
-    ///   - else → the in-review-folded mapping applied to `underlyingState`, so a
-    ///     shown draft mixes into its real state group (an otherwise-open draft
-    ///     lands in Open, an approved draft in Approved, etc.).
-    private func groupState(for pr: PRSnapshot) -> PRState {
-        if settings.splitDrafts && pr.isDraft { return .draft }
-        return displayState(pr.underlyingState)
-    }
-
-    /// Grouped sections in canonical state order, excluding empty ones. `.inReview`
-    /// PRs are folded into the "Open" section (see `displayState`); the "Open"
-    /// header count therefore equals open + in-review PRs combined. Drafts either
-    /// form their own "Draft" section (`splitDrafts`) or mix into their real state
-    /// group (default) — see `groupState`.
-    private var sections: [(state: PRState, prs: [PRSnapshot])] {
-        let grouped = Dictionary(grouping: orderedPRs, by: { groupState(for: $0) })
-        return PRState.allCases
-            .filter { $0 != .inReview }   // never render In Review as its own section
+    /// Grouped sections in canonical actionability order, excluding empty ones:
+    /// Needs attention → Ready to merge → Waiting → Draft → Merged → Closed.
+    private var sections: [(group: ActionGroup, prs: [PRSnapshot])] {
+        let grouped = Dictionary(grouping: orderedPRs, by: { groupFor($0) })
+        return ActionGroup.allCases
             .sorted { $0.sortIndex < $1.sortIndex }
-            .compactMap { state in
-                guard let prs = grouped[state], !prs.isEmpty else { return nil }
-                return (state, prs.sorted(by: PRSnapshot.triageOrder))
+            .compactMap { group in
+                guard let prs = grouped[group], !prs.isEmpty else { return nil }
+                return (group, prs.sorted(by: PRSnapshot.triageOrder))
             }
     }
 
     /// The single main list: the keyboard-navigable deck grouped into
-    /// collapsible per-state sections. Row focus indices map back into the flat
+    /// collapsible actionability sections. Row focus indices map back into the flat
     /// `orderedPRs` array so J/K navigation is unaffected by grouping.
     private var prList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(sections, id: \.state) { section in
-                    sectionView(state: section.state, prs: section.prs)
+                ForEach(sections, id: \.group) { section in
+                    sectionView(group: section.group, prs: section.prs)
                 }
             }
         }
@@ -287,8 +274,8 @@ struct TriageDeckView: View {
     }
 
     @ViewBuilder
-    private func sectionView(state: PRState, prs sectionPRs: [PRSnapshot]) -> some View {
-        let expansion = expansionBinding(for: state)
+    private func sectionView(group: ActionGroup, prs sectionPRs: [PRSnapshot]) -> some View {
+        let expansion = expansionBinding(for: group)
         // Whole-header tap toggles the section (label + count + chevron), matching
         // the Needs-a-Human header. Replaces DisclosureGroup so tapping the text or
         // count — not just the triangle — expands/collapses.
@@ -296,7 +283,7 @@ struct TriageDeckView: View {
             withAnimation(.easeInOut(duration: 0.15)) { expansion.wrappedValue.toggle() }
         } label: {
             HStack(spacing: 6) {
-                Text(state.title)
+                Text(group.title)
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
@@ -317,7 +304,7 @@ struct TriageDeckView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(expansion.wrappedValue ? "Collapse \(state.title)" : "Expand \(state.title)")
+        .help(expansion.wrappedValue ? "Collapse \(group.title)" : "Expand \(group.title)")
 
         if expansion.wrappedValue {
             ForEach(sectionPRs, id: \.nodeId) { pr in
@@ -332,13 +319,13 @@ struct TriageDeckView: View {
         orderedPRs.firstIndex(where: { $0.nodeId == pr.nodeId }) ?? 0
     }
 
-    /// Collapse state persisted to MainlineSettings.
-    private func expansionBinding(for state: PRState) -> Binding<Bool> {
+    /// Collapse state persisted to MainlineSettings, keyed by `ActionGroup`.
+    private func expansionBinding(for group: ActionGroup) -> Binding<Bool> {
         Binding(
-            get: { !settings.collapsedSections.contains(state) },
+            get: { !settings.collapsedSections.contains(group) },
             set: { expanded in
                 var collapsed = settings.collapsedSections
-                if expanded { collapsed.remove(state) } else { collapsed.insert(state) }
+                if expanded { collapsed.remove(group) } else { collapsed.insert(group) }
                 settings.collapsedSections = collapsed
             }
         )
@@ -748,11 +735,15 @@ struct DraftBadge: View {
 /// Priority:
 ///   1. `reviewDecision == .changesRequested` → red "changes" tag (a reviewer
 ///      formally requested changes — needs your attention).
-///   2. else if review activity exists — `reviewState == .changesRequested`
+///   2. else if `unresolvedThreadCount > 0` → an amber "N unresolved" pending tag
+///      (open conversations still need a reply/resolution — this PR still needs
+///      you). Chosen over the neutral comment badge so open threads stand out
+///      within a group.
+///   3. else if review activity exists — `reviewState == .changesRequested`
 ///      (reviews present but no aggregate decision) OR `commentCount > 0` →
 ///      a subtle secondary comment badge (bubble icon + count, count omitted
 ///      when 0).
-///   3. else → nothing.
+///   4. else → nothing.
 struct FeedbackBadge: View {
     let pr: PRSnapshot
 
@@ -766,6 +757,19 @@ struct FeedbackBadge: View {
                 .background(Color(nsColor: .systemRed).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
                 .foregroundStyle(Color(nsColor: .systemRed))
                 .accessibilityLabel("Changes requested")
+        } else if pr.unresolvedThreadCount > 0 {
+            HStack(spacing: 2) {
+                Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
+                    .font(.caption2)
+                Text("\(pr.unresolvedThreadCount) unresolved")
+                    .font(.caption2)
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Color(nsColor: .systemOrange).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+            .foregroundStyle(Color(nsColor: .systemOrange))
+            .accessibilityLabel("\(pr.unresolvedThreadCount) unresolved conversation\(pr.unresolvedThreadCount == 1 ? "" : "s")")
         } else if pr.reviewState == .changesRequested || pr.commentCount > 0 {
             HStack(spacing: 2) {
                 Image(systemName: "bubble.left")
