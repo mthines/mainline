@@ -129,6 +129,25 @@ struct SettingsView: View {
                 }
             }
 
+            // MARK: - Menu Bar (Bug 2 / 5)
+            Section("Menu Bar") {
+                Picker("Badge counts", selection: $settings.menuBarMetric) {
+                    ForEach(MenuBarMetric.allCases) { metric in
+                        Text(metric.displayName).tag(metric)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Toggle("Follow selected scope", isOn: $settings.menuBarScopeFollowsSelection)
+
+                Label("The badge counts the chosen metric" +
+                      (settings.menuBarScopeFollowsSelection ? ", narrowed to the scope you've selected in the panel." : " across all repositories."),
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // MARK: - Panel
             Section("Panel") {
                 Picker("Panel height", selection: $settings.panelHeight) {

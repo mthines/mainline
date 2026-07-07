@@ -1,6 +1,29 @@
 import Foundation
 import Combine
 
+// MARK: - MenuBarMetric
+
+/// What the menu-bar badge counts. User-configurable in Settings.
+enum MenuBarMetric: String, CaseIterable, Identifiable {
+    case needsAHuman        // PRs in the "Needs a Human" bucket (default)
+    case failingCI          // open PRs with failing/errored CI
+    case reviewRequests     // PRs where the user is a requested reviewer
+    case unread             // PRs the user hasn't looked at yet
+    case totalOpen          // all open (non-merged, non-closed) PRs
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .needsAHuman:    return "Needs a Human"
+        case .failingCI:      return "Failing CI"
+        case .reviewRequests: return "Review Requests"
+        case .unread:         return "Unread"
+        case .totalOpen:      return "Total Open"
+        }
+    }
+}
+
 /// All non-secret app settings backed by UserDefaults.
 final class MainlineSettings: ObservableObject {
     static let shared = MainlineSettings()
@@ -27,6 +50,8 @@ final class MainlineSettings: ObservableObject {
         static let attentionPolicy      = "attentionPolicy"
         static let unreadPRIds          = "unreadPRIds"
         static let panelHeight          = "panelHeight"
+        static let menuBarMetric        = "menuBarMetric"
+        static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
     }
 
     // MARK: - Persisted properties
@@ -107,6 +132,16 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(panelHeight, forKey: Keys.panelHeight) }
     }
 
+    /// What the menu-bar badge counts. Default `needsAHuman`.
+    @Published var menuBarMetric: MenuBarMetric {
+        didSet { defaults.set(menuBarMetric.rawValue, forKey: Keys.menuBarMetric) }
+    }
+
+    /// Whether the menu-bar badge follows the currently selected scope. Default true.
+    @Published var menuBarScopeFollowsSelection: Bool {
+        didSet { defaults.set(menuBarScopeFollowsSelection, forKey: Keys.menuBarScopeFollows) }
+    }
+
     /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
     @Published var snoozeMap: [String: Date] {
         didSet {
@@ -182,6 +217,13 @@ final class MainlineSettings: ObservableObject {
         attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
         unreadPRIdsList = defaults.stringArray(forKey: Keys.unreadPRIds) ?? []
         panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 560 : defaults.integer(forKey: Keys.panelHeight)
+
+        // Menu-bar badge — default: count "Needs a Human", follow selected scope
+        menuBarMetric = defaults.string(forKey: Keys.menuBarMetric)
+            .flatMap { MenuBarMetric(rawValue: $0) } ?? .needsAHuman
+        menuBarScopeFollowsSelection = defaults.object(forKey: Keys.menuBarScopeFollows) == nil
+            ? true
+            : defaults.bool(forKey: Keys.menuBarScopeFollows)
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {

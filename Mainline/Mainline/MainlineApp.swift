@@ -20,12 +20,32 @@ struct MainlineApp: App {
                 .task { await manager.start() }
                 .onAppear { ManagerBridge.instance = manager }
         } label: {
-            MenuBarIconView(
-                prs: manager.prs,
-                myLogin: manager.settings.githubUsername
-            )
+            MenuBarLabel(manager: manager)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+// MARK: - MenuBarLabel
+
+/// Observes the manager and the nested stores that drive the scope-aware,
+/// metric-configurable badge so the menu-bar icon updates live when the user
+/// changes scope (chip tap / `[` `]`), metric, or when PRs refresh.
+private struct MenuBarLabel: View {
+    @ObservedObject var manager: PRManager
+    @ObservedObject private var settings: MainlineSettings
+    @ObservedObject private var scopeStore: ScopeStore
+    @ObservedObject private var trustLedger: TrustLedgerStore
+
+    init(manager: PRManager) {
+        self.manager = manager
+        self.settings = manager.settings
+        self.scopeStore = manager.scopeStore
+        self.trustLedger = manager.trustLedger
+    }
+
+    var body: some View {
+        MenuBarIconView(badge: manager.menuBarBadge)
     }
 }
 

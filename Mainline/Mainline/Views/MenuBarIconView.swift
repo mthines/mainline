@@ -2,66 +2,56 @@ import SwiftUI
 
 // MARK: - MenuBarBadge
 
-/// Encodes the three distinct icon states for the menu bar badge.
+/// Encodes the menu-bar badge state, driven by the user-configured metric.
 /// Shape + tint are both used for colorblind safety.
+///
+/// - neutral:   secondary tint — informational counts (e.g. total open)
+/// - attention: amber          — items that want a look (needs-a-human, reviews, unread)
+/// - blocker:   red            — hard blockers (failing CI)
+///
+/// A count of 0 always renders as the "all clear" hollow circle regardless of
+/// severity, so an empty badge never draws a red/amber dot.
 enum MenuBarBadge {
-    case allClear                  // hollow circle — nothing needs attention
-    case ciRunning(Int)            // amber hourglass — pending CI on user's PRs
-    case mergeBlocker(Int)         // red exclamation — failing CI on user's PRs
+    case neutral(Int)
+    case attention(Int)
+    case blocker(Int)
 
-    var symbolName: String {
+    /// The raw count this badge represents.
+    var rawCount: Int {
         switch self {
-        case .allClear:       return "circle"
-        case .ciRunning:      return "hourglass.circle"
-        case .mergeBlocker:   return "exclamationmark.circle.fill"
+        case .neutral(let n), .attention(let n), .blocker(let n): return n
         }
     }
 
-    var count: Int? {
+    /// Whether there is anything to show.
+    private var isClear: Bool { rawCount == 0 }
+
+    var symbolName: String {
+        guard !isClear else { return "circle" }
         switch self {
-        case .allClear:            return nil
-        case .ciRunning(let n):    return n
-        case .mergeBlocker(let n): return n
+        case .neutral:   return "circle.fill"
+        case .attention: return "exclamationmark.circle.fill"
+        case .blocker:   return "exclamationmark.triangle.fill"
         }
+    }
+
+    /// The number to draw beside the icon, or nil when clear.
+    var count: Int? {
+        isClear ? nil : rawCount
     }
 }
 
 // MARK: - MenuBarIconView
 
-/// Dynamic menu bar icon label that encodes PR attention state.
-/// Replaces the static `systemImage: "arrow.triangle.pull"` in MainlineApp.
+/// Dynamic menu bar icon label that encodes the configured PR metric.
 ///
 /// Badge encoding (colorblind-safe — shape + tint):
-/// - allClear:     hollow circle, neutral   — 0 PRs need attention
-/// - ciRunning:    hourglass amber          — pending CI on user's PRs
-/// - mergeBlocker: filled exclamation red   — failing CI / merge conflict
+/// - clear:     hollow circle, neutral   — 0 items for the chosen metric
+/// - neutral:   filled circle, neutral   — informational count (total open)
+/// - attention: exclamation circle amber — needs-a-human / reviews / unread
+/// - blocker:   exclamation triangle red — failing CI
 struct MenuBarIconView: View {
-    let prs: [PRSnapshot]
-    let myLogin: String
-
-    var badge: MenuBarBadge {
-        guard !myLogin.isEmpty else { return .allClear }
-
-        var blocker = 0
-        var pending = 0
-
-        for pr in prs {
-            let isMyPR = pr.author == myLogin
-            let reviewRequested = pr.tabs.contains(.forMe) && pr.requestedReviewers.contains(myLogin)
-
-            if isMyPR && (pr.ciStatus == .failure || pr.ciStatus == .error) {
-                blocker += 1
-            } else if reviewRequested && (pr.ciStatus == .success || pr.ciStatus == .unknown) {
-                pending += 1
-            } else if (isMyPR || reviewRequested) && pr.ciStatus == .pending {
-                pending += 1
-            }
-        }
-
-        if blocker > 0 { return .mergeBlocker(blocker) }
-        if pending > 0 { return .ciRunning(pending) }
-        return .allClear
-    }
+    let badge: MenuBarBadge
 
     var body: some View {
         HStack(spacing: 2) {
@@ -77,10 +67,11 @@ struct MenuBarIconView: View {
     }
 
     private var iconColor: Color {
+        guard badge.count != nil else { return .secondary }
         switch badge {
-        case .allClear:      return .secondary
-        case .ciRunning:     return Color(nsColor: .systemOrange)
-        case .mergeBlocker:  return Color(nsColor: .systemRed)
+        case .neutral:   return .secondary
+        case .attention: return Color(nsColor: .systemOrange)
+        case .blocker:   return Color(nsColor: .systemRed)
         }
     }
 }
