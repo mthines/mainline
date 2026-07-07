@@ -1,9 +1,45 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Settings categories
+
+/// The sidebar categories for the settings window. Raw value drives the
+/// SF Symbol; `title` is the human-readable label shown in the sidebar and as
+/// the detail-pane heading.
+private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case github
+    case notifications
+    case menuBar
+    case appearance
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .github:        return "GitHub"
+        case .notifications: return "Notifications"
+        case .menuBar:       return "Menu Bar"
+        case .appearance:    return "Appearance"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .github:        return "key.fill"
+        case .notifications: return "bell.fill"
+        case .menuBar:       return "menubar.rectangle"
+        case .appearance:    return "slider.horizontal.3"
+        }
+    }
+}
+
+// MARK: - SettingsView
+
 struct SettingsView: View {
     @ObservedObject var manager: PRManager
     @ObservedObject private var settings: MainlineSettings
+
+    @State private var selection: SettingsCategory? = .github
 
     @State private var patDraft: String = ""
     @State private var patSaved: Bool = false
@@ -33,217 +69,244 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            // MARK: - GitHub Token
-            Section("GitHub Token") {
-                SecureField(
-                    hasStoredToken ? "A token is stored — paste a new one to replace" : "Personal Access Token",
-                    text: $patDraft
-                )
-                .textFieldStyle(.roundedBorder)
-
-                if hasStoredToken && !patSaved {
-                    Label("A token is stored", systemImage: "key.fill")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
-
-                HStack {
-                    Button("Save Token") {
-                        saveToken()
-                    }
-                    .disabled(patDraft.isEmpty)
-
-                    Button("Import from gh") {
-                        importFromGH()
-                    }
-                    .disabled(isImporting)
-
-                    if isImporting {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-
-                if patSaved {
-                    Label("Token saved", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.caption)
-                }
-
-                if let importError {
-                    Label(importError, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        NavigationSplitView {
+            List(SettingsCategory.allCases, selection: $selection) { category in
+                Label(category.title, systemImage: category.systemImage)
+                    .tag(category)
             }
-
-            // MARK: - Poll Interval
-            Section("Polling") {
-                Stepper(
-                    "Poll interval: \(settings.pollIntervalSeconds)s",
-                    value: $settings.pollIntervalSeconds,
-                    in: 30...3600,
-                    step: 30
-                )
-            }
-
-            // MARK: - Search Queries
-            Section("Search Queries") {
-                TextField("Author query", text: $settings.searchQueryAuthor)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Reviewer query", text: $settings.searchQueryReviewer)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            // MARK: - Notification Toggles
-            Section("Notifications") {
-                Toggle("New PR", isOn: $settings.notifyNewPR)
-                Toggle("Ready for Review", isOn: $settings.notifyReadyForReview)
-                Toggle("CI Status Changed", isOn: $settings.notifyCIChange)
-                Toggle("New Review / Comment", isOn: $settings.notifyReviewComment)
-            }
-
-            // MARK: - Triage (Layer B / D)
-            Section("Write Actions") {
-                Toggle("Enable write actions (Approve, Merge, Request Changes)", isOn: $settings.writeActionsEnabled)
-                if settings.writeActionsEnabled {
-                    Toggle("Enable autopilot auto-approve (advanced)", isOn: $settings.autopilotEnabled)
-                    if settings.autopilotEnabled {
-                        Label("Auto-approve fires when author is autopilot tier, CI green, and < 50 LOC changed.", systemImage: "info.circle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            // MARK: - Triage Focus
-            Section("Triage") {
-                Toggle("Show draft PRs", isOn: $settings.showDrafts)
-                Label("When off, drafts are hidden from the list, sections, counts, and the Needs-a-Human bucket. Toggle in the panel with the Drafts chip or ⌘D.",
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle("Group drafts in their own section", isOn: $settings.splitDrafts)
-                Label("When off, shown drafts are mixed into their real state group (Open, Approved, …) and marked with a Draft badge.",
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle("Route merge conflicts to \"Needs a Human\"", isOn: $settings.includeConflictsInNeedsHuman)
-                Label("When off, the Needs-a-Human bucket focuses on failing CI; conflicts still show as a tag on rows but don't route PRs into the bucket.",
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // MARK: - Attention Policy
-            Section("Attention Policy") {
-                Text("Control how interrupting each event is.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                ForEach(PREvent.allCases, id: \.rawValue) { event in
-                    HStack {
-                        Text(event.displayName)
-                        Spacer()
-                        Picker("", selection: Binding(
-                            get: { settings.level(for: event) },
-                            set: { newLevel in
-                                var policy = settings.attentionPolicy
-                                policy[event.rawValue] = newLevel.rawValue
-                                settings.attentionPolicy = policy
-                            }
-                        )) {
-                            Text("Notify").tag(AttentionLevel.notify)
-                            Text("Quiet").tag(AttentionLevel.quiet)
-                            Text("Off").tag(AttentionLevel.off)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 200)
-                    }
-                }
-            }
-
-            // MARK: - Menu Bar (Bug 2 / 5)
-            Section("Menu Bar") {
-                Picker("Badge counts", selection: $settings.menuBarMetric) {
-                    ForEach(MenuBarMetric.allCases) { metric in
-                        Text(metric.displayName).tag(metric)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Toggle("Follow current view (tab, scope & drafts)", isOn: $settings.menuBarScopeFollowsSelection)
-
-                Label("The badge counts the chosen metric" +
-                      (settings.menuBarScopeFollowsSelection ? " over exactly what the panel shows — the selected tab, scope, and drafts filter." : " across all repositories, ignoring the selected tab, scope, and drafts."),
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // MARK: - Global Shortcut
-            Section("Global Shortcut") {
-                Toggle("Open Mainline with a global shortcut", isOn: $settings.globalShortcutEnabled)
-
-                HStack {
-                    Text("Shortcut")
-                    Spacer()
-                    ShortcutRecorder(settings: settings)
-                        .disabled(!settings.globalShortcutEnabled)
-                    Button("Reset to default (⇧⌃⌘P)") {
-                        settings.resetGlobalShortcutToDefault()
-                    }
-                    .disabled(!settings.globalShortcutEnabled)
-                }
-
-                Label("Press this key combination from any app to open the Mainline popover. Requires at least one modifier key.",
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // MARK: - Panel
-            Section("Panel") {
-                Toggle("Compact rows", isOn: $settings.compactRows)
-                Label("Single-line titles, tighter spacing — fit more PRs.",
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack {
-                    Text("Max panel height (pt)")
-                    Spacer()
-                    TextField("", value: $panelHeightDraft, formatter: Self.panelHeightFormatter)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 70)
-                        .onSubmit { commitPanelHeight() }
-                    Stepper("", value: $panelHeightDraft, in: Self.panelHeightMin...Self.panelHeightMax, step: 20)
-                        .labelsHidden()
-                        .onChange(of: panelHeightDraft) { _ in commitPanelHeight() }
-                }
-                Label("The MAXIMUM height — the panel sizes to its content and only grows up to this (scrolling beyond it). Capped to the display height, so very large values just let it fill the screen.",
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+        } detail: {
+            detailPane(for: selection ?? .github)
+                .navigationSplitViewColumnWidth(min: 440, ideal: 520)
         }
-        .formStyle(.grouped)
-        .padding()
-        .frame(width: 420, height: 560)
+        .frame(minWidth: 640, minHeight: 480)
         .onAppear {
             loadToken()
             panelHeightDraft = settings.panelHeight
+        }
+    }
+
+    // MARK: - Detail pane routing
+
+    @ViewBuilder
+    private func detailPane(for category: SettingsCategory) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(category.title)
+                .font(.title2.weight(.semibold))
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 4)
+
+            Form {
+                switch category {
+                case .github:        githubSection
+                case .notifications: notificationsSection
+                case .menuBar:       menuBarSection
+                case .appearance:    appearanceSection
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: - GitHub
+
+    @ViewBuilder
+    private var githubSection: some View {
+        Section("GitHub Token") {
+            SecureField(
+                hasStoredToken ? "A token is stored — paste a new one to replace" : "Personal Access Token",
+                text: $patDraft
+            )
+            .textFieldStyle(.roundedBorder)
+
+            if hasStoredToken && !patSaved {
+                Label("A token is stored", systemImage: "key.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+
+            HStack {
+                Button("Save Token") {
+                    saveToken()
+                }
+                .disabled(patDraft.isEmpty)
+
+                Button("Import from gh") {
+                    importFromGH()
+                }
+                .disabled(isImporting)
+
+                if isImporting {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if patSaved {
+                Label("Token saved", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            }
+
+            if let importError {
+                Label(importError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        Section("Search Queries") {
+            TextField("Author query", text: $settings.searchQueryAuthor)
+                .textFieldStyle(.roundedBorder)
+            TextField("Reviewer query", text: $settings.searchQueryReviewer)
+                .textFieldStyle(.roundedBorder)
+        }
+
+        Section("Polling") {
+            Stepper(
+                "Poll interval: \(settings.pollIntervalSeconds)s",
+                value: $settings.pollIntervalSeconds,
+                in: 30...3600,
+                step: 30
+            )
+        }
+
+        Section("Write Actions") {
+            Toggle("Enable write actions (Approve, Merge, Request Changes)", isOn: $settings.writeActionsEnabled)
+            if settings.writeActionsEnabled {
+                Toggle("Enable autopilot auto-approve (advanced)", isOn: $settings.autopilotEnabled)
+                if settings.autopilotEnabled {
+                    Label("Auto-approve fires when author is autopilot tier, CI green, and < 50 LOC changed.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Notifications
+
+    @ViewBuilder
+    private var notificationsSection: some View {
+        Section("Attention Policy") {
+            Text("Control how interrupting each event is.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(PREvent.allCases, id: \.rawValue) { event in
+                HStack {
+                    Text(event.displayName)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { settings.level(for: event) },
+                        set: { newLevel in
+                            var policy = settings.attentionPolicy
+                            policy[event.rawValue] = newLevel.rawValue
+                            settings.attentionPolicy = policy
+                        }
+                    )) {
+                        Text("Notify").tag(AttentionLevel.notify)
+                        Text("Quiet").tag(AttentionLevel.quiet)
+                        Text("Off").tag(AttentionLevel.off)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 200)
+                }
+            }
+        }
+    }
+
+    // MARK: - Menu Bar
+
+    @ViewBuilder
+    private var menuBarSection: some View {
+        Section("Badge") {
+            Picker("Badge counts", selection: $settings.menuBarMetric) {
+                ForEach(MenuBarMetric.allCases) { metric in
+                    Text(metric.displayName).tag(metric)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Toggle("Follow current view (tab, scope & drafts)", isOn: $settings.menuBarScopeFollowsSelection)
+
+            Label("The badge counts the chosen metric" +
+                  (settings.menuBarScopeFollowsSelection ? " over exactly what the panel shows — the selected tab, scope, and drafts filter." : " across all repositories, ignoring the selected tab, scope, and drafts."),
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Section("Global Shortcut") {
+            Toggle("Open Mainline with a global shortcut", isOn: $settings.globalShortcutEnabled)
+
+            HStack {
+                Text("Shortcut")
+                Spacer()
+                ShortcutRecorder(settings: settings)
+                    .disabled(!settings.globalShortcutEnabled)
+                Button("Reset to default (⇧⌃⌘P)") {
+                    settings.resetGlobalShortcutToDefault()
+                }
+                .disabled(!settings.globalShortcutEnabled)
+            }
+
+            Label("Press this key combination from any app to open the Mainline popover. Requires at least one modifier key.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Appearance
+
+    @ViewBuilder
+    private var appearanceSection: some View {
+        Section("Panel") {
+            HStack {
+                Text("Max panel height (pt)")
+                Spacer()
+                TextField("", value: $panelHeightDraft, formatter: Self.panelHeightFormatter)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 70)
+                    .onSubmit { commitPanelHeight() }
+                Stepper("", value: $panelHeightDraft, in: Self.panelHeightMin...Self.panelHeightMax, step: 20)
+                    .labelsHidden()
+                    .onChange(of: panelHeightDraft) { _ in commitPanelHeight() }
+            }
+            Label("The MAXIMUM height — the panel sizes to its content and only grows up to this (scrolling beyond it). Capped to the display height, so very large values just let it fill the screen.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Compact rows", isOn: $settings.compactRows)
+            Label("Single-line titles, tighter spacing — fit more PRs.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Section("Drafts") {
+            Toggle("Show draft PRs", isOn: $settings.showDrafts)
+            Label("When off, drafts are hidden from the list, sections, counts, and the Needs-a-Human bucket. Toggle in the panel with the Drafts chip or ⌘D.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Group drafts in their own section", isOn: $settings.splitDrafts)
+            Label("When off, shown drafts are mixed into their real state group (Open, Approved, …) and marked with a Draft badge.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -186,9 +186,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let controller   = NSHostingController(rootView: settingsView)
         let window       = NSWindow(contentViewController: controller)
         window.title                = "Mainline Settings"
-        window.styleMask            = [.titled, .closable]
+        window.styleMask            = [.titled, .closable, .resizable]
         window.isReleasedWhenClosed = false
         window.delegate             = self
+        // Larger, resizable, sidebar-friendly window. The hosting SettingsView
+        // fills this via its NavigationSplitView (no fixed inner frame), so the
+        // sidebar + detail pane use the full content area.
+        window.setContentSize(NSSize(width: 720, height: 560))
+        window.minSize              = NSSize(width: 640, height: 480)
         window.center()
 
         self.settingsWindow = window
