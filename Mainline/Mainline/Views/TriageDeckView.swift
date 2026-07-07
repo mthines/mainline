@@ -228,6 +228,9 @@ struct TriageDeckView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         TrustBadgeView(tier: manager.trustLedger.tier(for: pr.author))
+                        if settings.selectedTab == .forMe {
+                            ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
+                        }
                     }
                 }
             }
@@ -496,5 +499,38 @@ struct TriageDeckView: View {
     /// Returns the PRs currently in the multi-select set, in display order.
     private var selectedPRList: [PRSnapshot] {
         prs.filter { selectedPRs.contains($0.nodeId) }
+    }
+}
+
+// MARK: - ReviewSourceBadge
+
+/// Small badge distinguishing a DIRECT ("you", accent) review request from a
+/// TEAM one (team slug, secondary). Rendered on For-me rows next to the
+/// repo/#number line. Hidden when the PR is not review-requested.
+struct ReviewSourceBadge: View {
+    let pr: PRSnapshot
+    let myLogin: String
+
+    var body: some View {
+        switch pr.reviewRequestSource(myLogin: myLogin) {
+        case .direct:
+            badge(text: "you", color: Color.accentColor)
+        case .team:
+            // Prefer showing the team slug; fall back to a generic "team" label.
+            badge(text: pr.requestedTeams.first ?? "team", color: Color(nsColor: .secondaryLabelColor))
+        case .none:
+            EmptyView()
+        }
+    }
+
+    private func badge(text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2)
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
+            .foregroundStyle(color)
+            .accessibilityLabel(text == "you" ? "Directly requested" : "Team requested: \(text)")
     }
 }

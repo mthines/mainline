@@ -84,8 +84,12 @@ private struct GraphQLReviewRequestNode: Decodable {
     let requestedReviewer: GraphQLRequestedReviewer?
 }
 
+/// A requested reviewer is either a User (has `login`) or a Team (has `slug`/`name`).
+/// GraphQL inline fragments populate whichever applies.
 private struct GraphQLRequestedReviewer: Decodable {
-    let login: String?
+    let login: String?  // ... on User
+    let slug: String?   // ... on Team
+    let name: String?   // ... on Team
 }
 
 /// Response model for REST `/repos/{owner}/{repo}/pulls/{number}/files`.
@@ -253,9 +257,16 @@ final class GitHubClient {
         default:            mergeableBool = nil   // UNKNOWN or missing
         }
 
-        // Extract requested reviewer logins
+        // Extract requested reviewer logins (User reviewers)
         let requestedReviewers: [String] = node.reviewRequests?.nodes.compactMap {
             $0.requestedReviewer?.login
+        } ?? []
+
+        // Extract requested team slugs (Team reviewers), falling back to name.
+        let requestedTeams: [String] = node.reviewRequests?.nodes.compactMap {
+            let reviewer = $0.requestedReviewer
+            guard reviewer?.login == nil else { return nil }   // skip User reviewers
+            return reviewer?.slug ?? reviewer?.name
         } ?? []
 
         return PRSnapshot(
@@ -275,6 +286,7 @@ final class GitHubClient {
             updatedAt:          node.updatedAt ?? "",
             author:             node.author?.login ?? "",
             requestedReviewers: requestedReviewers,
+            requestedTeams:     requestedTeams,
             tabs:               [tab],
             mergeable:          mergeableBool,
             headRefName:        node.headRefName ?? "",
@@ -324,6 +336,7 @@ final class GitHubClient {
               nodes {
                 requestedReviewer {
                   ... on User { login }
+                  ... on Team { slug name }
                 }
               }
             }

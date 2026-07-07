@@ -17,6 +17,15 @@ enum ReviewState: String, Codable, Equatable {
     case changesRequested
 }
 
+/// Why a PR appears in the "For me" set, given the authenticated user's login.
+/// `review-requested:@me` matches when the user is requested directly OR when a
+/// team they belong to is requested — this distinguishes the two.
+enum ReviewRequestSource: String, Codable, Equatable {
+    case direct   // the user's own login is a requested reviewer
+    case team     // only a team the user belongs to is requested
+    case none     // not review-requested (e.g. authored / assigned another way)
+}
+
 /// GitHub's aggregate review decision for a PR.
 /// Mirrors GraphQL `PullRequest.reviewDecision`.
 enum ReviewDecision: String, Codable, Equatable {
@@ -95,7 +104,10 @@ struct PRSnapshot: Codable, Equatable {
     var commentCount: Int           // total comment count for new-comment detection
     var updatedAt: String           // ISO 8601
     let author: String              // PR author login
-    var requestedReviewers: [String] // logins requested for review
+    var requestedReviewers: [String] // logins requested for review (User reviewers)
+    /// Team slugs (or names) requested for review. A team request is how a PR can
+    /// enter the "For me" set without the user's own login being requested.
+    var requestedTeams: [String]
     /// Which tab(s) surfaced this PR. Unioned when the same PR appears in both queries.
     var tabs: Set<ReviewTab>
 
@@ -137,6 +149,7 @@ struct PRSnapshot: Codable, Equatable {
         updatedAt: String,
         author: String,
         requestedReviewers: [String],
+        requestedTeams: [String] = [],
         tabs: Set<ReviewTab> = [],
         mergeable: Bool? = nil,
         headRefName: String = "",
@@ -160,6 +173,7 @@ struct PRSnapshot: Codable, Equatable {
         self.updatedAt = updatedAt
         self.author = author
         self.requestedReviewers = requestedReviewers
+        self.requestedTeams = requestedTeams
         self.tabs = tabs
         self.mergeable = mergeable
         self.headRefName = headRefName
@@ -197,5 +211,19 @@ struct PRSnapshot: Codable, Equatable {
             // No decision yet. If reviews exist but no formal decision, treat as In Review.
             return reviewState == .changesRequested ? .inReview : .open
         }
+    }
+
+    /// Why this PR is in the "For me" set, from the point of view of `myLogin`.
+    /// `.direct` when the user is personally a requested reviewer; `.team` when
+    /// only a team the user belongs to is requested (the PR was pulled in by a
+    /// team request); `.none` otherwise.
+    func reviewRequestSource(myLogin: String) -> ReviewRequestSource {
+        if !myLogin.isEmpty && requestedReviewers.contains(myLogin) {
+            return .direct
+        }
+        if !requestedTeams.isEmpty {
+            return .team
+        }
+        return .none
     }
 }

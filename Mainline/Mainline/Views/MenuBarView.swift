@@ -41,6 +41,11 @@ struct MenuBarView: View {
             // Tab picker governs ONLY the browse list below it.
             tabPicker
 
+            // For-me sub-filter (Direct / Team) — only visible on the For-me tab.
+            if settings.selectedTab == .forMe {
+                forMeReviewFilterPicker
+            }
+
             // Browse list: PRs for the selected tab + scope + drafts filter.
             content
 
@@ -97,7 +102,22 @@ struct MenuBarView: View {
         } else {
             scopeFiltered = draftFiltered
         }
-        return scopeFiltered.sorted(by: PRSnapshot.triageOrder)
+        // For-me sub-filter: narrow by direct/team review-request source. Only
+        // applies on the For-me tab; `.all` (default) is a no-op.
+        let sourceFiltered: [PRSnapshot]
+        if settings.selectedTab == .forMe, settings.forMeReviewFilter != .all {
+            let myLogin = settings.githubUsername
+            sourceFiltered = scopeFiltered.filter { pr in
+                switch settings.forMeReviewFilter {
+                case .all:    return true
+                case .direct: return pr.reviewRequestSource(myLogin: myLogin) == .direct
+                case .team:   return pr.reviewRequestSource(myLogin: myLogin) == .team
+                }
+            }
+        } else {
+            sourceFiltered = scopeFiltered
+        }
+        return sourceFiltered.sorted(by: PRSnapshot.triageOrder)
     }
 
     /// Whether a PR should count toward the tab labels, honouring the draft toggle.
@@ -171,6 +191,23 @@ struct MenuBarView: View {
         case .forMe:   return forMeCount > 0   ? "For me (\(forMeCount))"     : tab.title
         case .created: return createdCount > 0 ? "Created (\(createdCount))" : tab.title
         }
+    }
+
+    // MARK: - For-me review sub-filter (Direct / Team)
+
+    /// Compact segmented control shown only on the For-me tab. Filters the browse
+    /// list by review-request source. Persisted in `settings.forMeReviewFilter`.
+    private var forMeReviewFilterPicker: some View {
+        Picker("Review source", selection: $settings.forMeReviewFilter) {
+            ForEach(ForMeReviewFilter.allCases) { filter in
+                Text(filter.displayName).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
     }
 
     // MARK: - Scope filter

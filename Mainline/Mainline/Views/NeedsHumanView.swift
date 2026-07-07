@@ -96,6 +96,7 @@ struct NeedsHumanView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         TrustBadgeView(tier: trustTier)
+                        ReviewSourceBadge(pr: pr, myLogin: myLogin)
                         triggerLabels(for: pr)
                     }
                 }

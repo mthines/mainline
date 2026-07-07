@@ -65,8 +65,20 @@ final class NotificationService {
     ) -> (PREvent, PRSnapshot, (id: String, title: String, body: String, url: String))? {
         switch transition {
         case .newPR(let pr):
-            let event: PREvent = (!myLogin.isEmpty && pr.author == myLogin) ? .newPRByMe : .reviewRequested
-            let args = (id: "mainline.new_pr.\(pr.nodeId)", title: "New PR",
+            let event: PREvent
+            let title: String
+            if !myLogin.isEmpty && pr.author == myLogin {
+                event = .newPRByMe
+                title = "New PR"
+            } else if pr.reviewRequestSource(myLogin: myLogin) == .team {
+                // Team pulled this into the For-me set — quiet by default.
+                event = .reviewRequestedTeam
+                title = "Team review requested"
+            } else {
+                event = .reviewRequested
+                title = "New PR"
+            }
+            let args = (id: "mainline.new_pr.\(pr.nodeId)", title: title,
                         body: "\(pr.repoFullName): \(pr.title)", url: pr.htmlUrl)
             return (event, pr, args)
         case .readyForReview(let pr):

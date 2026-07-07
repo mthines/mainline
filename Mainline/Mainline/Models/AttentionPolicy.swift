@@ -14,7 +14,8 @@ enum AttentionLevel: String, Codable, CaseIterable {
 /// All PR event types that can generate attention.
 enum PREvent: String, Codable, CaseIterable {
     case newPRByMe           // new PR opened by me (authored)
-    case reviewRequested     // review requested from me
+    case reviewRequested     // DIRECT review requested from me (my login)
+    case reviewRequestedTeam // review requested from a team I belong to
     case ciFailedOnMyPR      // CI failed on my PR
     case changesRequested    // reviewer requested changes on my PR
     case newReviewOrComment  // new review or comment needing response
@@ -30,6 +31,7 @@ enum PREvent: String, Codable, CaseIterable {
         switch self {
         case .newPRByMe:          return "New PR opened by me"
         case .reviewRequested:    return "Review requested from me"
+        case .reviewRequestedTeam: return "Team review requested"
         case .ciFailedOnMyPR:     return "CI failed on my PR"
         case .changesRequested:   return "Changes requested on my PR"
         case .newReviewOrComment: return "New review or comment"
@@ -49,7 +51,8 @@ extension PREvent {
     /// The default attention level — baked in to be attention-respectful.
     static let defaults: [PREvent: AttentionLevel] = [
         .newPRByMe:          .notify,
-        .reviewRequested:    .notify,
+        .reviewRequested:    .notify,   // DIRECT request — actionable
+        .reviewRequestedTeam: .quiet,   // team pulled it in — lower noise
         .ciFailedOnMyPR:     .notify,
         .changesRequested:   .notify,
         .newReviewOrComment: .notify,

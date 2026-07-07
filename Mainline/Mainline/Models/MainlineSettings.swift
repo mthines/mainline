@@ -24,6 +24,26 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - ForMeReviewFilter
+
+/// Sub-filter for the "For me" tab: narrow the visible PRs by how the review
+/// was requested. Default `.all` shows both direct and team requests.
+enum ForMeReviewFilter: String, CaseIterable, Identifiable {
+    case all
+    case direct
+    case team
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all:    return "All"
+        case .direct: return "Direct"
+        case .team:   return "Team"
+        }
+    }
+}
+
 /// All non-secret app settings backed by UserDefaults.
 final class MainlineSettings: ObservableObject {
     static let shared = MainlineSettings()
@@ -54,6 +74,7 @@ final class MainlineSettings: ObservableObject {
         static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
         static let showDrafts           = "showDrafts"
+        static let forMeReviewFilter    = "forMeReviewFilter"
     }
 
     // MARK: - Persisted properties
@@ -157,6 +178,11 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(showDrafts, forKey: Keys.showDrafts) }
     }
 
+    /// Sub-filter for the "For me" tab. Default `.all` (show direct + team).
+    @Published var forMeReviewFilter: ForMeReviewFilter {
+        didSet { defaults.set(forMeReviewFilter.rawValue, forKey: Keys.forMeReviewFilter) }
+    }
+
     /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
     @Published var snoozeMap: [String: Date] {
         didSet {
@@ -244,6 +270,10 @@ final class MainlineSettings: ObservableObject {
         includeConflictsInNeedsHuman = defaults.bool(forKey: Keys.includeConflictsInNeedsHuman)
         // Drafts — default OFF (calmer view)
         showDrafts = defaults.bool(forKey: Keys.showDrafts)
+
+        // For-me review sub-filter — default All (show direct + team)
+        forMeReviewFilter = defaults.string(forKey: Keys.forMeReviewFilter)
+            .flatMap { ForMeReviewFilter(rawValue: $0) } ?? .all
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {
