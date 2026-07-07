@@ -432,14 +432,36 @@ struct TriageDeckView: View {
             // HERE — before the hover overlay — so the draft dim never reaches the
             // hover action cluster; Later/Merge stay full-opacity on draft rows.
             .opacity(isDraft ? 0.6 : 1.0)
+            // On hover, dissolve the trailing edge of the row CONTENT (title +
+            // metadata) to transparent with an alpha mask so the text fades out
+            // smoothly UNDER the trailing action pill — letting the panel background
+            // show through with no colored block or hard seam. Most of the row stays
+            // fully visible; only the trailing region (~the pill width) fades. When
+            // NOT hovered, no mask is applied and the title stays full-width/opaque.
+            .mask(alignment: .center) {
+                if isHovered {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0.0),
+                            .init(color: .black, location: 0.80),
+                            .init(color: .clear, location: 1.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                } else {
+                    Rectangle()
+                }
+            }
             // The title/content extends the FULL row width — no reserved space for
             // the Later button. The hover actions are drawn as a trailing overlay
-            // on top, vertically CENTERED within the row content and compact so the
-            // capsule sits on its OWN row with no vertical bleed into neighbours.
-            // Attached to the row content HStack — BEFORE the row's vertical padding
-            // and BEFORE the section's trailing Divider — so its bounds equal the
-            // visible row content and never include the divider's height. Placed
-            // AFTER the draft opacity so the cluster always renders fully opaque.
+            // on top of the faded area, vertically CENTERED within the row content
+            // and compact so the capsule sits on its OWN row with no vertical bleed
+            // into neighbours. Attached to the row content HStack — BEFORE the row's
+            // vertical padding and BEFORE the section's trailing Divider — so its
+            // bounds equal the visible row content and never include the divider's
+            // height. Placed AFTER the draft opacity so the cluster renders fully
+            // opaque even on draft rows.
             .overlay(alignment: .trailing) {
                 if isHovered {
                     hoverActionsCluster(for: pr)
@@ -473,53 +495,41 @@ struct TriageDeckView: View {
         .buttonStyle(.plain)
     }
 
-    /// The hover-only trailing action cluster drawn as an `.overlay` on top of a
+    /// The hover-only trailing action pill drawn as an `.overlay` on top of a
     /// deck row's full-width title. Contains "Later" (always) plus "Merge" (only
     /// on ready-to-merge rows) so the two never overlap — on ready rows the
     /// in-flow Merge is hidden while hovered and re-drawn here beside Later.
     ///
-    /// A short leading clear→background gradient fades the row material in from
-    /// the left so the buttons blend over the title text instead of hard-clipping
-    /// it; the buttons themselves sit on a solid `.regularMaterial` cap so their
-    /// labels stay readable over whatever title is behind them.
+    /// There is NO separate leading gradient block: the row content itself is
+    /// alpha-masked to fade to transparent under this pill (see the `.mask` in
+    /// `deckRow`), so the title dissolves smoothly beneath the buttons with no
+    /// colored seam. The pill keeps a subtle `.regularMaterial` capsule for its
+    /// OWN label legibility over whatever title remains behind it.
     @ViewBuilder
     private func hoverActionsCluster(for pr: PRSnapshot) -> some View {
-        // Compact fixed height for the whole cluster so it matches the button
-        // capsule — NOT the full row+divider height — and stays vertically
-        // centered within the row content, never bleeding into neighbours.
+        // Compact fixed height for the pill so it matches the button capsule —
+        // NOT the full row+divider height — and stays vertically centered within
+        // the row content, never bleeding into neighbours.
         let clusterHeight: CGFloat = 24
         HStack(spacing: 6) {
-            // Leading fade: clear → the row's material, so the title dissolves
-            // under the cluster rather than being cut off abruptly. Same height as
-            // the capsule so the fade aligns with the cluster, not the whole row.
-            LinearGradient(
-                colors: [Color.clear, Color(nsColor: .windowBackgroundColor)],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .frame(width: 24, height: clusterHeight)
+            LaterButton(onPostpone: { duration in postpone(pr, for: duration) })
 
-            HStack(spacing: 6) {
-                LaterButton(onPostpone: { duration in postpone(pr, for: duration) })
-
-                // On ready rows, re-draw Merge here beside Later so both actions
-                // share the hover background and Later never covers Merge.
-                if pr.readyToMerge {
-                    MergeButton(
-                        writeActionsEnabled: settings.writeActionsEnabled,
-                        onMerge: { dispatchVerb(.merge(pr)) }
-                    )
-                }
+            // On ready rows, re-draw Merge here beside Later so both actions
+            // share the hover background and Later never covers Merge.
+            if pr.readyToMerge {
+                MergeButton(
+                    writeActionsEnabled: settings.writeActionsEnabled,
+                    onMerge: { dispatchVerb(.merge(pr)) }
+                )
             }
-            .padding(.leading, 4)
-            .padding(.trailing, 6)
-            .frame(height: clusterHeight)
-            .background(.regularMaterial, in: Capsule())
         }
+        .padding(.leading, 4)
+        .padding(.trailing, 6)
         // Fixed compact height keeps the capsule on its own row; `.center`
         // alignment in the enclosing `.overlay(alignment: .trailing)` then centres
         // it vertically within the row content.
         .frame(height: clusterHeight)
+        .background(.regularMaterial, in: Capsule())
         .padding(.trailing, 4)
         .fixedSize()
     }
