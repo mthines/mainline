@@ -160,12 +160,25 @@ final class GitHubClient {
     /// no per-PR check-runs fan-out is needed.
     /// Throws `.notModified` if the server returned 304 (ETag unchanged).
     func searchPRs(query: String, token: String, tab: ReviewTab) async throws -> (snapshots: [PRSnapshot], etag: String?) {
+        try await runSearch(query: query, token: token, tab: tab, first: 100, etagPrefix: "graphql.search")
+    }
+
+    /// Shared GraphQL search executor backing both `searchPRs` (open, first: 100)
+    /// and `searchDonePRs` (completed, first: 30). `etagPrefix` keeps the two
+    /// caches distinct so an open 304 can't suppress a Done fetch (and vice versa).
+    private func runSearch(
+        query: String,
+        token: String,
+        tab: ReviewTab,
+        first: Int,
+        etagPrefix: String
+    ) async throws -> (snapshots: [PRSnapshot], etag: String?) {
         guard let url = URL(string: "https://api.github.com/graphql") else {
             throw GitHubAPIError.unknown(0)
         }
 
         let gql = Self.searchQueryDocument
-        let variables: [String: Any] = ["q": query, "first": 100]
+        let variables: [String: Any] = ["q": query, "first": first]
         let bodyDict: [String: Any] = ["query": gql, "variables": variables]
         guard let body = try? JSONSerialization.data(withJSONObject: bodyDict) else {
             throw GitHubAPIError.unknown(0)
@@ -178,8 +191,9 @@ final class GitHubClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        // ETag caching — keyed per tab query so the two tabs don't collide.
-        let etagKey = "graphql.search.\(tab.rawValue).\(query)"
+        // ETag caching — keyed per prefix + tab + query so the two tabs (and the
+        // open vs. done fetches) never collide.
+        let etagKey = "\(etagPrefix).\(tab.rawValue).\(query)"
         if let storedEtag = settings.etag(for: etagKey) {
             request.setValue(storedEtag, forHTTPHeaderField: "If-None-Match")
         }
@@ -233,6 +247,31 @@ final class GitHubClient {
         }
 
         return (snapshots, newEtag)
+    }
+
+    // MARK: - Search recently DONE PRs (merged/closed) — display-only
+
+    /// Fetches recently completed PRs (merged OR closed-not-merged) for a tab.
+    ///
+    /// DISPLAY-ONLY: the caller must keep these OUT of `PRStateStore` /
+    /// `PRDiffEngine` / notifications — a merged PR must never fire a "new PR"
+    /// banner. The query is the tab's own author/reviewer qualifier plus
+    /// `is:pr is:closed sort:updated-desc` (GitHub's `is:closed` includes merged +
+    /// closed), bounded to `first: 30`. ETag is cached under a distinct per-tab key
+    /// so it never collides with the open-fetch cache. Throws `.notModified` on 304
+    /// so the caller can keep the prior Done set unchanged.
+    func searchDonePRs(tab: ReviewTab, token: String) async throws -> (snapshots: [PRSnapshot], etag: String?) {
+        let query = "\(Self.doneQualifier(for: tab)) is:pr is:closed sort:updated-desc"
+        return try await runSearch(query: query, token: token, tab: tab, first: 30, etagPrefix: "graphql.done")
+    }
+
+    /// The user-scoped qualifier for a tab's Done query. Mirrors the open-fetch
+    /// queries: `author:@me` for the Created tab, `review-requested:@me` for For me.
+    private static func doneQualifier(for tab: ReviewTab) -> String {
+        switch tab {
+        case .created: return "author:@me"
+        case .forMe:   return "review-requested:@me"
+        }
     }
 
     // MARK: - Snapshot mapping

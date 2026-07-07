@@ -262,6 +262,15 @@ struct TriageDeckView: View {
         if !postponed.isEmpty {
             result.append((.postponed, postponed))
         }
+
+        // Done is the LOWEST-priority section — appended LAST, after Postponed.
+        // Sourced from the display-only `doneViewPRs` (merged/closed for the
+        // current tab + scope), sorted most-recently-updated first. Collapsed by
+        // default (see `expansionBinding`).
+        let done = manager.doneViewPRs.sorted { $0.updatedAt > $1.updatedAt }
+        if !done.isEmpty {
+            result.append((.done, done))
+        }
         return result
     }
 
@@ -328,6 +337,8 @@ struct TriageDeckView: View {
             ForEach(sectionPRs, id: \.nodeId) { pr in
                 if group == .postponed {
                     postponedRow(pr: pr)
+                } else if group == .done {
+                    doneRow(pr: pr)
                 } else {
                     deckRow(pr: pr, index: flatIndex(of: pr))
                 }
@@ -343,18 +354,23 @@ struct TriageDeckView: View {
 
     /// Collapse state persisted to MainlineSettings, keyed by `ActionGroup`.
     ///
-    /// Every group EXCEPT `.postponed` is expanded by default (a group is collapsed
-    /// only when present in `collapsedSections`). `.postponed` inverts this: it is
-    /// COLLAPSED by default and the set instead records that the user explicitly
-    /// EXPANDED it — so a first-run user sees Postponed closed, but the choice still
-    /// persists once toggled. Reuses the same `collapsedSections` store (no new key).
+    /// Every group EXCEPT `.postponed` / `.done` is expanded by default (a group is
+    /// collapsed only when present in `collapsedSections`). Those two invert this:
+    /// they are COLLAPSED by default and the set instead records that the user
+    /// explicitly EXPANDED them — so a first-run user sees Postponed and Done
+    /// closed, but the choice still persists once toggled. Reuses the same
+    /// `collapsedSections` store (no new key).
     private func expansionBinding(for group: ActionGroup) -> Binding<Bool> {
-        if group == .postponed {
+        // Postponed and Done both INVERT the default: they are COLLAPSED by default,
+        // and the `collapsedSections` set instead records that the user explicitly
+        // EXPANDED them (so the choice persists once toggled). Every other group is
+        // expanded by default and the set records collapse.
+        if group == .postponed || group == .done {
             return Binding(
-                get: { settings.collapsedSections.contains(.postponed) },
+                get: { settings.collapsedSections.contains(group) },
                 set: { expanded in
                     var set = settings.collapsedSections
-                    if expanded { set.insert(.postponed) } else { set.remove(.postponed) }
+                    if expanded { set.insert(group) } else { set.remove(group) }
                     settings.collapsedSections = set
                 }
             )
@@ -597,6 +613,52 @@ struct TriageDeckView: View {
         .buttonStyle(.plain)
     }
 
+    /// A row in the collapsed "Done" section (recently merged / closed PRs). These
+    /// are DISPLAY-ONLY: no keyboard focus (they are not in the `orderedPRs` index
+    /// space), no unread dot, and NO hover action cluster — a finished PR has no
+    /// Merge / Later action. Reuses the shared `LeadingColumn` + `RowMetrics` so it
+    /// aligns with every other section, shows the purple merged / grey closed status
+    /// icon in the leading slot, and opens the PR in the browser on click. Rendered
+    /// inside the SAME single scroll region — no nested ScrollView.
+    private func doneRow(pr: PRSnapshot) -> some View {
+        let m = metrics
+        return Button {
+            if let url = URL(string: pr.htmlUrl) { NSWorkspace.shared.open(url) }
+        } label: {
+            HStack(alignment: .top, spacing: m.rowHStackSpacing) {
+                LeadingColumn(metrics: m, isUnread: false) {
+                    doneStatusIcon(for: pr)
+                }
+
+                VStack(alignment: .leading, spacing: m.titleMetadataSpacing) {
+                    Text(pr.title)
+                        .font(.callout)
+                        .lineLimit(m.titleLineLimit)
+                        .truncationMode(.tail)
+                        .multilineTextAlignment(.leading)
+                    HStack(spacing: 4) {
+                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        DoneBadge(pr: pr)
+                        if settings.selectedTab == .forMe {
+                            ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 4)
+            }
+            // Finished PRs read as lower priority — mute the whole row.
+            .opacity(0.7)
+            .padding(.horizontal, RowMetrics.horizontalPadding)
+            .padding(.vertical, m.rowVerticalPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     /// A mouse click focuses the row and — unless multi-select is active —
     /// opens the PR in the browser, matching the other row lists. In
     /// multi-select mode a click toggles membership instead of opening.
@@ -625,6 +687,29 @@ struct TriageDeckView: View {
         Image(systemName: "pencil.circle")
             .foregroundStyle(.secondary)
             .accessibilityLabel("Draft")
+    }
+
+    // MARK: - Done status icon (merged = purple, closed = grey)
+
+    /// Leading status icon for a completed PR, OVERRIDING the CI icon:
+    ///   - merged (`pr.merged == true`)   → purple `arrow.triangle.merge` ("Merged")
+    ///   - closed-not-merged (`closed && !merged`) → muted grey `xmark.circle`
+    ///     ("Closed").
+    /// Falls back to the CI icon for anything unexpected (should not occur in the
+    /// Done set, which only contains merged/closed PRs).
+    @ViewBuilder
+    private func doneStatusIcon(for pr: PRSnapshot) -> some View {
+        if pr.merged {
+            Image(systemName: "arrow.triangle.merge")
+                .foregroundStyle(Color(nsColor: .systemPurple))
+                .accessibilityLabel("Merged")
+        } else if pr.closed {
+            Image(systemName: "xmark.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Closed")
+        } else {
+            ciIcon(for: pr.ciStatus)
+        }
     }
 
     // MARK: - CI icon (accessibilityLabel on every state)
@@ -1008,6 +1093,35 @@ struct DraftBadge: View {
             .background(Color(nsColor: .secondaryLabelColor).opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
             .foregroundStyle(.secondary)
             .accessibilityLabel("Draft")
+    }
+}
+
+// MARK: - DoneBadge
+
+/// Compact pill marking a completed PR as Merged (purple) or Closed (grey),
+/// rendered on the repo/#number metadata line of a Done-section row. Mirrors the
+/// leading status icon's color so the row's "merged vs. closed" state reads at a
+/// glance without the icon.
+struct DoneBadge: View {
+    let pr: PRSnapshot
+
+    var body: some View {
+        if pr.merged {
+            badge(text: "Merged", color: Color(nsColor: .systemPurple))
+        } else if pr.closed {
+            badge(text: "Closed", color: Color(nsColor: .secondaryLabelColor))
+        }
+    }
+
+    private func badge(text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2)
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
+            .foregroundStyle(color)
+            .accessibilityLabel(text)
     }
 }
 

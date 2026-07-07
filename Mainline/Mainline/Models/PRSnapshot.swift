@@ -114,6 +114,13 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
     /// otherwise return, because the snooze exclusion has already removed it from
     /// the active view. Always rendered last and collapsed by default.
     case postponed
+    /// Recently completed PRs (merged OR closed-not-merged). DISPLAY-ONLY and
+    /// LOWEST priority: populated from a separate, bounded fetch that never routes
+    /// through the diff engine / notifications, so a merged PR can never fire a
+    /// "new PR" banner. Always rendered LAST (below Postponed) and collapsed by
+    /// default. `.merged` / `.closed` above are legacy buckets retained for the
+    /// `PRState`-based ordering helpers; the browse deck folds both into `.done`.
+    case done
 
     /// Section header label.
     var title: String {
@@ -125,6 +132,7 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
         case .merged:         return "Merged"
         case .closed:         return "Closed"
         case .postponed:      return "Postponed"
+        case .done:           return "Done"
         }
     }
 
@@ -138,6 +146,7 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
         case .merged:         return 4
         case .closed:         return 5
         case .postponed:      return 6
+        case .done:           return 7
         }
     }
 }

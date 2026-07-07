@@ -23,6 +23,15 @@ final class PRManager: ObservableObject {
     // MARK: - Published state (consumed by MenuBarView)
 
     @Published var prs: [PRSnapshot] = []
+
+    /// DISPLAY-ONLY recently-completed PRs (merged / closed-not-merged), populated
+    /// each poll by `PRPoller.fetchDonePRs` via the `onDonePRs` sink. These are
+    /// kept ENTIRELY separate from `prs` (which is the open, diff-engine-backed
+    /// set): they never pass through `PRStateStore` / `PRDiffEngine` /
+    /// notifications, never affect the badge / needs-attention counts, and never
+    /// fire a "new PR" banner. Rendered only in the collapsed "Done" section.
+    @Published var donePRs: [PRSnapshot] = []
+
     @Published var statusMessage: String = "Starting…"
     @Published var hasToken: Bool = false
     @Published var tokenInvalid: Bool = false
@@ -117,6 +126,25 @@ final class PRManager: ObservableObject {
     var postponedPRs: [PRSnapshot] {
         let snoozed = snoozeStore.snoozedNodeIds
         return tabScopeFilteredPRs.filter { snoozed.contains($0.nodeId) }
+    }
+
+    /// The DISPLAY-ONLY "Done" set (recently merged/closed) for the current tab +
+    /// scope — the membership of the collapsed "Done" section. Filters `donePRs`
+    /// (never `prs`) by the selected tab and scope only: the drafts filter and the
+    /// For-me Direct/Team sub-filter don't apply to completed PRs (a closed PR is
+    /// not a draft; review-request source is moot once merged/closed). Snooze does
+    /// not apply either. Not sorted here — the view sorts by `updatedAt` desc.
+    var doneViewPRs: [PRSnapshot] {
+        // Tab.
+        let tabFiltered = donePRs.filter { $0.tabs.contains(settings.selectedTab) }
+        // Scope.
+        guard let scope = scopeStore.selectedScope else { return tabFiltered }
+        return tabFiltered.filter { pr in
+            switch scope {
+            case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
+            case .repo(let r): return pr.repoFullName == r
+            }
+        }
     }
 
     /// The population every badge metric counts over. When "Follow current view"
@@ -255,6 +283,13 @@ final class PRManager: ObservableObject {
             notifications: notifications,
             settings:      settings
         )
+
+        // Receive the display-only Done set from the poller. Assigned on the main
+        // actor (poller is @MainActor); stored separately from `prs` so it never
+        // reaches the diff engine, notifications, or any badge/attention count.
+        poller.onDonePRs = { [weak self] done in
+            self?.donePRs = done
+        }
 
         // Mirror store updates to prs
         store.$snapshots

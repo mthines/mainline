@@ -14,6 +14,13 @@ final class PRPoller {
     /// Human-readable status for the menu bar.
     @Published private(set) var statusMessage: String = "Not started"
 
+    /// Sink for the DISPLAY-ONLY "Done" set (recently merged/closed PRs), fetched
+    /// alongside the open sets each poll but stored SEPARATELY by the caller
+    /// (`PRManager.donePRs`). These NEVER pass through `PRStateStore` /
+    /// `PRDiffEngine` / notifications, so a merged PR can't fire a "new PR" banner.
+    /// Set by `PRManager`; nil = no Done fetch performed.
+    var onDonePRs: (([PRSnapshot]) -> Void)?
+
     init(
         client:        GitHubClient,
         store:         PRStateStore,
@@ -147,6 +154,53 @@ final class PRPoller {
         }
 
         statusMessage = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
+
+        // DISPLAY-ONLY Done fetch — recently merged/closed PRs for both tabs.
+        // Runs AFTER the open path so it never blocks notifications, and its errors
+        // are all swallowed benignly (the Done section is non-critical). Results
+        // are pushed to the caller's separate `donePRs` collection and NEVER go
+        // through the diff engine / notifications.
+        await fetchDonePRs(token: token)
+    }
+
+    /// Fetches the recently-completed (merged/closed) PRs for both tabs, dedupes by
+    /// nodeId (unioning tab membership), and hands the result to `onDonePRs`. All
+    /// errors — 304, cancellation, transient 5xx, auth, decoding — are handled the
+    /// same benign way as the open fetch: they never surface a banner and never
+    /// clear a previously-loaded Done set (on error we simply skip the update).
+    private func fetchDonePRs(token: String) async {
+        guard let onDonePRs else { return }
+
+        let tabs: [ReviewTab] = [.created, .forMe]
+        var collected: [PRSnapshot] = []
+
+        for tab in tabs {
+            do {
+                let (snapshots, _) = try await client.searchDonePRs(tab: tab, token: token)
+                collected.append(contentsOf: snapshots)
+            } catch {
+                // 304 (notModified), cancellation, transient 5xx, auth, decoding —
+                // all non-critical for the display-only Done section. Skip this tab
+                // and keep whatever we already have; the next poll retries.
+                continue
+            }
+        }
+
+        // De-duplicate by nodeId (a PR can appear in both tabs), unioning tabs.
+        var merged: [String: PRSnapshot] = [:]
+        var order: [String] = []
+        for snapshot in collected {
+            if var existing = merged[snapshot.nodeId] {
+                existing.tabs.formUnion(snapshot.tabs)
+                merged[snapshot.nodeId] = existing
+            } else {
+                merged[snapshot.nodeId] = snapshot
+                order.append(snapshot.nodeId)
+            }
+        }
+        let unique = order.compactMap { merged[$0] }
+
+        onDonePRs(unique)
     }
 }
 
