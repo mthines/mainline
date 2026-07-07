@@ -7,6 +7,7 @@ enum GitHubAPIError: Error, LocalizedError {
     case rateLimited(retryAfter: Int)   // seconds
     case notModified                    // 304 — no changes
     case cancelled                      // request cancelled (popover closed) — benign
+    case serverError(Int)               // 5xx — transient GitHub server error; retry next poll
     case networkError(URLError)
     case decodingError(Error)
     case unknown(Int)                   // HTTP status code
@@ -21,6 +22,8 @@ enum GitHubAPIError: Error, LocalizedError {
             return "No changes since last poll."
         case .cancelled:
             return "Request cancelled."
+        case .serverError(let code):
+            return "GitHub server error (\(code)) — will retry."
         case .networkError(let err):
             return "Network error: \(err.localizedDescription)"
         case .decodingError(let err):
@@ -186,6 +189,8 @@ final class GitHubClient {
             throw GitHubAPIError.unauthorized
         case 200:
             break
+        case 500...599:
+            throw GitHubAPIError.serverError(http.statusCode)
         default:
             throw GitHubAPIError.unknown(http.statusCode)
         }
@@ -371,6 +376,7 @@ final class GitHubClient {
         switch http.statusCode {
         case 200: break
         case 401: throw GitHubAPIError.unauthorized
+        case 500...599: throw GitHubAPIError.serverError(http.statusCode)
         default:  throw GitHubAPIError.unknown(http.statusCode)
         }
 
@@ -396,6 +402,7 @@ final class GitHubClient {
         switch http.statusCode {
         case 200: break
         case 401: throw GitHubAPIError.unauthorized
+        case 500...599: throw GitHubAPIError.serverError(http.statusCode)
         default:  throw GitHubAPIError.unknown(http.statusCode)
         }
 
@@ -439,6 +446,7 @@ final class GitHubClient {
         switch http.statusCode {
         case 200: break
         case 401: throw GitHubAPIError.unauthorized
+        case 500...599: throw GitHubAPIError.serverError(http.statusCode)
         default:  throw GitHubAPIError.unknown(http.statusCode)
         }
 

@@ -78,6 +78,11 @@ final class PRPoller {
             } catch is CancellationError {
                 // Task cancellation — benign, keep prior state.
                 return
+            } catch GitHubAPIError.serverError {
+                // Transient GitHub 5xx (500/502/503/504). Treat like cancellation:
+                // keep the last successful data/counts and do NOT surface an error
+                // banner. The next scheduled poll retries automatically.
+                return
             } catch GitHubAPIError.rateLimited(let seconds) {
                 await MainActor.run { self.statusMessage = "Rate limited — wait \(seconds)s" }
                 try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
