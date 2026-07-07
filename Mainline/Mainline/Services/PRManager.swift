@@ -9,6 +9,7 @@ enum WriteAction {
     case merge(PRSnapshot)
     case requestChanges(PRSnapshot)
     case snooze(PRSnapshot, until: Date)
+    case unsnooze(PRSnapshot)
     case markSeen(PRSnapshot)
     case dismiss(PRSnapshot)
 }
@@ -61,7 +62,19 @@ final class PRManager: ObservableObject {
     /// This is the "follow current view" set. Every badge metric reads from it
     /// when `menuBarScopeFollowsSelection` is ON. Not sorted here — callers that
     /// render sort via `PRSnapshot.triageOrder`; counting doesn't need order.
+    ///
+    /// Snoozed (postponed) PRs are EXCLUDED here — a PR with a future
+    /// `snoozeMap[nodeId]` leaves every actionability group AND drops from the
+    /// badge / needs-attention count. The "Postponed" list section renders them
+    /// separately via `postponedPRs`, which deliberately ignores this exclusion.
     var currentViewPRs: [PRSnapshot] {
+        tabScopeFilteredPRs.filter { !snoozeStore.snoozedNodeIds.contains($0.nodeId) }
+    }
+
+    /// The current tab + scope + drafts + For-me sub-filter population, BEFORE the
+    /// snooze exclusion. Shared by `currentViewPRs` (which then drops snoozed) and
+    /// `postponedPRs` (which keeps only the snoozed ones). Not sorted.
+    private var tabScopeFilteredPRs: [PRSnapshot] {
         // 1. Tab.
         let tabFiltered = prs.filter { $0.tabs.contains(settings.selectedTab) }
 
@@ -95,6 +108,15 @@ final class PRManager: ObservableObject {
             case .team:   return pr.reviewRequestSource(myLogin: myLogin) == .team
             }
         }
+    }
+
+    /// Currently-snoozed PRs for the current tab + scope (+ drafts + For-me
+    /// sub-filter) — the membership of the "Postponed" list section. This is the
+    /// complement of `currentViewPRs` within `tabScopeFilteredPRs`: it KEEPS only
+    /// the PRs excluded by the snooze filter, which is the section's whole purpose.
+    var postponedPRs: [PRSnapshot] {
+        let snoozed = snoozeStore.snoozedNodeIds
+        return tabScopeFilteredPRs.filter { snoozed.contains($0.nodeId) }
     }
 
     /// The population every badge metric counts over. When "Follow current view"
@@ -321,6 +343,23 @@ final class PRManager: ObservableObject {
 
     /// Dispatches a write action. Write actions are gated by `settings.writeActionsEnabled`.
     func performAction(_ action: WriteAction) async {
+        // Local, no-network actions run without a token so postpone / resume /
+        // mark-seen / dismiss always work even before the PAT is loaded.
+        switch action {
+        case .snooze(let pr, let until):
+            snoozeStore.snooze(pr, until: until)
+            return
+        case .unsnooze(let pr):
+            snoozeStore.unsnooze(nodeId: pr.nodeId)
+            return
+        case .markSeen, .dismiss:
+            // Both are local no-ops today (dismiss clears until next poll,
+            // markSeen is handled elsewhere) — nothing network-bound to do.
+            return
+        default:
+            break
+        }
+
         guard let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
 
         switch action {
@@ -372,16 +411,9 @@ final class PRManager: ObservableObject {
                 statusMessage = "Request changes failed: \(error.localizedDescription)"
             }
 
-        case .snooze(let pr, let until):
-            snoozeStore.snooze(pr, until: until)
-
-        case .markSeen(let pr):
-            // Mark seen is a local operation — no API call needed
-            _ = pr
-
-        case .dismiss(let pr):
-            // Dismiss removes from visible list locally until next poll
-            _ = pr
+        case .snooze, .unsnooze, .markSeen, .dismiss:
+            // Handled above as local, no-network actions before the token guard.
+            break
         }
     }
 

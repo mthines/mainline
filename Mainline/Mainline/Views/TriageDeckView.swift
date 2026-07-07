@@ -242,15 +242,34 @@ struct TriageDeckView: View {
     }
 
     /// Grouped sections in canonical actionability order, excluding empty ones:
-    /// Needs attention → Ready to merge → Waiting → Draft → Merged → Closed.
+    /// Needs attention → Ready to merge → Waiting → Draft → Merged → Closed →
+    /// Postponed. The active `prs` (already snooze-excluded upstream) fill the
+    /// actionability groups; the trailing `.postponed` section is appended from
+    /// `manager.postponedPRs` (snoozed & not expired for the current tab + scope),
+    /// so it is always LAST and its membership is independent of actionability.
     private var sections: [(group: ActionGroup, prs: [PRSnapshot])] {
         let grouped = Dictionary(grouping: orderedPRs, by: { groupFor($0) })
-        return ActionGroup.allCases
+        var result = ActionGroup.allCases
+            .filter { $0 != .postponed }
             .sorted { $0.sortIndex < $1.sortIndex }
-            .compactMap { group in
+            .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
                 guard let prs = grouped[group], !prs.isEmpty else { return nil }
                 return (group, prs.sorted(by: PRSnapshot.triageOrder))
             }
+
+        let postponed = manager.postponedPRs.sorted(by: postponedWakeOrder)
+        if !postponed.isEmpty {
+            result.append((.postponed, postponed))
+        }
+        return result
+    }
+
+    /// Ordering for the Postponed section: soonest wake first, then title.
+    private func postponedWakeOrder(_ lhs: PRSnapshot, _ rhs: PRSnapshot) -> Bool {
+        let lw = manager.snoozeStore.wakeTime(nodeId: lhs.nodeId) ?? .distantFuture
+        let rw = manager.snoozeStore.wakeTime(nodeId: rhs.nodeId) ?? .distantFuture
+        if lw != rw { return lw < rw }
+        return lhs.title < rhs.title
     }
 
     /// The single main list: the keyboard-navigable deck grouped into
@@ -306,7 +325,11 @@ struct TriageDeckView: View {
 
         if expansion.wrappedValue {
             ForEach(sectionPRs, id: \.nodeId) { pr in
-                deckRow(pr: pr, index: flatIndex(of: pr))
+                if group == .postponed {
+                    postponedRow(pr: pr)
+                } else {
+                    deckRow(pr: pr, index: flatIndex(of: pr))
+                }
                 Divider().padding(.leading, metrics.dividerInset())
             }
         }
@@ -318,8 +341,24 @@ struct TriageDeckView: View {
     }
 
     /// Collapse state persisted to MainlineSettings, keyed by `ActionGroup`.
+    ///
+    /// Every group EXCEPT `.postponed` is expanded by default (a group is collapsed
+    /// only when present in `collapsedSections`). `.postponed` inverts this: it is
+    /// COLLAPSED by default and the set instead records that the user explicitly
+    /// EXPANDED it — so a first-run user sees Postponed closed, but the choice still
+    /// persists once toggled. Reuses the same `collapsedSections` store (no new key).
     private func expansionBinding(for group: ActionGroup) -> Binding<Bool> {
-        Binding(
+        if group == .postponed {
+            return Binding(
+                get: { settings.collapsedSections.contains(.postponed) },
+                set: { expanded in
+                    var set = settings.collapsedSections
+                    if expanded { set.insert(.postponed) } else { set.remove(.postponed) }
+                    settings.collapsedSections = set
+                }
+            )
+        }
+        return Binding(
             get: { !settings.collapsedSections.contains(group) },
             set: { expanded in
                 var collapsed = settings.collapsedSections
@@ -369,17 +408,23 @@ struct TriageDeckView: View {
                     }
                 }
 
+                Spacer(minLength: 4)
+
                 // Inline Merge — shown only on ready-to-merge rows. Separate hit
                 // area (borderless button) so it never triggers the row's
                 // click-to-open; routes through the SAME confirm + performAction
                 // path as the M verb.
                 if pr.readyToMerge {
-                    Spacer(minLength: 4)
                     MergeButton(
                         writeActionsEnabled: settings.writeActionsEnabled,
                         onMerge: { dispatchVerb(.merge(pr)) }
                     )
                 }
+
+                // Inline "Later" — compact clock menu with the four durations. Its
+                // OWN borderless hit area so tapping it never triggers row-open
+                // (same pattern as MergeButton). Routes through `postpone`.
+                LaterButton(onPostpone: { duration in postpone(pr, for: duration) })
             }
             // Drafts read as lower-priority: mute the whole row while keeping
             // it fully clickable/openable.
@@ -398,6 +443,62 @@ struct TriageDeckView: View {
                           : (isFocused ? Color.accentColor.opacity(0.4) : Color.clear))
                     .frame(width: 3)
             }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A row in the collapsed "Postponed" section. Reuses the shared
+    /// `LeadingColumn` + `RowMetrics` so it aligns with every other section, shows
+    /// a relative "wakes in 3h" / "wakes tomorrow" label derived from the wake
+    /// date, and a Resume button that unsnoozes the PR (returning it to its normal
+    /// group immediately). Clicking the row body opens the PR in the browser, like
+    /// the deck rows. Rendered inside the SAME single scroll region — no nested
+    /// ScrollView — preserving the crash-safe height architecture.
+    private func postponedRow(pr: PRSnapshot) -> some View {
+        let m = metrics
+        let wake = manager.snoozeStore.wakeTime(nodeId: pr.nodeId)
+        return Button {
+            if let url = URL(string: pr.htmlUrl) { NSWorkspace.shared.open(url) }
+        } label: {
+            HStack(alignment: .top, spacing: m.rowHStackSpacing) {
+                LeadingColumn(metrics: m, isUnread: false) {
+                    Image(systemName: "moon.zzz")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Postponed")
+                }
+
+                VStack(alignment: .leading, spacing: m.titleMetadataSpacing) {
+                    Text(pr.title)
+                        .font(.callout)
+                        .lineLimit(m.titleLineLimit)
+                        .truncationMode(.tail)
+                        .multilineTextAlignment(.leading)
+                    HStack(spacing: 4) {
+                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let wake {
+                            Text(humanizedWake(from: wake))
+                                .font(.caption2)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color(nsColor: .systemIndigo).opacity(0.18),
+                                            in: RoundedRectangle(cornerRadius: 3))
+                                .foregroundStyle(Color(nsColor: .systemIndigo))
+                                .accessibilityLabel(humanizedWake(from: wake))
+                        }
+                    }
+                }
+
+                Spacer(minLength: 4)
+
+                ResumeButton(onResume: { resume(pr) })
+            }
+            .opacity(0.85)
+            .padding(.horizontal, RowMetrics.horizontalPadding)
+            .padding(.vertical, m.rowVerticalPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -540,9 +641,10 @@ struct TriageDeckView: View {
 
         // Non-write verbs
         case ("s", false):
+            // Quick "Later" — postpone with the default duration (1 day). The clock
+            // button + command palette expose the full duration menu.
             if let pr = focusedPR {
-                Task { await manager.performAction(.snooze(pr, until: Date().addingTimeInterval(3600))) }
-                pushUndo(label: "Snoozed \(pr.title)", pr: pr) {}
+                postpone(pr, for: .quickDefault)
             }
             return nil
         case ("e", false):
@@ -605,12 +707,8 @@ struct TriageDeckView: View {
             dispatchVerb(.merge(pr))
         case .requestChanges:
             dispatchVerb(.requestChanges(pr))
-        case .snooze1h:
-            Task { await manager.performAction(.snooze(pr, until: Date().addingTimeInterval(3600))) }
-            pushUndo(label: "Snoozed \(pr.title)", pr: pr) {}
-        case .snooze24h:
-            Task { await manager.performAction(.snooze(pr, until: Date().addingTimeInterval(86400))) }
-            pushUndo(label: "Snoozed \(pr.title) 24h", pr: pr) {}
+        case .snooze(let duration):
+            postpone(pr, for: duration)
         case .markSeen:
             Task { await manager.performAction(.markSeen(pr)) }
             pushUndo(label: "Marked seen: \(pr.title)", pr: pr) {}
@@ -640,6 +738,24 @@ struct TriageDeckView: View {
         guard let last = undoEntries.last else { return }
         last.undo()
         withAnimation { undoEntries.removeLast() }
+    }
+
+    // MARK: - Postpone / Resume
+
+    /// Postpones (snoozes) a PR for the given duration. The PR immediately leaves
+    /// its actionability group (excluded from `currentViewPRs`) and moves to the
+    /// collapsed "Postponed" section. Pushes an undoable toast that resumes it.
+    private func postpone(_ pr: PRSnapshot, for duration: SnoozeDuration) {
+        Task { await manager.performAction(.snooze(pr, until: Date().addingTimeInterval(duration.interval))) }
+        pushUndo(label: "Postponed \(pr.title) · \(duration.title)", pr: pr) {
+            Task { await manager.performAction(.unsnooze(pr)) }
+        }
+    }
+
+    /// Resumes (unsnoozes) a postponed PR — it returns to its normal group
+    /// immediately.
+    private func resume(_ pr: PRSnapshot) {
+        Task { await manager.performAction(.unsnooze(pr)) }
     }
 
     // MARK: - Confirmation dialog title
@@ -703,6 +819,73 @@ struct MergeButton: View {
               ? "Merge this PR"
               : "Enable write actions in Settings to merge")
         .accessibilityLabel("Merge")
+    }
+}
+
+// MARK: - LaterButton
+
+/// Compact inline "Later" (postpone) control rendered on the trailing side of a
+/// deck row. It is a SwiftUI `Menu` styled as a small clock capsule with its OWN
+/// borderless hit area, so opening it or picking a duration never triggers the
+/// row's click-to-open (same isolation pattern as `MergeButton`). Picking a
+/// duration calls `onPostpone`, which snoozes the PR and moves it to the
+/// "Postponed" section.
+struct LaterButton: View {
+    let onPostpone: (SnoozeDuration) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(SnoozeDuration.allCases) { duration in
+                Button(duration.title) { onPostpone(duration) }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.caption2)
+                Text("Later")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color(nsColor: .systemIndigo).opacity(0.15), in: Capsule())
+            .foregroundStyle(Color(nsColor: .systemIndigo))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Postpone this PR for later")
+        .accessibilityLabel("Later")
+    }
+}
+
+// MARK: - ResumeButton
+
+/// Compact inline "Resume" control on a Postponed row. Its own borderless hit
+/// area so tapping it never opens the PR; calls `onResume` to unsnooze the PR,
+/// returning it to its normal actionability group immediately.
+struct ResumeButton: View {
+    let onResume: () -> Void
+
+    var body: some View {
+        Button(action: onResume) {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.caption2)
+                Text("Resume")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color(nsColor: .systemBlue).opacity(0.15), in: Capsule())
+            .foregroundStyle(Color(nsColor: .systemBlue))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.borderless)
+        .help("Resume now — return this PR to its group")
+        .accessibilityLabel("Resume")
     }
 }
 

@@ -108,6 +108,12 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
     case draft
     case merged
     case closed
+    /// PRs the user postponed (snoozed) and that have not yet woken. Membership is
+    /// "snoozed & not expired", INDEPENDENT of actionability — a PR is placed here
+    /// by `TriageDeckView` regardless of what `actionGroup(splitDrafts:)` would
+    /// otherwise return, because the snooze exclusion has already removed it from
+    /// the active view. Always rendered last and collapsed by default.
+    case postponed
 
     /// Section header label.
     var title: String {
@@ -118,6 +124,7 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
         case .draft:          return "Draft"
         case .merged:         return "Merged"
         case .closed:         return "Closed"
+        case .postponed:      return "Postponed"
         }
     }
 
@@ -130,6 +137,7 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
         case .draft:          return 3
         case .merged:         return 4
         case .closed:         return 5
+        case .postponed:      return 6
         }
     }
 }

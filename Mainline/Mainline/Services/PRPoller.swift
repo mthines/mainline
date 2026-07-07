@@ -58,6 +58,12 @@ final class PRPoller {
     // MARK: - Single poll
 
     private func poll(token: String) async {
+        // Prune expired snoozes on every poll so postponed PRs silently return to
+        // their normal group the moment their wake time passes — even while the
+        // panel is closed. Render-time filtering already compares to `Date()`; this
+        // keeps the persisted map from growing unbounded. Cheap, main-actor, local.
+        SnoozeStore(settings: settings).clearExpired()
+
         // Always poll both tabs so notifications fire regardless of which tab
         // is currently visible. Each query is tagged with the tab that sourced it.
         let queries: [(tab: ReviewTab, query: String)] = [

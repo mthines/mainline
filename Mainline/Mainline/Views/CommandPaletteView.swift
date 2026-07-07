@@ -7,26 +7,31 @@ enum TriageAction: CaseIterable, Identifiable {
     case approve
     case merge
     case requestChanges
-    case snooze1h
-    case snooze24h
+    case snooze(SnoozeDuration)
     case markSeen
     case dismiss
     case viewDiff
     case openInBrowser
 
+    /// One palette entry per `SnoozeDuration`, plus the fixed non-snooze actions.
+    static var allCases: [TriageAction] {
+        [.approve, .merge, .requestChanges]
+            + SnoozeDuration.allCases.map { TriageAction.snooze($0) }
+            + [.markSeen, .dismiss, .viewDiff, .openInBrowser]
+    }
+
     var id: String { label }
 
     var label: String {
         switch self {
-        case .approve:         return "Approve PR"
-        case .merge:           return "Merge PR"
-        case .requestChanges:  return "Request Changes"
-        case .snooze1h:        return "Snooze 1 hour"
-        case .snooze24h:       return "Snooze 24 hours"
-        case .markSeen:        return "Mark as Seen"
-        case .dismiss:         return "Dismiss"
-        case .viewDiff:        return "View Diff (Space)"
-        case .openInBrowser:   return "Open in Browser"
+        case .approve:            return "Approve PR"
+        case .merge:              return "Merge PR"
+        case .requestChanges:     return "Request Changes"
+        case .snooze(let d):      return "Later — \(d.title)"
+        case .markSeen:           return "Mark as Seen"
+        case .dismiss:            return "Dismiss"
+        case .viewDiff:           return "View Diff (Space)"
+        case .openInBrowser:      return "Open in Browser"
         }
     }
 
@@ -35,8 +40,7 @@ enum TriageAction: CaseIterable, Identifiable {
         case .approve:         return "checkmark.circle"
         case .merge:           return "arrow.triangle.merge"
         case .requestChanges:  return "text.bubble"
-        case .snooze1h:        return "clock"
-        case .snooze24h:       return "moon"
+        case .snooze:          return "clock"
         case .markSeen:        return "eye"
         case .dismiss:         return "xmark"
         case .viewDiff:        return "doc.plaintext"
