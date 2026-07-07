@@ -373,9 +373,9 @@ struct TriageDeckView: View {
         let isFocused = index == selectedIndex
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
-        // The "Later" button reveals on hover OR when this is the keyboard-focused
-        // row, so keyboard users can still reach it without a pointer.
-        let isLaterVisible = hoveredRowID == pr.nodeId || isFocused
+        // "Later" is HOVER-ONLY — it reveals when the pointer is over this row and
+        // never on the keyboard-focused row (keyboard users snooze via `S` / ⌘K).
+        let isHovered = hoveredRowID == pr.nodeId
         let m = metrics
         return Button {
             handleRowClick(pr: pr, index: index)
@@ -414,30 +414,31 @@ struct TriageDeckView: View {
 
                 Spacer(minLength: 4)
 
-                // Inline Merge — shown only on ready-to-merge rows. Separate hit
-                // area (borderless button) so it never triggers the row's
-                // click-to-open; routes through the SAME confirm + performAction
-                // path as the M verb.
+                // Inline Merge — shown only on ready-to-merge rows, and only while
+                // NOT hovered. On hover it is hidden here and re-drawn inside the
+                // trailing overlay cluster so Later never sits on top of Merge.
+                // Separate borderless hit area (never triggers row click-to-open);
+                // routes through the SAME confirm + performAction path as the M verb.
                 if pr.readyToMerge {
                     MergeButton(
                         writeActionsEnabled: settings.writeActionsEnabled,
                         onMerge: { dispatchVerb(.merge(pr)) }
                     )
+                    .opacity(isHovered ? 0 : 1)
+                    .allowsHitTesting(!isHovered)
                 }
-
-                // Inline "Later" — compact clock menu with the four durations. Its
-                // OWN borderless hit area so tapping it never triggers row-open
-                // (same pattern as MergeButton). Routes through `postpone`.
-                //
-                // Shown only when the row is hovered OR keyboard-focused, to keep
-                // resting rows uncluttered. Hidden variants stay in the layout at
-                // `.opacity(0)` + `.allowsHitTesting(false)` so their width is
-                // reserved and rows never resize as the button fades in/out.
-                LaterButton(onPostpone: { duration in postpone(pr, for: duration) })
-                    .opacity(isLaterVisible ? 1 : 0)
-                    .allowsHitTesting(isLaterVisible)
-                    .animation(.easeInOut(duration: 0.12), value: hoveredRowID)
             }
+            // The title/content now extends the FULL row width — no reserved space
+            // for the Later button. The hover actions are drawn as a trailing
+            // overlay on top, with a readable background + leading fade so they
+            // blend over the title rather than hard-clipping it.
+            .overlay(alignment: .trailing) {
+                if isHovered {
+                    hoverActionsCluster(for: pr)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.12), value: hoveredRowID)
             // Track the hovered row so its Later button reveals on hover. Clearing
             // only when THIS row was the hovered one avoids a late "mouse exited"
             // from a previous row wiping a newer row's hover state.
@@ -464,6 +465,48 @@ struct TriageDeckView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// The hover-only trailing action cluster drawn as an `.overlay` on top of a
+    /// deck row's full-width title. Contains "Later" (always) plus "Merge" (only
+    /// on ready-to-merge rows) so the two never overlap — on ready rows the
+    /// in-flow Merge is hidden while hovered and re-drawn here beside Later.
+    ///
+    /// A short leading clear→background gradient fades the row material in from
+    /// the left so the buttons blend over the title text instead of hard-clipping
+    /// it; the buttons themselves sit on a solid `.regularMaterial` cap so their
+    /// labels stay readable over whatever title is behind them.
+    @ViewBuilder
+    private func hoverActionsCluster(for pr: PRSnapshot) -> some View {
+        HStack(spacing: 6) {
+            // Leading fade: clear → the row's material, so the title dissolves
+            // under the cluster rather than being cut off abruptly.
+            LinearGradient(
+                colors: [Color.clear, Color(nsColor: .windowBackgroundColor)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: 24)
+
+            HStack(spacing: 6) {
+                LaterButton(onPostpone: { duration in postpone(pr, for: duration) })
+
+                // On ready rows, re-draw Merge here beside Later so both actions
+                // share the hover background and Later never covers Merge.
+                if pr.readyToMerge {
+                    MergeButton(
+                        writeActionsEnabled: settings.writeActionsEnabled,
+                        onMerge: { dispatchVerb(.merge(pr)) }
+                    )
+                }
+            }
+            .padding(.leading, 4)
+            .padding(.trailing, 6)
+            .padding(.vertical, 2)
+            .background(.regularMaterial, in: Capsule())
+        }
+        .padding(.trailing, 4)
+        .fixedSize()
     }
 
     /// A row in the collapsed "Postponed" section. Reuses the shared
