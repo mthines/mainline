@@ -10,6 +10,22 @@ struct SettingsView: View {
     @State private var importError: String? = nil
     @State private var isImporting: Bool = false
     @State private var hasStoredToken: Bool = false
+    @State private var panelHeightDraft: Int = 560
+
+    // Panel-height bounds. The setting may store a large number; the render path
+    // in MenuBarView clamps it to the usable screen height, so a big value just
+    // makes the panel as tall as the display allows.
+    static let panelHeightMin = 300
+    static let panelHeightMax = 2000
+
+    static let panelHeightFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .none
+        f.allowsFloats = false
+        f.minimum = NSNumber(value: panelHeightMin)
+        f.maximum = NSNumber(value: panelHeightMax)
+        return f
+    }()
 
     init(manager: PRManager) {
         self.manager  = manager
@@ -167,13 +183,23 @@ struct SettingsView: View {
 
             // MARK: - Panel
             Section("Panel") {
-                Picker("Panel height", selection: $settings.panelHeight) {
-                    Text("400 pt").tag(400)
-                    Text("480 pt").tag(480)
-                    Text("560 pt (default)").tag(560)
-                    Text("640 pt").tag(640)
+                HStack {
+                    Text("Panel height (pt)")
+                    Spacer()
+                    TextField("", value: $panelHeightDraft, formatter: Self.panelHeightFormatter)
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 70)
+                        .onSubmit { commitPanelHeight() }
+                    Stepper("", value: $panelHeightDraft, in: Self.panelHeightMin...Self.panelHeightMax, step: 20)
+                        .labelsHidden()
+                        .onChange(of: panelHeightDraft) { _ in commitPanelHeight() }
                 }
-                .pickerStyle(.segmented)
+                Label("Capped to the display height — very large values make the panel as tall as the screen allows.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
@@ -181,10 +207,24 @@ struct SettingsView: View {
         .frame(width: 420, height: 560)
         .onAppear {
             loadToken()
+            panelHeightDraft = settings.panelHeight
         }
     }
 
     // MARK: - Actions
+
+    /// Clamp the typed/stepped draft to the allowed range and persist it. Keeps
+    /// the setting from going below ~300 or above the max; MenuBarView further
+    /// bounds it to the usable screen height at render time.
+    private func commitPanelHeight() {
+        let clamped = min(max(panelHeightDraft, Self.panelHeightMin), Self.panelHeightMax)
+        if clamped != panelHeightDraft {
+            panelHeightDraft = clamped
+        }
+        if settings.panelHeight != clamped {
+            settings.panelHeight = clamped
+        }
+    }
 
     private func loadToken() {
         Task {

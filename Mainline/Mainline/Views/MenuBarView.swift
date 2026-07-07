@@ -198,12 +198,13 @@ struct MenuBarView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
             Image(systemName: "arrow.triangle.pull")
                 .foregroundStyle(.blue)
             Text("Mainline")
                 .font(.headline)
-            Spacer()
+                .fixedSize()
+            Spacer(minLength: 8)
             // Error state: red + tappable to open Settings (AC-19)
             if manager.tokenInvalid {
                 Button {
@@ -212,13 +213,29 @@ struct MenuBarView: View {
                     Text("Token invalid — tap to fix")
                         .font(.caption)
                         .foregroundStyle(Color(nsColor: .systemRed))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 .buttonStyle(.plain)
             } else {
                 Text(manager.statusMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            // Settings gear — always-visible fixed chrome, far right. Reachable
+            // even when the panel is very tall, since the header never scrolls.
+            Button {
+                NotificationCenter.default.post(name: .openSettings, object: nil)
+            } label: {
+                Image(systemName: "gearshape")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
+            .help("Settings")
+            .fixedSize()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -470,16 +487,6 @@ struct MenuBarView: View {
 
     private var footer: some View {
         HStack(spacing: 0) {
-            Button("Settings") {
-                NotificationCenter.default.post(name: .openSettings, object: nil)
-            }
-            .buttonStyle(.plain)
-            .font(.callout)
-            .frame(minHeight: 44)
-            .padding(.horizontal, 12)
-
-            Spacer()
-
             // AC-20: Refresh shows spinner + disabled during refresh
             Button {
                 Task { await manager.triggerSingleRefresh() }
@@ -499,7 +506,9 @@ struct MenuBarView: View {
             .buttonStyle(.plain)
             .disabled(manager.isRefreshing)
             .frame(minHeight: 44)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 12)
+
+            Spacer()
 
             Button("Quit") {
                 NSApp.terminate(nil)
