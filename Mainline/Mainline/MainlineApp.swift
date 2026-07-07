@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UserNotifications
+import Combine
 
 // A simple nonisolated bridge so AppDelegate (created before the SwiftUI scene)
 // can reach the @StateObject manager once the scene has initialised it.
@@ -65,6 +66,11 @@ private struct MenuBarLabel: View {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var settingsWindow: NSWindow?
 
+    // MARK: - Global hotkey
+
+    private let globalHotKey = GlobalHotKey()
+    private var shortcutObservers: [AnyCancellable] = []
+
     // MARK: - Application lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -77,6 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             name: .openSettings,
             object: nil
         )
+
+        // Global shortcut: register now (if enabled) and re-register whenever the
+        // stored combo or the enabled flag changes.
+        setUpGlobalHotKey()
 
         // Kick off fetching the moment the app launches — independent of whether
         // the popover is ever opened. The MenuBarLabel `.task` also calls
@@ -103,6 +113,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationWillTerminate(_ notification: Notification) {
         NotificationCenter.default.removeObserver(self)
+        globalHotKey.unregister()
+    }
+
+    // MARK: - Global hotkey wiring
+
+    /// Wire the global hotkey to `MainlineSettings.shared`: subscribe to the three
+    /// relevant published properties so any change (from the recorder, the toggle,
+    /// or the reset button) live re-registers the Carbon hotkey, and perform an
+    /// initial registration immediately.
+    private func setUpGlobalHotKey() {
+        globalHotKey.onPress = {
+            // `onPress` is delivered on the main thread, but hop through a
+            // MainActor task so the compiler is satisfied and the call is safe.
+            Task { @MainActor in
+                MenuBarPopoverOpener.open()
+            }
+        }
+
+        let settings = MainlineSettings.shared
+        // `receive(on:.main)` + `dropFirst` on each publisher would still fire on
+        // the initial value; instead we do one explicit apply now, then react to
+        // subsequent changes. Combine's @Published emits the NEW value in
+        // willSet, so debounce a tiny bit to coalesce multi-property updates
+        // (e.g. reset sets keyCode + modifiers together).
+        Publishers.Merge3(
+            settings.$globalShortcutEnabled.map { _ in () },
+            settings.$globalShortcutKeyCode.map { _ in () },
+            settings.$globalShortcutModifiers.map { _ in () }
+        )
+        .debounce(for: .milliseconds(50), scheduler: RunLoop.main)
+        .sink { [weak self] in
+            self?.applyGlobalHotKey()
+        }
+        .store(in: &shortcutObservers)
+
+        applyGlobalHotKey()
+    }
+
+    /// Register or unregister the Carbon hotkey to match current settings.
+    private func applyGlobalHotKey() {
+        let settings = MainlineSettings.shared
+        guard settings.globalShortcutEnabled else {
+            globalHotKey.unregister()
+            return
+        }
+        let carbonMods = GlobalHotKey.carbonModifiers(from: settings.globalShortcutModifierFlags)
+        globalHotKey.register(
+            keyCode: UInt32(settings.globalShortcutKeyCode),
+            modifiers: carbonMods
+        )
     }
 
     // MARK: - Settings window

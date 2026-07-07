@@ -188,6 +188,28 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // MARK: - Global Shortcut
+            Section("Global Shortcut") {
+                Toggle("Open Mainline with a global shortcut", isOn: $settings.globalShortcutEnabled)
+
+                HStack {
+                    Text("Shortcut")
+                    Spacer()
+                    ShortcutRecorder(settings: settings)
+                        .disabled(!settings.globalShortcutEnabled)
+                    Button("Reset to default (⇧⌃⌘P)") {
+                        settings.resetGlobalShortcutToDefault()
+                    }
+                    .disabled(!settings.globalShortcutEnabled)
+                }
+
+                Label("Press this key combination from any app to open the Mainline popover. Requires at least one modifier key.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // MARK: - Panel
             Section("Panel") {
                 Toggle("Compact rows", isOn: $settings.compactRows)
@@ -370,5 +392,70 @@ struct SettingsView: View {
                 return "gh auth token failed: \(msg)"
             }
         }
+    }
+}
+
+// MARK: - ShortcutRecorder
+
+/// A button that displays the current global shortcut and, when clicked, enters
+/// "recording" mode to capture the next key-down (macOS 13-safe via a local
+/// `NSEvent` monitor). Requires at least one modifier; Escape cancels.
+private struct ShortcutRecorder: View {
+    @ObservedObject var settings: MainlineSettings
+    @State private var isRecording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        Button(action: toggleRecording) {
+            Text(isRecording ? "Press keys…" : settings.globalShortcutDisplayString)
+                .font(.system(.body, design: .monospaced))
+                .frame(minWidth: 90)
+        }
+        .buttonStyle(.bordered)
+        .tint(isRecording ? .accentColor : nil)
+        .help(isRecording ? "Press a key combination, or Escape to cancel" : "Click to record a new shortcut")
+        .onDisappear(perform: stopRecording)
+    }
+
+    private func toggleRecording() {
+        if isRecording {
+            stopRecording()
+        } else {
+            startRecording()
+        }
+    }
+
+    private func startRecording() {
+        isRecording = true
+        // Capture the NEXT key-down locally. Returning nil swallows the event so
+        // it doesn't reach other controls while recording.
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            handleKeyDown(event)
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        isRecording = false
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    private func handleKeyDown(_ event: NSEvent) {
+        // Escape cancels recording without changing the shortcut.
+        if event.keyCode == 0x35 { // Escape
+            stopRecording()
+            return
+        }
+
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Require at least one modifier so the combo is a safe global hotkey.
+        guard !mods.isEmpty else { return }
+
+        settings.globalShortcutKeyCode   = Int(event.keyCode)
+        settings.globalShortcutModifiers = mods.rawValue
+        stopRecording()
     }
 }

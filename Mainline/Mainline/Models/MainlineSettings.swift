@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 // MARK: - MenuBarMetric
 
@@ -78,7 +79,20 @@ final class MainlineSettings: ObservableObject {
         static let forMeReviewFilter    = "forMeReviewFilter"
         static let compactRows          = "compactRows"
         static let needsHumanExpanded   = "needsHumanExpanded"
+        // Global shortcut
+        static let globalShortcutEnabled   = "globalShortcutEnabled"
+        static let globalShortcutKeyCode   = "globalShortcutKeyCode"
+        static let globalShortcutModifiers = "globalShortcutModifiers"
     }
+
+    // MARK: - Global shortcut defaults
+
+    /// Virtual key code for "P" (`kVK_ANSI_P`).
+    static let defaultShortcutKeyCode = 0x23
+    /// Default modifier mask: ⇧⌃⌘ (shift + control + command).
+    static let defaultShortcutModifiers: UInt = {
+        NSEvent.ModifierFlags([.command, .shift, .control]).rawValue
+    }()
 
     // MARK: - Persisted properties
 
@@ -214,6 +228,92 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(needsHumanExpanded, forKey: Keys.needsHumanExpanded) }
     }
 
+    // MARK: - Global shortcut
+
+    /// Whether a system-wide keyboard shortcut opens the Mainline popover. Default ON.
+    @Published var globalShortcutEnabled: Bool {
+        didSet { defaults.set(globalShortcutEnabled, forKey: Keys.globalShortcutEnabled) }
+    }
+
+    /// Virtual key code of the global shortcut. Default `0x23` (P).
+    @Published var globalShortcutKeyCode: Int {
+        didSet { defaults.set(globalShortcutKeyCode, forKey: Keys.globalShortcutKeyCode) }
+    }
+
+    /// Modifier flags for the global shortcut, stored as `NSEvent.ModifierFlags.rawValue`.
+    /// Default `[.command, .shift, .control]`.
+    @Published var globalShortcutModifiers: UInt {
+        didSet { defaults.set(globalShortcutModifiers, forKey: Keys.globalShortcutModifiers) }
+    }
+
+    /// Typed accessor for the stored modifier flags, masked to the device-
+    /// independent modifier set so stray flags never leak in.
+    var globalShortcutModifierFlags: NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: globalShortcutModifiers)
+            .intersection(.deviceIndependentFlagsMask)
+    }
+
+    /// Human-readable rendering of the shortcut, e.g. "⇧⌃⌘P". Modifier glyphs are
+    /// emitted in the conventional Cocoa order (⌃⌥⇧⌘) followed by the key glyph.
+    var globalShortcutDisplayString: String {
+        var out = ""
+        let flags = globalShortcutModifierFlags
+        // Order chosen to match the default display "⇧⌃⌘P".
+        if flags.contains(.shift)   { out += "⇧" }
+        if flags.contains(.control) { out += "⌃" }
+        if flags.contains(.option)  { out += "⌥" }
+        if flags.contains(.command) { out += "⌘" }
+        out += Self.keyGlyph(for: globalShortcutKeyCode)
+        return out
+    }
+
+    /// Reset the global shortcut to the default ⇧⌃⌘P.
+    func resetGlobalShortcutToDefault() {
+        globalShortcutKeyCode   = Self.defaultShortcutKeyCode
+        globalShortcutModifiers = Self.defaultShortcutModifiers
+    }
+
+    /// Map a virtual key code to a display glyph/character. Covers letters,
+    /// digits, and common special keys; unknown codes fall back to "?".
+    static func keyGlyph(for keyCode: Int) -> String {
+        // Special (non-character) keys.
+        switch keyCode {
+        case 0x24: return "↩"   // Return
+        case 0x30: return "⇥"   // Tab
+        case 0x31: return "Space"
+        case 0x33: return "⌫"   // Delete (backspace)
+        case 0x35: return "⎋"   // Escape
+        case 0x75: return "⌦"   // Forward delete
+        case 0x7B: return "←"
+        case 0x7C: return "→"
+        case 0x7D: return "↓"
+        case 0x7E: return "↑"
+        case 0x73: return "↖"   // Home
+        case 0x77: return "↘"   // End
+        case 0x74: return "⇞"   // Page Up
+        case 0x79: return "⇟"   // Page Down
+        default: break
+        }
+        if let c = Self.keyCodeToCharacter[keyCode] {
+            return c
+        }
+        return "?"
+    }
+
+    /// ANSI key code → uppercase character. Layout-independent (physical keys),
+    /// which matches how the recorder captures `event.keyCode`.
+    private static let keyCodeToCharacter: [Int: String] = [
+        0x00: "A", 0x0B: "B", 0x08: "C", 0x02: "D", 0x0E: "E", 0x03: "F",
+        0x05: "G", 0x04: "H", 0x22: "I", 0x26: "J", 0x28: "K", 0x25: "L",
+        0x2E: "M", 0x2D: "N", 0x1F: "O", 0x23: "P", 0x0C: "Q", 0x0F: "R",
+        0x01: "S", 0x11: "T", 0x20: "U", 0x09: "V", 0x0D: "W", 0x07: "X",
+        0x10: "Y", 0x06: "Z",
+        0x1D: "0", 0x12: "1", 0x13: "2", 0x14: "3", 0x15: "4", 0x17: "5",
+        0x16: "6", 0x1A: "7", 0x1C: "8", 0x19: "9",
+        0x18: "=", 0x1B: "-", 0x21: "[", 0x1E: "]", 0x2A: "\\",
+        0x29: ";", 0x27: "'", 0x2B: ",", 0x2F: ".", 0x2C: "/", 0x32: "`"
+    ]
+
     /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
     @Published var snoozeMap: [String: Date] {
         didSet {
@@ -315,6 +415,17 @@ final class MainlineSettings: ObservableObject {
 
         // Needs-a-Human expanded — default collapsed (false); persisted on change
         needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
+
+        // Global shortcut — default ON, ⇧⌃⌘P
+        globalShortcutEnabled = defaults.object(forKey: Keys.globalShortcutEnabled) == nil
+            ? true
+            : defaults.bool(forKey: Keys.globalShortcutEnabled)
+        globalShortcutKeyCode = defaults.object(forKey: Keys.globalShortcutKeyCode) == nil
+            ? Self.defaultShortcutKeyCode
+            : defaults.integer(forKey: Keys.globalShortcutKeyCode)
+        globalShortcutModifiers = defaults.object(forKey: Keys.globalShortcutModifiers) == nil
+            ? Self.defaultShortcutModifiers
+            : UInt(defaults.integer(forKey: Keys.globalShortcutModifiers))
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {

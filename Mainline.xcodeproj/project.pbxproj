@@ -34,6 +34,7 @@
 		PC000000000000000000001A /* TrustBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001D /* TrustBadgeView.swift */; };
 		PC000000000000000000001B /* AttentionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001E /* AttentionPolicy.swift */; };
 		PC000000000000000000001C /* ScopeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001F /* ScopeStore.swift */; };
+		PC0000000000000000000099 /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000099 /* GlobalHotKey.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -67,6 +68,7 @@
 		PF000000000000000000001D /* TrustBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustBadgeView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001E /* AttentionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionPolicy.swift; sourceTree = "<group>"; };
 		PF000000000000000000001F /* ScopeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeStore.swift; sourceTree = "<group>"; };
+		PF0000000000000000000099 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -129,6 +131,7 @@
 				PF0000000000000000000015 /* TrustLedgerStore.swift */,
 				PF0000000000000000000016 /* SnoozeStore.swift */,
 				PF000000000000000000001F /* ScopeStore.swift */,
+				PF0000000000000000000099 /* GlobalHotKey.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -251,6 +254,7 @@
 				PC000000000000000000001A /* TrustBadgeView.swift in Sources */,
 				PC000000000000000000001B /* AttentionPolicy.swift in Sources */,
 				PC000000000000000000001C /* ScopeStore.swift in Sources */,
+				PC0000000000000000000099 /* GlobalHotKey.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
