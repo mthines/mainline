@@ -41,10 +41,11 @@ struct MenuBarView: View {
 
             Divider()
 
-            // "Needs a Human" bucket — now scoped to the selected tab so it
-            // never mixes in PRs the current tab wouldn't show. Collapsed by
-            // default so a noisy bucket (e.g. dependabot chores with red CI)
-            // never blocks the relevant list below it.
+            // "Needs a Human" bucket — GLOBAL (tab-agnostic): its header count and
+            // rows derive from `manager.needsHumanPRs` (scope + drafts + conflicts
+            // applied) so the count always equals the menu-bar badge, regardless of
+            // the active tab. Collapsed by default so a noisy bucket (e.g.
+            // dependabot chores with red CI) never blocks the browse list below it.
             needsHumanSection
 
             // Browse list: PRs for the selected tab + scope + drafts filter.
@@ -168,7 +169,7 @@ struct MenuBarView: View {
     /// budget after reserving room for the Needs-a-Human box (only when the
     /// bucket is non-empty). Guarantees needs-human + browse <= budget.
     private var browseListHeight: CGFloat {
-        let hasBucket = !tabScopedNeedsHuman.isEmpty
+        let hasBucket = !globalNeedsHuman.isEmpty
         let reserved = hasBucket ? needsHumanMaxHeight : 0
         return panelContentHeight - reserved
     }
@@ -329,37 +330,27 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - "Needs a Human" section (tab-scoped)
+    // MARK: - "Needs a Human" section (GLOBAL / tab-agnostic)
 
-    /// The "Needs a Human" bucket for the CURRENTLY selected tab. Derived from
-    /// `visiblePRs` (tab + scope + drafts + For-me sub-filter already applied)
-    /// so it respects the same axis as everything else in the panel. Ordered
-    /// CI-failures first, then canonical triage order.
-    private var tabScopedNeedsHuman: [PRSnapshot] {
-        let myLogin = settings.githubUsername
-        return visiblePRs.filter { pr in
-            let tier = manager.trustLedger.tier(for: pr.author)
-            return TriageClassifier.needsHuman(
-                pr,
-                myLogin: myLogin,
-                trustTier: tier,
-                includeConflicts: settings.includeConflictsInNeedsHuman
-            )
-        }
+    /// The GLOBAL "Needs a Human" bucket — sourced from `manager.needsHumanPRs`
+    /// (scope + drafts + conflicts applied, but NOT tab-scoped). Using the same
+    /// set the badge reads guarantees the collapsed "Needs a Human · N" header
+    /// count equals `PRManager.needsHumanCount` / `menuBarBadge` on EITHER tab.
+    private var globalNeedsHuman: [PRSnapshot] {
+        manager.needsHumanPRs
     }
 
-    /// The "Needs a Human" bucket, scoped to the selected tab. Collapsed by
-    /// default (see `NeedsHumanView`) so a noisy bucket never blocks the browse
-    /// list below it. `handledCount` here is the tab-scoped remainder so the
-    /// "N handled" line stays consistent with the tab.
+    /// The GLOBAL "Needs a Human" bucket. Collapsed by default (see
+    /// `NeedsHumanView`) so a noisy bucket never blocks the browse list below it.
+    /// Both `needsHumanPRs` and `handledCount` are tab-agnostic (from the manager)
+    /// so the header count matches the menu-bar badge on every tab.
     @ViewBuilder
     private var needsHumanSection: some View {
-        let bucket = tabScopedNeedsHuman
+        let bucket = globalNeedsHuman
         if manager.hasToken && !bucket.isEmpty {
-            let handled = visiblePRs.count - bucket.count
             NeedsHumanView(
                 needsHumanPRs: bucket,
-                handledCount: max(handled, 0),
+                handledCount: manager.handledCount,
                 myLogin: settings.githubUsername,
                 includeConflicts: settings.includeConflictsInNeedsHuman,
                 maxExpandedHeight: needsHumanMaxHeight,
