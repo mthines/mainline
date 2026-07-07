@@ -4,10 +4,17 @@ import AppKit
 struct MenuBarView: View {
     @ObservedObject var manager: PRManager
     @ObservedObject private var settings: MainlineSettings
+    // Nested ObservableObjects the view reads for live updates. Without observing
+    // these directly, mutations (e.g. tapping a scope chip) don't re-render the
+    // view until the popover is reopened.
+    @ObservedObject private var scopeStore: ScopeStore
+    @ObservedObject private var trustLedger: TrustLedgerStore
 
     init(manager: PRManager) {
         self.manager = manager
         self.settings = manager.settings
+        self.scopeStore = manager.scopeStore
+        self.trustLedger = manager.trustLedger
     }
 
     var body: some View {
@@ -56,13 +63,18 @@ struct MenuBarView: View {
     /// PRs belonging to the currently selected tab, filtered by scope.
     private var visiblePRs: [PRSnapshot] {
         let tabFiltered = manager.prs.filter { $0.tabs.contains(settings.selectedTab) }
-        guard let scope = manager.scopeStore.selectedScope else { return tabFiltered }
-        return tabFiltered.filter { pr in
-            switch scope {
-            case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
-            case .repo(let r): return pr.repoFullName == r
+        let scopeFiltered: [PRSnapshot]
+        if let scope = scopeStore.selectedScope {
+            scopeFiltered = tabFiltered.filter { pr in
+                switch scope {
+                case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
+                case .repo(let r): return pr.repoFullName == r
+                }
             }
+        } else {
+            scopeFiltered = tabFiltered
         }
+        return scopeFiltered.sorted(by: PRSnapshot.triageOrder)
     }
 
     /// Count for the For-me tab label.
@@ -82,7 +94,7 @@ struct MenuBarView: View {
             .sorted { $0.sortIndex < $1.sortIndex }
             .compactMap { state in
                 guard let prs = grouped[state], !prs.isEmpty else { return nil }
-                return (state, prs.sorted { $0.updatedAt > $1.updatedAt })
+                return (state, prs.sorted(by: PRSnapshot.triageOrder))
             }
     }
 
@@ -148,12 +160,12 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var scopeFilter: some View {
-        if !manager.scopeStore.availableScopes.isEmpty {
+        if !scopeStore.availableScopes.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     scopeChip(label: "All", scope: nil)
-                    ForEach(manager.scopeStore.availableScopes, id: \.rawValue) { scope in
-                        let count = manager.scopeStore.scopeCounts[scope] ?? 0
+                    ForEach(scopeStore.availableScopes, id: \.rawValue) { scope in
+                        let count = scopeStore.scopeCounts[scope] ?? 0
                         scopeChip(label: "\(scope.displayName) \(count)", scope: scope)
                     }
                 }
@@ -165,9 +177,9 @@ struct MenuBarView: View {
     }
 
     private func scopeChip(label: String, scope: PRScope?) -> some View {
-        let isSelected = manager.scopeStore.selectedScope == scope
+        let isSelected = scopeStore.selectedScope == scope
         return Button {
-            manager.scopeStore.selectedScope = scope
+            scopeStore.selectedScope = scope
         } label: {
             Text(label)
                 .font(.caption)
@@ -186,24 +198,24 @@ struct MenuBarView: View {
     // MARK: - Scope cycling
 
     private func cycleScopeForward() {
-        let all: [PRScope?] = [nil] + manager.scopeStore.availableScopes
-        let current = manager.scopeStore.selectedScope
+        let all: [PRScope?] = [nil] + scopeStore.availableScopes
+        let current = scopeStore.selectedScope
         if let idx = all.firstIndex(where: { $0 == current }) {
             let next = all[(idx + 1) % all.count]
-            manager.scopeStore.selectedScope = next
+            scopeStore.selectedScope = next
         } else {
-            manager.scopeStore.selectedScope = nil
+            scopeStore.selectedScope = nil
         }
     }
 
     private func cycleScopeBackward() {
-        let all: [PRScope?] = [nil] + manager.scopeStore.availableScopes
-        let current = manager.scopeStore.selectedScope
+        let all: [PRScope?] = [nil] + scopeStore.availableScopes
+        let current = scopeStore.selectedScope
         if let idx = all.firstIndex(where: { $0 == current }) {
             let prev = all[(idx - 1 + all.count) % all.count]
-            manager.scopeStore.selectedScope = prev
+            scopeStore.selectedScope = prev
         } else {
-            manager.scopeStore.selectedScope = nil
+            scopeStore.selectedScope = nil
         }
     }
 
@@ -221,7 +233,7 @@ struct MenuBarView: View {
                         NeedsHumanView(
                             prs: visiblePRs,
                             myLogin: settings.githubUsername,
-                            trustLedger: manager.trustLedger
+                            trustLedger: trustLedger
                         )
                         Divider()
                     }
@@ -238,7 +250,10 @@ struct MenuBarView: View {
                     }
                 }
             }
-            .frame(maxHeight: panelContentHeight)
+            // Give the scroll content a concrete height so the self-sizing
+            // `.window` MenuBarExtra popover actually grows to the configured
+            // size. `maxHeight` alone only caps and lets the ScrollView collapse.
+            .frame(height: panelContentHeight)
         }
     }
 
@@ -375,7 +390,7 @@ struct MenuBarView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         // Layer D: trust badge
-                        TrustBadgeView(tier: manager.trustLedger.tier(for: pr.author))
+                        TrustBadgeView(tier: trustLedger.tier(for: pr.author))
                     }
                 }
             }
