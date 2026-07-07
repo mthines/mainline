@@ -72,9 +72,9 @@ struct MenuBarView: View {
 
             Divider()
 
-            // "Needs a Human" HEADER — GLOBAL (tab-agnostic) chrome. Always
-            // pinned (non-scrolling); its count derives from `manager.needsHumanPRs`
-            // so it equals the menu-bar badge on either tab. Collapsed by default.
+            // "Needs a Human" HEADER — always pinned (non-scrolling). Its count is
+            // TAB-SCOPED (`tabScopedNeedsHuman`), matching the visible list below.
+            // Collapsed by default.
             needsHumanHeaderSection
 
             // The SINGLE scrollable body: the Needs-a-Human rows (only when
@@ -140,42 +140,14 @@ struct MenuBarView: View {
 
     // MARK: - Derived data
 
-    /// PRs belonging to the currently selected tab, filtered by scope and (when
-    /// `showDrafts` is off) excluding draft PRs. This is the single source of
-    /// truth for the visible list, the sections, the Needs-a-Human bucket, and
-    /// every count derived below.
+    /// PRs belonging to the currently selected tab, filtered by scope, drafts, and
+    /// the For-me Direct/Team sub-filter. This is the single source of truth for
+    /// the visible list, the sections, the panel's Needs-a-Human bucket, and every
+    /// count derived below. Delegates to `manager.currentViewPRs` — the SAME
+    /// computation the menu-bar badge reads — so the list and the badge can never
+    /// diverge; this view only adds the display sort.
     private var visiblePRs: [PRSnapshot] {
-        let tabFiltered = manager.prs.filter { $0.tabs.contains(settings.selectedTab) }
-        let draftFiltered = settings.showDrafts
-            ? tabFiltered
-            : tabFiltered.filter { $0.classifiedState != .draft }
-        let scopeFiltered: [PRSnapshot]
-        if let scope = scopeStore.selectedScope {
-            scopeFiltered = draftFiltered.filter { pr in
-                switch scope {
-                case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
-                case .repo(let r): return pr.repoFullName == r
-                }
-            }
-        } else {
-            scopeFiltered = draftFiltered
-        }
-        // For-me sub-filter: narrow by direct/team review-request source. Only
-        // applies on the For-me tab; `.all` (default) is a no-op.
-        let sourceFiltered: [PRSnapshot]
-        if settings.selectedTab == .forMe, settings.forMeReviewFilter != .all {
-            let myLogin = settings.githubUsername
-            sourceFiltered = scopeFiltered.filter { pr in
-                switch settings.forMeReviewFilter {
-                case .all:    return true
-                case .direct: return pr.reviewRequestSource(myLogin: myLogin) == .direct
-                case .team:   return pr.reviewRequestSource(myLogin: myLogin) == .team
-                }
-            }
-        } else {
-            sourceFiltered = scopeFiltered
-        }
-        return sourceFiltered.sorted(by: PRSnapshot.triageOrder)
+        manager.currentViewPRs.sorted(by: PRSnapshot.triageOrder)
     }
 
     /// The TAB-SCOPED "Needs a Human" subset: the needs-human PRs within the
@@ -204,17 +176,28 @@ struct MenuBarView: View {
         max(0, visiblePRs.count - tabScopedNeedsHuman.count)
     }
 
-    /// Whether a PR should count toward the tab labels, honouring the draft toggle.
+    /// Whether a PR should count toward the tab labels. Honours both the draft
+    /// toggle and the selected scope, so the tab label, the badge (when that tab
+    /// is selected), and the visible list all agree. The For-me Direct/Team
+    /// sub-filter is intentionally NOT applied here — it narrows the visible
+    /// list/badge only, not the tab label.
     private func countsTowardTabs(_ pr: PRSnapshot) -> Bool {
-        settings.showDrafts || pr.classifiedState != .draft
+        // Drafts.
+        guard settings.showDrafts || pr.classifiedState != .draft else { return false }
+        // Scope.
+        guard let scope = scopeStore.selectedScope else { return true }
+        switch scope {
+        case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
+        case .repo(let r): return pr.repoFullName == r
+        }
     }
 
-    /// Count for the For-me tab label.
+    /// Count for the For-me tab label (tab + scope + drafts).
     private var forMeCount: Int {
         manager.prs.filter { $0.tabs.contains(.forMe) && countsTowardTabs($0) }.count
     }
 
-    /// Count for the Created tab label.
+    /// Count for the Created tab label (tab + scope + drafts).
     private var createdCount: Int {
         manager.prs.filter { $0.tabs.contains(.created) && countsTowardTabs($0) }.count
     }

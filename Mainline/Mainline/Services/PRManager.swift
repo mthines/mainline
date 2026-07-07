@@ -50,33 +50,68 @@ final class PRManager: ObservableObject {
 
     // MARK: - Triage Cockpit computed properties
 
-    /// The tab-agnostic PR population that both the badge and the panel's
-    /// "Needs a Human" bucket are computed from. Spans both For-me and Created
-    /// tabs (deduped by nodeId via the store), narrowed by the selected scope,
-    /// and — when `settings.showDrafts` is off — excludes drafts. Every badge
-    /// metric reads from this set so the badge and the panel stay consistent.
-    var scopedFilteredPRs: [PRSnapshot] {
+    /// The SINGLE population that drives the visible browse list AND the
+    /// menu-bar badge, so the two can never disagree. Applies, in order:
+    ///   1. the selected tab (`tabs.contains(settings.selectedTab)`),
+    ///   2. the selected scope (`scopeStore.selectedScope`, nil = All),
+    ///   3. the draft filter (excludes `.draft` when `!settings.showDrafts`),
+    ///   4. the For-me Direct/Team sub-filter (only on the For-me tab).
+    /// `MenuBarView.visiblePRs` delegates to this exact computation.
+    ///
+    /// This is the "follow current view" set. Every badge metric reads from it
+    /// when `menuBarScopeFollowsSelection` is ON. Not sorted here — callers that
+    /// render sort via `PRSnapshot.triageOrder`; counting doesn't need order.
+    var currentViewPRs: [PRSnapshot] {
+        // 1. Tab.
+        let tabFiltered = prs.filter { $0.tabs.contains(settings.selectedTab) }
+
+        // 2. Scope.
         let scopeFiltered: [PRSnapshot]
-        if settings.menuBarScopeFollowsSelection, let scope = scopeStore.selectedScope {
-            scopeFiltered = prs.filter { pr in
+        if let scope = scopeStore.selectedScope {
+            scopeFiltered = tabFiltered.filter { pr in
                 switch scope {
                 case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
                 case .repo(let r): return pr.repoFullName == r
                 }
             }
         } else {
-            scopeFiltered = prs
+            scopeFiltered = tabFiltered
         }
-        guard !settings.showDrafts else { return scopeFiltered }
-        return scopeFiltered.filter { $0.classifiedState != .draft }
+
+        // 3. Drafts.
+        let draftFiltered = settings.showDrafts
+            ? scopeFiltered
+            : scopeFiltered.filter { $0.classifiedState != .draft }
+
+        // 4. For-me Direct/Team sub-filter (only on the For-me tab; `.all` no-op).
+        guard settings.selectedTab == .forMe, settings.forMeReviewFilter != .all else {
+            return draftFiltered
+        }
+        let myLogin = settings.githubUsername
+        return draftFiltered.filter { pr in
+            switch settings.forMeReviewFilter {
+            case .all:    return true
+            case .direct: return pr.reviewRequestSource(myLogin: myLogin) == .direct
+            case .team:   return pr.reviewRequestSource(myLogin: myLogin) == .team
+            }
+        }
     }
 
-    /// PRs that need human attention based on TriageClassifier. Tab-agnostic:
-    /// derived from `scopedFilteredPRs` so the panel's bucket header count and
-    /// the menu-bar badge (`.needsAHuman`) reflect the SAME population.
+    /// The population every badge metric counts over. When "Follow current view"
+    /// is ON (default), this is `currentViewPRs` (tab + scope + drafts + For-me
+    /// sub-filter) so the badge equals what the panel shows. When OFF, it is the
+    /// full `prs` list (global, ignoring tab/scope/drafts).
+    private var badgeBasePRs: [PRSnapshot] {
+        settings.menuBarScopeFollowsSelection ? currentViewPRs : prs
+    }
+
+    /// PRs that need human attention based on TriageClassifier, computed over
+    /// `badgeBasePRs` so the `.needsAHuman` badge follows the current view (tab +
+    /// scope + drafts + For-me sub-filter) when follow-view is on, or all PRs when
+    /// off. The panel's own bucket is tab-scoped separately in `MenuBarView`.
     var needsHumanPRs: [PRSnapshot] {
         let myLogin = settings.githubUsername
-        return scopedFilteredPRs.filter { pr in
+        return badgeBasePRs.filter { pr in
             let tier = trustLedger.tier(for: pr.author)
             return TriageClassifier.needsHuman(
                 pr,
@@ -109,21 +144,21 @@ final class PRManager: ObservableObject {
         }.count
     }
 
-    /// Count of PRs that have been "handled" (in the scope+draft-filtered
-    /// population but not in the needs-human bucket). Matches the bucket's
-    /// denominator so "N handled" is consistent with the bucket header.
+    /// Count of PRs that have been "handled" (in the badge-base population but not
+    /// in the needs-human bucket). Matches the same denominator as `needsHumanPRs`.
     var handledCount: Int {
-        scopedFilteredPRs.count - needsHumanPRs.count
+        badgeBasePRs.count - needsHumanPRs.count
     }
 
     // MARK: - Menu-bar badge (scope-aware + configurable — Bug 2 / 5)
 
     /// The badge for the menu-bar icon, computed from the configured metric.
-    /// Reads from `scopedFilteredPRs` (scope + draft filter applied) so every
-    /// metric stays consistent with the panel. Colorblind-safe: encodes shape +
-    /// tint (see `MenuBarBadge`).
+    /// Reads from `badgeBasePRs` — i.e. the current view (tab + scope + drafts +
+    /// For-me sub-filter) when "Follow current view" is on, else all PRs — so the
+    /// badge matches the visible list. With the `.totalOpen` metric the badge
+    /// equals the visible open count. Colorblind-safe: encodes shape + tint.
     var menuBarBadge: MenuBarBadge {
-        let scoped = scopedFilteredPRs
+        let scoped = badgeBasePRs
         let myLogin = settings.githubUsername
 
         switch settings.menuBarMetric {
@@ -157,11 +192,13 @@ final class PRManager: ObservableObject {
         }
     }
 
-    /// A human-readable one-line description of the current menu-bar badge:
-    /// "<count> <metric-noun>[ in <scope>]". The count is read verbatim from
-    /// `menuBarBadge.rawCount`, so this string ALWAYS agrees with the icon.
+    /// A human-readable one-line description of the current menu-bar badge. The
+    /// count is read verbatim from `menuBarBadge.rawCount` (which reads the SAME
+    /// `badgeBasePRs`), so this string ALWAYS agrees with the icon.
     ///
-    /// Examples: "115 open PRs in dash0hq", "33 need a human", "5 review requests".
+    /// When "Follow current view" is on, it reflects the tab (and scope) context:
+    ///   "5 open PRs · Created · dash0hq", "93 review requests · For me · dash0hq".
+    /// When off, it describes the global metric: "115 open PRs across all repos".
     var badgeExplanation: String {
         let count = menuBarBadge.rawCount
 
@@ -174,16 +211,19 @@ final class PRManager: ObservableObject {
         case .totalOpen:      noun = "open PRs"
         }
 
-        let scopeSuffix: String
-        if settings.menuBarScopeFollowsSelection, let scope = scopeStore.selectedScope {
-            scopeSuffix = " in \(scope.displayName)"
+        var parts = ["\(count) \(noun)"]
+
+        if settings.menuBarScopeFollowsSelection {
+            // Follow current view: annotate with the tab and (if any) the scope.
+            parts.append(settings.selectedTab.title)
+            if let scope = scopeStore.selectedScope {
+                parts.append(scope.displayName)
+            }
         } else if settings.menuBarMetric == .totalOpen {
-            scopeSuffix = " across all repos"
-        } else {
-            scopeSuffix = ""
+            parts[0] += " across all repos"
         }
 
-        return "\(count) \(noun)\(scopeSuffix)"
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - Init

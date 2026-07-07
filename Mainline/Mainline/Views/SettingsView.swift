@@ -178,10 +178,10 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.menu)
 
-                Toggle("Follow selected scope", isOn: $settings.menuBarScopeFollowsSelection)
+                Toggle("Follow current view (tab, scope & drafts)", isOn: $settings.menuBarScopeFollowsSelection)
 
                 Label("The badge counts the chosen metric" +
-                      (settings.menuBarScopeFollowsSelection ? ", narrowed to the scope you've selected in the panel." : " across all repositories."),
+                      (settings.menuBarScopeFollowsSelection ? " over exactly what the panel shows — the selected tab, scope, and drafts filter." : " across all repositories, ignoring the selected tab, scope, and drafts."),
                       systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
