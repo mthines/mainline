@@ -124,7 +124,11 @@ struct MenuBarView: View {
         // `manager.peekPR`; the deck only sets it.
         .overlay {
             if let pr = manager.peekPR {
-                ZStack {
+                // Top-aligned, not centered: the card sizes to each PR's content, so
+                // a centered card would shift vertically as you step through PRs with
+                // J/K and the title/info would jump. Pinning to the top keeps the
+                // header and glance rows anchored in place while stepping.
+                ZStack(alignment: .top) {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
                         .onTapGesture { manager.peekPR = nil }
@@ -144,6 +148,7 @@ struct MenuBarView: View {
                     // files list + loading state and re-fetches for the new PR.
                     .id(pr.nodeId)
                     .padding(.horizontal, 8)
+                    .padding(.top, 8)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
                 }
                 .zIndex(10)
