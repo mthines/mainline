@@ -3,7 +3,8 @@
 A lightweight macOS menu bar app that notifies you about GitHub pull requests.
 
 <!-- HERO IMAGE — replace with a screenshot (or short GIF) of the menu bar panel open, showing PRs grouped by actionability. Recommended width ~900px. -->
-![Mainline menu bar panel open, showing pull requests grouped by actionability with CI status](docs/images/hero.png)
+
+
 
 ## Features
 
@@ -83,31 +84,12 @@ To distribute outside your machine:
 
 ## Screenshots
 
-<!--
-  Replace each placeholder below with a real screenshot.
-  Drop the image files in docs/images/ using these exact filenames (or update the paths).
-  Recommended: retina PNGs, ~800–900px wide, light or dark mode consistent across the set.
--->
-
-### Triage panel
-
-<!-- Screenshot: the menu bar panel with PRs grouped into Needs a Human / Ready to merge / Waiting, each row showing CI status and a trust badge. -->
-![Menu bar panel with PRs grouped by actionability](docs/images/triage-panel.png)
-
-### Keyboard triage & command palette
-
-<!-- Screenshot: a PR row selected via keyboard, or the ⌘K command palette open over the panel. -->
-![Keyboard triage with the command palette open](docs/images/command-palette.png)
-
-### Diff preview
-
-<!-- Screenshot: the Quick Look diff overlay (Space) showing a PR's changes. -->
-![Quick Look diff preview of a pull request](docs/images/diff-preview.png)
-
 ### Settings
 
 <!-- Screenshot: the Settings window showing the PAT/gh import, notification toggles, and the global shortcut recorder. -->
-![Settings window with token entry, notification toggles, and the global shortcut recorder](docs/images/settings.png)
+<img width="406" height="661" alt="Screenshot 2026-07-07 at 21 50 26" src="https://github.com/user-attachments/assets/8d495452-b523-47f9-9739-a0d89bee7154" />
+
+
 
 ## Releasing / Homebrew
 
