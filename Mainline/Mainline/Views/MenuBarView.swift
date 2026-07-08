@@ -134,12 +134,15 @@ struct MenuBarView: View {
                         isPresented: Binding(
                             get: { manager.peekPR != nil },
                             set: { if !$0 { manager.peekPR = nil } }
-                        )
+                        ),
+                        // Cap only — the card sizes to its content and grows to at
+                        // most this, so short PRs render a compact card instead of
+                        // filling the panel.
+                        maxHeight: peekHeight
                     )
                     // Recreate per PR so stepping through with J/K/arrows resets the
                     // files list + loading state and re-fetches for the new PR.
                     .id(pr.nodeId)
-                    .frame(height: peekHeight)
                     .padding(.horizontal, 8)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
                 }

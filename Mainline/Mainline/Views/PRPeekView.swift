@@ -1,5 +1,16 @@
 import SwiftUI
 
+// MARK: - PeekContentHeightKey
+
+/// Reports the natural height of the peek card's scrollable content so the card
+/// can size to it (up to a cap) instead of always filling the popover.
+private struct PeekContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 // MARK: - PRPeekView
 
 /// Quick-peek overlay for the focused PR (Space / context-menu "Details").
@@ -19,13 +30,23 @@ struct PRPeekView: View {
     let pr: PRSnapshot
     let client: GitHubClient
     @Binding var isPresented: Bool
+    /// Upper bound on the card height (the available popover space). The card sizes
+    /// to its CONTENT and only grows to this cap — beyond it the file list scrolls.
+    var maxHeight: CGFloat = 560
 
     @State private var files: [PRFile] = []
     @State private var isLoadingFiles: Bool = true
     @State private var filesError: String? = nil
+    /// Natural (unclipped) height of the scrollable content, measured live so the
+    /// scroll region can shrink to fit a short PR instead of filling the panel.
+    @State private var contentHeight: CGFloat = 0
 
     /// Cap the rendered file rows so a giant PR can't blow up the popover.
     private let fileDisplayCap = 40
+
+    /// Space reserved for the header + divider above the scroll region. Keeps the
+    /// whole card within `maxHeight` when the content is capped.
+    private let headerReserve: CGFloat = 104
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -40,15 +61,24 @@ struct PRPeekView: View {
                     filesSection
                 }
                 .padding(.vertical, 8)
+                // Measure the content's natural height (a vertical ScrollView lays
+                // its content out at ideal size), so `scrollHeight` can fit it.
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: PeekContentHeightKey.self,
+                                               value: proxy.size.height)
+                    }
+                )
             }
-            // Fill whatever height the presenter (`MenuBarView`) allocates so the
-            // card uses the available popover height instead of a fixed cap.
-            .frame(maxHeight: .infinity)
+            // Fit the content, capped so the whole card stays within `maxHeight`.
+            // Short PRs → a compact card; long PRs → scroll at the cap.
+            .frame(height: scrollHeight)
         }
-        // Width fits inside the 360pt MenuBarExtra popover; height is driven by the
-        // presenter. Opaque fill so the list behind can't bleed through
+        .onPreferenceChange(PeekContentHeightKey.self) { contentHeight = $0 }
+        // Width fits inside the 360pt MenuBarExtra popover; height sizes to content
+        // (see `scrollHeight`). Opaque fill so the list behind can't bleed through
         // (`.background(.background)` is translucent here).
-        .frame(maxWidth: 344, maxHeight: .infinity)
+        .frame(maxWidth: 344)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .windowBackgroundColor))
@@ -60,6 +90,15 @@ struct PRPeekView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .shadow(radius: 12)
         .task { await loadFiles() }
+    }
+
+    /// Height of the scroll region: the measured content height, capped so the
+    /// header + scroll region together never exceed `maxHeight`. Falls back to the
+    /// cap until the first measurement arrives.
+    private var scrollHeight: CGFloat {
+        let cap = max(maxHeight - headerReserve, 160)
+        guard contentHeight > 0 else { return cap }
+        return min(contentHeight, cap)
     }
 
     // MARK: - Header
