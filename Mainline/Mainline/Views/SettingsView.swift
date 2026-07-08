@@ -50,6 +50,7 @@ struct SettingsView: View {
     @State private var isImporting: Bool = false
     @State private var hasStoredToken: Bool = false
     @State private var panelHeightDraft: Int = 560
+    @State private var panelMinHeightDraft: Int = 240
     @State private var showingTelemetryDetails: Bool = false
 
     // Panel-height bounds. The setting may store a large number; the render path
@@ -57,6 +58,7 @@ struct SettingsView: View {
     // makes the panel as tall as the display allows.
     static let panelHeightMin = 300
     static let panelHeightMax = 2000
+    static let panelMinHeightMin = 200
 
     static let panelHeightFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -87,6 +89,7 @@ struct SettingsView: View {
         .onAppear {
             loadToken()
             panelHeightDraft = settings.panelHeight
+            panelMinHeightDraft = settings.panelMinHeight
         }
     }
 
@@ -285,6 +288,24 @@ struct SettingsView: View {
     private var appearanceSection: some View {
         Section("Panel") {
             HStack {
+                Text("Min panel height (pt)")
+                Spacer()
+                TextField("", value: $panelMinHeightDraft, formatter: Self.panelHeightFormatter)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 70)
+                    .onSubmit { commitPanelMinHeight() }
+                Stepper("", value: $panelMinHeightDraft, in: Self.panelMinHeightMin...Self.panelHeightMax, step: 20)
+                    .labelsHidden()
+                    .onChange(of: panelMinHeightDraft) { _ in commitPanelMinHeight() }
+            }
+            Label("The MINIMUM height — the panel never shrinks below this even with few PRs. Clamped to the max below.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
                 Text("Max panel height (pt)")
                 Spacer()
                 TextField("", value: $panelHeightDraft, formatter: Self.panelHeightFormatter)
@@ -371,6 +392,19 @@ struct SettingsView: View {
         }
         if settings.panelHeight != clamped {
             settings.panelHeight = clamped
+        }
+    }
+
+    /// Clamp the min-height draft to its range and to the current max, then persist.
+    /// MenuBarView also clamps min <= max defensively at render time.
+    private func commitPanelMinHeight() {
+        let ceiling = min(Self.panelHeightMax, panelHeightDraft)
+        let clamped = min(max(panelMinHeightDraft, Self.panelMinHeightMin), ceiling)
+        if clamped != panelMinHeightDraft {
+            panelMinHeightDraft = clamped
+        }
+        if settings.panelMinHeight != clamped {
+            settings.panelMinHeight = clamped
         }
     }
 

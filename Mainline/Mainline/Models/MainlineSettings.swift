@@ -95,6 +95,7 @@ final class MainlineSettings: ObservableObject {
         static let attentionPolicy      = "attentionPolicy"
         static let unreadPRIds          = "unreadPRIds"
         static let panelHeight          = "panelHeight"
+        static let panelMinHeight       = "panelMinHeight"
         static let menuBarMetric        = "menuBarMetric"
         static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
@@ -208,9 +209,16 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(unreadPRIdsList, forKey: Keys.unreadPRIds) }
     }
 
-    /// Preferred panel content height. Options: 400/480/560/640. Default 560.
+    /// Preferred MAX panel content height. The panel sizes to content and grows up
+    /// to this (capped to the display). Default 560.
     @Published var panelHeight: Int {
         didSet { defaults.set(panelHeight, forKey: Keys.panelHeight) }
+    }
+
+    /// Preferred MIN panel content height — the panel never shrinks below this even
+    /// with few PRs. Clamped not to exceed `panelHeight` downstream. Default 240.
+    @Published var panelMinHeight: Int {
+        didSet { defaults.set(panelMinHeight, forKey: Keys.panelMinHeight) }
     }
 
     /// What the menu-bar badge counts. Default `needsAHuman`.
@@ -493,6 +501,7 @@ final class MainlineSettings: ObservableObject {
         attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
         unreadPRIdsList = defaults.stringArray(forKey: Keys.unreadPRIds) ?? []
         panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 560 : defaults.integer(forKey: Keys.panelHeight)
+        panelMinHeight  = defaults.object(forKey: Keys.panelMinHeight) == nil ? 240 : defaults.integer(forKey: Keys.panelMinHeight)
 
         // Menu-bar badge — default: count "Needs a Human", follow selected scope
         menuBarMetric = defaults.string(forKey: Keys.menuBarMetric)

@@ -174,8 +174,14 @@ struct MenuBarView: View {
         return max(0, value)
     }
 
-    /// Absolute floor for the scroll region so it is never a zero/one-pixel sliver.
-    private let regionFloor: CGFloat = 120
+    /// Floor for the scroll region — derived from the user's MIN panel height so the
+    /// panel never shrinks below it with few PRs. The min is a TOTAL panel height, so
+    /// convert to a scroll-region floor (minus fixed chrome), clamped not to exceed
+    /// the max (`panelHeight`) and never below an absolute sliver guard (80pt).
+    private var regionFloor: CGFloat {
+        let effMin = min(CGFloat(settings.panelMinHeight), CGFloat(settings.panelHeight))
+        return max(safe(effMin - chromeReserve, fallback: 120), 80)
+    }
 
     /// The MAXIMUM total budget for the whole panel: the smaller of the user's
     /// preferred `panelHeight` and the real space below the menu bar (visibleFrame
