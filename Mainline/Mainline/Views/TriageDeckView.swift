@@ -205,7 +205,12 @@ struct TriageDeckView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if prs.isEmpty {
+            // Show "Queue clear" only when there is genuinely nothing to display —
+            // no active PRs AND no Postponed/Done sections. Guarding on `prs` (the
+            // active list) alone hid the Postponed and Done sections whenever the
+            // active list was empty, so postponing everything in a scope left no way
+            // to see or resume those PRs. `sections` already folds in Postponed/Done.
+            if sections.isEmpty {
                 emptyState
             } else {
                 prList
