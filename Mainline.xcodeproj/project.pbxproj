@@ -21,16 +21,13 @@
 		PC000000000000000000000C /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000000C /* MenuBarView.swift */; };
 		PC000000000000000000000D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000000D /* SettingsView.swift */; };
 		PC000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000000E /* Assets.xcassets */; };
-		PC000000000000000000000F /* TrustLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000012 /* TrustLedger.swift */; };
 		PC0000000000000000000010 /* SensitivePathMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000013 /* SensitivePathMatcher.swift */; };
 		PC0000000000000000000011 /* TriageClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000014 /* TriageClassifier.swift */; };
-		PC0000000000000000000012 /* TrustLedgerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000015 /* TrustLedgerStore.swift */; };
 		PC0000000000000000000013 /* SnoozeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000016 /* SnoozeStore.swift */; };
 		PC0000000000000000000014 /* MenuBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000017 /* MenuBarIconView.swift */; };
 		PC0000000000000000000016 /* TriageDeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000019 /* TriageDeckView.swift */; };
-		PC0000000000000000000017 /* DiffPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001A /* DiffPreviewView.swift */; };
+		PC0000000000000000000017 /* PRPeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001A /* PRPeekView.swift */; };
 		PC0000000000000000000019 /* UndoToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001C /* UndoToastView.swift */; };
-		PC000000000000000000001A /* TrustBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001D /* TrustBadgeView.swift */; };
 		PC000000000000000000001B /* AttentionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001E /* AttentionPolicy.swift */; };
 		PC000000000000000000001C /* ScopeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001F /* ScopeStore.swift */; };
 		PC0000000000000000000099 /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000099 /* GlobalHotKey.swift */; };
@@ -62,16 +59,13 @@
 		PF000000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		PF0000000000000000000010 /* Mainline.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Mainline.entitlements; sourceTree = "<group>"; };
 		PF0000000000000000000011 /* Mainline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mainline.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		PF0000000000000000000012 /* TrustLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustLedger.swift; sourceTree = "<group>"; };
 		PF0000000000000000000013 /* SensitivePathMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitivePathMatcher.swift; sourceTree = "<group>"; };
 		PF0000000000000000000014 /* TriageClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriageClassifier.swift; sourceTree = "<group>"; };
-		PF0000000000000000000015 /* TrustLedgerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustLedgerStore.swift; sourceTree = "<group>"; };
 		PF0000000000000000000016 /* SnoozeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnoozeStore.swift; sourceTree = "<group>"; };
 		PF0000000000000000000017 /* MenuBarIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarIconView.swift; sourceTree = "<group>"; };
 		PF0000000000000000000019 /* TriageDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriageDeckView.swift; sourceTree = "<group>"; };
-		PF000000000000000000001A /* DiffPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffPreviewView.swift; sourceTree = "<group>"; };
+		PF000000000000000000001A /* PRPeekView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRPeekView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001C /* UndoToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoToastView.swift; sourceTree = "<group>"; };
-		PF000000000000000000001D /* TrustBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustBadgeView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001E /* AttentionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionPolicy.swift; sourceTree = "<group>"; };
 		PF000000000000000000001F /* ScopeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeStore.swift; sourceTree = "<group>"; };
 		PF0000000000000000000099 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
@@ -123,7 +117,6 @@
 				PF0000000000000000000002 /* PRSnapshot.swift */,
 				PF0000000000000000000003 /* PRTransition.swift */,
 				PF0000000000000000000004 /* MainlineSettings.swift */,
-				PF0000000000000000000012 /* TrustLedger.swift */,
 				PF000000000000000000001E /* AttentionPolicy.swift */,
 			);
 			path = Models;
@@ -141,7 +134,6 @@
 				PF000000000000000000000B /* PRManager.swift */,
 				PF0000000000000000000013 /* SensitivePathMatcher.swift */,
 				PF0000000000000000000014 /* TriageClassifier.swift */,
-				PF0000000000000000000015 /* TrustLedgerStore.swift */,
 				PF0000000000000000000016 /* SnoozeStore.swift */,
 				PF000000000000000000001F /* ScopeStore.swift */,
 				PF0000000000000000000099 /* GlobalHotKey.swift */,
@@ -157,9 +149,8 @@
 				PF000000000000000000000D /* SettingsView.swift */,
 				PF0000000000000000000017 /* MenuBarIconView.swift */,
 				PF0000000000000000000019 /* TriageDeckView.swift */,
-				PF000000000000000000001A /* DiffPreviewView.swift */,
+				PF000000000000000000001A /* PRPeekView.swift */,
 				PF000000000000000000001C /* UndoToastView.swift */,
-				PF000000000000000000001D /* TrustBadgeView.swift */,
 				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
 				OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */,
 			);
@@ -268,16 +259,13 @@
 				PC000000000000000000000B /* PRManager.swift in Sources */,
 				PC000000000000000000000C /* MenuBarView.swift in Sources */,
 				PC000000000000000000000D /* SettingsView.swift in Sources */,
-				PC000000000000000000000F /* TrustLedger.swift in Sources */,
 				PC0000000000000000000010 /* SensitivePathMatcher.swift in Sources */,
 				PC0000000000000000000011 /* TriageClassifier.swift in Sources */,
-				PC0000000000000000000012 /* TrustLedgerStore.swift in Sources */,
 				PC0000000000000000000013 /* SnoozeStore.swift in Sources */,
 				PC0000000000000000000014 /* MenuBarIconView.swift in Sources */,
 				PC0000000000000000000016 /* TriageDeckView.swift in Sources */,
-				PC0000000000000000000017 /* DiffPreviewView.swift in Sources */,
+				PC0000000000000000000017 /* PRPeekView.swift in Sources */,
 				PC0000000000000000000019 /* UndoToastView.swift in Sources */,
-				PC000000000000000000001A /* TrustBadgeView.swift in Sources */,
 				PC000000000000000000001B /* AttentionPolicy.swift in Sources */,
 				PC000000000000000000001C /* ScopeStore.swift in Sources */,
 				PC0000000000000000000099 /* GlobalHotKey.swift in Sources */,

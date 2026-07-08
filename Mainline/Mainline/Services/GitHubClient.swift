@@ -131,6 +131,8 @@ struct PRFile: Decodable {
     let filename: String
     let additions: Int
     let deletions: Int
+    /// GitHub file status: "added" | "modified" | "removed" | "renamed" | "changed".
+    var status: String? = nil
 }
 
 private struct GraphQLActor: Decodable {
@@ -479,33 +481,6 @@ final class GitHubClient {
       }
     }
     """
-
-    // MARK: - Fetch diff (REST)
-
-    /// Fetches the unified diff text for a PR.
-    /// Caps the response at 512 KB to avoid OOM on very large PRs.
-    func fetchDiff(repoFullName: String, number: Int, token: String) async throws -> String {
-        let urlString = "https://api.github.com/repos/\(repoFullName)/pulls/\(number)"
-        guard let url = URL(string: urlString) else { throw GitHubAPIError.unknown(0) }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/vnd.github.v3.diff", forHTTPHeaderField: "Accept")
-
-        let (data, response) = try await performRequest(request)
-        guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
-
-        switch http.statusCode {
-        case 200: break
-        case 401: throw GitHubAPIError.unauthorized
-        case 500...599: throw GitHubAPIError.serverError(http.statusCode)
-        default:  throw GitHubAPIError.unknown(http.statusCode)
-        }
-
-        let cap = 512 * 1024  // 512 KB
-        let truncated = data.count > cap ? data.prefix(cap) : data
-        return String(data: truncated, encoding: .utf8) ?? String(data: truncated, encoding: .isoLatin1) ?? ""
-    }
 
     // MARK: - Fetch files (REST)
 

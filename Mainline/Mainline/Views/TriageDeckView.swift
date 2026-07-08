@@ -25,7 +25,7 @@ enum TriageAction: Identifiable {
         case .snooze(let d):      return "Later — \(d.title)"
         case .markSeen:           return "Mark as Seen"
         case .dismiss:            return "Dismiss"
-        case .viewDiff:           return "View Diff"
+        case .viewDiff:           return "View Details"
         case .openInBrowser:      return "Open in Browser"
         }
     }
@@ -38,7 +38,7 @@ enum TriageAction: Identifiable {
         case .snooze:          return "clock"
         case .markSeen:        return "eye"
         case .dismiss:         return "xmark"
-        case .viewDiff:        return "doc.plaintext"
+        case .viewDiff:        return "rectangle.stack"
         case .openInBrowser:   return "safari"
         }
     }
@@ -168,13 +168,14 @@ struct LeadingColumn<Icon: View>: View {
 // MARK: - TriageDeckView
 
 /// Keyboard-driven triage deck. Manages selection, key bindings,
-/// single-key verb dispatch, multi-select, diff preview, a per-row context
+/// single-key verb dispatch, multi-select, PR peek, a per-row context
 /// menu (right-click), and the undo toast stack.
 ///
 /// Key bindings:
 ///   J / ↓  — next PR
 ///   K / ↑  — previous PR
-///   Space  — view diff (DiffPreviewView)
+///   Space  — peek: glance card + files (PRPeekView)
+///   ↵      — open selected PR in browser (works while peek is open too)
 ///   A      — approve (write-gated)
 ///   M      — merge (write-gated)
 ///   R      — request changes (write-gated)
@@ -182,6 +183,7 @@ struct LeadingColumn<Icon: View>: View {
 ///   E      — mark seen
 ///   X      — dismiss
 ///   V      — toggle multi-select mode
+///   D      — toggle draft visibility
 ///   ⌘Z     — undo last action
 ///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
@@ -191,11 +193,11 @@ struct TriageDeckView: View {
 
     @State private var selectedIndex: Int = 0
     @State private var hoveredRowID: String? = nil
-    @State private var showDiff: Bool = false
-    /// The PR whose diff the overlay shows. Set by both the Space key (focused row)
-    /// and the row context menu (the right-clicked row), so the diff always matches
+    @State private var showPeek: Bool = false
+    /// The PR whose peek overlay is shown. Set by both the Space key (focused row)
+    /// and the row context menu (the right-clicked row), so the peek always matches
     /// the row the user acted on — not merely the keyboard-focused one.
-    @State private var diffPR: PRSnapshot?
+    @State private var peekPR: PRSnapshot?
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
     @State private var undoEntries: [UndoEntry] = []
@@ -212,15 +214,18 @@ struct TriageDeckView: View {
                 }
             }
             .overlay(alignment: .center) {
-                if showDiff, let pr = diffPR {
+                if showPeek, let pr = peekPR {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
-                        .onTapGesture { showDiff = false }
-                    DiffPreviewView(
+                        .onTapGesture { showPeek = false }
+                    PRPeekView(
                         pr: pr,
                         client: manager.client,
-                        isPresented: $showDiff
+                        isPresented: $showPeek
                     )
+                    // Recreate per PR so stepping through with J/K/arrows resets the
+                    // files list + loading state and re-fetches for the new PR.
+                    .id(pr.nodeId)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
                     .zIndex(10)
                 }
@@ -241,7 +246,10 @@ struct TriageDeckView: View {
         // was opened, unlike a global/local NSEvent monitor which needs the app to
         // be active. `handleKeyDown` returns nil when it consumed the key.
         .background(
-            KeyCaptureView { event in handleKeyDown(event) }
+            KeyCaptureView(
+                handler: { event in handleKeyDown(event) },
+                onDismiss: { showPeek = false }
+            )
         )
     }
 
@@ -462,7 +470,6 @@ struct TriageDeckView: View {
                         if isDraft {
                             DraftBadge()
                         }
-                        TrustBadgeView(tier: manager.trustLedger.tier(for: pr.author))
                         if settings.selectedTab == .forMe {
                             ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
                         }
@@ -591,7 +598,7 @@ struct TriageDeckView: View {
         Divider()
 
         Button { handleTriageAction(.viewDiff, on: pr) } label: {
-            Label("View Diff", systemImage: "doc.plaintext")
+            Label("View Details", systemImage: "rectangle.stack")
         }
         Button { handleTriageAction(.openInBrowser, on: pr) } label: {
             Label("Open in Browser", systemImage: "safari")
@@ -853,14 +860,28 @@ struct TriageDeckView: View {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let cmd = event.modifierFlags.contains(.command)
 
-        // While the diff overlay is showing, Space (the key that opened it) or Esc
-        // closes it again; swallow everything else so deck verbs don't fire behind it.
-        if showDiff {
-            if chars == " " || event.keyCode == 53 {   // Space or Esc
-                showDiff = false
-                return nil
+        // Return opens the selected PR in the browser — regardless of whether the
+        // peek card is open (focusedPR stays in sync with the card as you step).
+        if event.keyCode == 36 {   // Return
+            if let pr = focusedPR { handleTriageAction(.openInBrowser, on: pr) }
+            return nil
+        }
+
+        // While the peek overlay is showing: J/K/arrows step through PRs and update
+        // the card in place; Space (the key that opened it) or Esc closes it. Other
+        // keys are swallowed so deck verbs don't fire behind the card.
+        if showPeek {
+            switch (chars, cmd) {
+            case ("j", false), ("\u{F701}", false):   // j or ↓
+                moveDown(); peekPR = focusedPR; return nil
+            case ("k", false), ("\u{F700}", false):   // k or ↑
+                moveUp(); peekPR = focusedPR; return nil
+            case (" ", false):                         // Space closes
+                showPeek = false; return nil
+            default:
+                if event.keyCode == 53 { showPeek = false; return nil }   // Esc
+                return event
             }
-            return event
         }
 
         switch (chars, cmd) {
@@ -872,11 +893,11 @@ struct TriageDeckView: View {
             moveUp()
             return nil
 
-        // Diff preview
+        // Peek (glance + files)
         case (" ", false):
             if let pr = focusedPR {
-                diffPR = pr
-                showDiff = true
+                peekPR = pr
+                showPeek = true
                 TelemetryService.shared.recordTriageInteraction("diff_preview")
             }
             return nil
@@ -921,6 +942,12 @@ struct TriageDeckView: View {
         // Multi-select toggle
         case ("v", false):
             multiSelectMode.toggle()
+            return nil
+
+        // Toggle draft visibility
+        case ("d", false):
+            settings.showDrafts.toggle()
+            TelemetryService.shared.recordTriageInteraction("toggle_drafts")
             return nil
 
         default:
@@ -986,8 +1013,8 @@ struct TriageDeckView: View {
             Task { await manager.performAction(.dismiss(pr)) }
             pushUndo(label: "Dismissed \(pr.title)", pr: pr) {}
         case .viewDiff:
-            diffPR = pr
-            showDiff = true
+            peekPR = pr
+            showPeek = true
             TelemetryService.shared.recordTriageInteraction("diff_preview")
         case .openInBrowser:
             if let url = URL(string: pr.htmlUrl) {
@@ -1321,26 +1348,55 @@ struct ReviewSourceBadge: View {
 /// stale `@State`.
 private struct KeyCaptureView: NSViewRepresentable {
     let handler: (NSEvent) -> NSEvent?
+    /// Called when the popover window resigns key — i.e. the menu bar popover was
+    /// closed. Used to dismiss transient overlays (the peek card) so they aren't
+    /// still open when the popover is reopened.
+    var onDismiss: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> KeyView {
         let view = KeyView()
         view.handler = handler
+        view.onDismiss = onDismiss
         return view
     }
 
     func updateNSView(_ nsView: KeyView, context: Context) {
         nsView.handler = handler
+        nsView.onDismiss = onDismiss
         nsView.reassertFocusIfIdle()
     }
 
     final class KeyView: NSView {
         var handler: ((NSEvent) -> NSEvent?)?
+        var onDismiss: (() -> Void)?
+        private var resignObserver: NSObjectProtocol?
         override var acceptsFirstResponder: Bool { true }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            observeResignKey()
             guard window != nil else { return }
             takeFocus(attempt: 0)
+        }
+
+        /// Fire `onDismiss` when this view's window resigns key (popover closed).
+        private func observeResignKey() {
+            if let resignObserver {
+                NotificationCenter.default.removeObserver(resignObserver)
+                self.resignObserver = nil
+            }
+            guard let window else { return }
+            resignObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.onDismiss?()
+            }
+        }
+
+        deinit {
+            if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         }
 
         /// Reclaim first responder only when nothing meaningful holds it (the window

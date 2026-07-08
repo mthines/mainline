@@ -53,7 +53,6 @@ final class PRManager: ObservableObject {
     let client:         GitHubClient
     private let poller: PRPoller
     let settings:       MainlineSettings
-    let trustLedger:    TrustLedgerStore
     let snoozeStore:    SnoozeStore
     let scopeStore:     ScopeStore
 
@@ -275,7 +274,6 @@ final class PRManager: ObservableObject {
         self.store         = PRStateStore()
         self.notifications = NotificationService()
         self.client        = GitHubClient(settings: settings)
-        self.trustLedger   = TrustLedgerStore()
         self.snoozeStore   = SnoozeStore(settings: settings)
         self.scopeStore    = ScopeStore()
         self.poller        = PRPoller(
@@ -336,7 +334,10 @@ final class PRManager: ObservableObject {
         didStart = true
 
         notifications.requestAuthorization()
-        await trustLedger.load()
+        // Load the persisted snapshot baseline BEFORE the first poll so the diff
+        // engine compares against last-known state instead of an empty set (which
+        // would fire a "New PR" banner for every open PR on launch).
+        await store.load()
 
         let token = await KeychainHelper.loadToken()
         if let token, !token.isEmpty {
@@ -407,15 +408,6 @@ final class PRManager: ObservableObject {
             let actionStart = Date()
             do {
                 try await client.approvePR(nodeId: pr.nodeId, token: token)
-                let verdict = VerdictRecord(
-                    prNodeId: pr.nodeId,
-                    author: pr.author,
-                    verdict: .merged,
-                    date: Date(),
-                    linesChanged: pr.totalLines,
-                    hadTests: false
-                )
-                trustLedger.recordVerdict(verdict, for: pr.author)
                 TelemetryService.shared.recordWriteAction(
                     "approve",
                     mergeMethod: nil,
@@ -440,15 +432,6 @@ final class PRManager: ObservableObject {
             let resolvedMergeMethod = resolvedMergeMethodString(for: pr)
             do {
                 try await client.mergePR(pr: pr, preference: settings.mergeMethodPreference, token: token)
-                let verdict = VerdictRecord(
-                    prNodeId: pr.nodeId,
-                    author: pr.author,
-                    verdict: .merged,
-                    date: Date(),
-                    linesChanged: pr.totalLines,
-                    hadTests: false
-                )
-                trustLedger.recordVerdict(verdict, for: pr.author)
                 TelemetryService.shared.recordWriteAction(
                     "merge",
                     mergeMethod: resolvedMergeMethod,
@@ -472,15 +455,6 @@ final class PRManager: ObservableObject {
             let actionStart = Date()
             do {
                 try await client.requestChangesPR(nodeId: pr.nodeId, body: "", token: token)
-                let verdict = VerdictRecord(
-                    prNodeId: pr.nodeId,
-                    author: pr.author,
-                    verdict: .changesRequested,
-                    date: Date(),
-                    linesChanged: pr.totalLines,
-                    hadTests: false
-                )
-                trustLedger.recordVerdict(verdict, for: pr.author)
                 TelemetryService.shared.recordWriteAction(
                     "request_changes",
                     mergeMethod: nil,
@@ -538,21 +512,6 @@ final class PRManager: ObservableObject {
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
-    }
-
-    // MARK: - Autopilot
-
-    /// Checks if a PR qualifies for autopilot auto-approve and fires if so.
-    /// Double-gated: requires both autopilotEnabled AND writeActionsEnabled.
-    func checkAutopilot(for pr: PRSnapshot) async {
-        guard settings.autopilotEnabled, settings.writeActionsEnabled else { return }
-
-        let tier = trustLedger.tier(for: pr.author)
-        guard tier == .autopilot else { return }
-        guard pr.ciStatus == .success else { return }
-        guard pr.totalLines < 50 else { return }
-
-        await performAction(.approve(pr))
     }
 
     // MARK: - Unread management

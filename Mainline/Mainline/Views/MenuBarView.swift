@@ -8,7 +8,6 @@ struct MenuBarView: View {
     // these directly, mutations (e.g. tapping a scope chip) don't re-render the
     // view until the popover is reopened.
     @ObservedObject private var scopeStore: ScopeStore
-    @ObservedObject private var trustLedger: TrustLedgerStore
 
     /// Natural (unclamped) height of the single scrollable body — the tabbed
     /// browse deck. Measured via a `GeometryReader` background on the body content
@@ -21,7 +20,6 @@ struct MenuBarView: View {
         self.manager = manager
         self.settings = manager.settings
         self.scopeStore = manager.scopeStore
-        self.trustLedger = manager.trustLedger
     }
 
     var body: some View {
@@ -576,7 +574,7 @@ struct MenuBarView: View {
     /// here?" affordance.
     private var keyboardLegend: some View {
         HStack(spacing: 0) {
-            Text("J/K move · Space diff · A/M/R act · S later · ⌘Z undo · right-click ▸ all")
+            Text("J/K move · Space peek · ↵ open · A/M/R act · S later · ⌘Z undo · right-click ▸ all")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

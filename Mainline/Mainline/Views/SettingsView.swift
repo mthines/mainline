@@ -190,12 +190,6 @@ struct SettingsView: View {
                 Label("Auto picks the repo's allowed method (squash → rebase → merge commit).", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Toggle("Enable autopilot auto-approve (advanced)", isOn: $settings.autopilotEnabled)
-                if settings.autopilotEnabled {
-                    Label("Auto-approve fires when author is autopilot tier, CI green, and < 50 LOC changed.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
     }
