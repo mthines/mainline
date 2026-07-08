@@ -1,6 +1,57 @@
 import SwiftUI
 import AppKit
 
+// MARK: - TriageAction
+
+/// All actions available for a PR in the triage deck. Surfaced via the row
+/// context menu (right-click) and dispatched through `handleTriageAction`.
+enum TriageAction: Identifiable {
+    case approve
+    case merge
+    case requestChanges
+    case snooze(SnoozeDuration)
+    case markSeen
+    case dismiss
+    case viewDiff
+    case openInBrowser
+
+    var id: String { label }
+
+    var label: String {
+        switch self {
+        case .approve:            return "Approve PR"
+        case .merge:              return "Merge PR"
+        case .requestChanges:     return "Request Changes"
+        case .snooze(let d):      return "Later — \(d.title)"
+        case .markSeen:           return "Mark as Seen"
+        case .dismiss:            return "Dismiss"
+        case .viewDiff:           return "View Details"
+        case .openInBrowser:      return "Open in Browser"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .approve:         return "checkmark.circle"
+        case .merge:           return "arrow.triangle.merge"
+        case .requestChanges:  return "text.bubble"
+        case .snooze:          return "clock"
+        case .markSeen:        return "eye"
+        case .dismiss:         return "xmark"
+        case .viewDiff:        return "rectangle.stack"
+        case .openInBrowser:   return "safari"
+        }
+    }
+
+    /// Returns true if this action requires write-actions to be enabled.
+    var requiresWriteActions: Bool {
+        switch self {
+        case .approve, .merge, .requestChanges: return true
+        default: return false
+        }
+    }
+}
+
 // MARK: - RowMetrics
 
 /// Shared layout metrics for PR rows, driven by `settings.compactRows`. Used by
@@ -117,13 +168,14 @@ struct LeadingColumn<Icon: View>: View {
 // MARK: - TriageDeckView
 
 /// Keyboard-driven triage deck. Manages selection, key bindings,
-/// single-key verb dispatch, multi-select, diff preview, command palette,
-/// and undo toast stack.
+/// single-key verb dispatch, multi-select, PR peek, a per-row context
+/// menu (right-click), and the undo toast stack.
 ///
 /// Key bindings:
 ///   J / ↓  — next PR
 ///   K / ↑  — previous PR
-///   Space  — view diff (DiffPreviewView)
+///   Space  — peek: glance card + files (PRPeekView)
+///   ↵      — open selected PR in browser (works while peek is open too)
 ///   A      — approve (write-gated)
 ///   M      — merge (write-gated)
 ///   R      — request changes (write-gated)
@@ -131,21 +183,23 @@ struct LeadingColumn<Icon: View>: View {
 ///   E      — mark seen
 ///   X      — dismiss
 ///   V      — toggle multi-select mode
-///   ⌘K     — command palette
+///   D      — toggle draft visibility
 ///   ⌘Z     — undo last action
+///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
     let prs: [PRSnapshot]
     @ObservedObject var manager: PRManager
     @ObservedObject var settings: MainlineSettings
 
     @State private var selectedIndex: Int = 0
-    @State private var hoveredRowID: String? = nil
-    @State private var showDiff: Bool = false
-    @State private var showCommandPalette: Bool = false
+    @State private var showPeek: Bool = false
+    /// The PR whose peek overlay is shown. Set by both the Space key (focused row)
+    /// and the row context menu (the right-clicked row), so the peek always matches
+    /// the row the user acted on — not merely the keyboard-focused one.
+    @State private var peekPR: PRSnapshot?
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
     @State private var undoEntries: [UndoEntry] = []
-    @State private var eventMonitor: Any? = nil
 
     // MARK: - Body
 
@@ -159,35 +213,22 @@ struct TriageDeckView: View {
                 }
             }
             .overlay(alignment: .center) {
-                if showDiff, let pr = focusedPR {
+                if showPeek, let pr = peekPR {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
-                        .onTapGesture { showDiff = false }
-                    DiffPreviewView(
+                        .onTapGesture { showPeek = false }
+                    PRPeekView(
                         pr: pr,
                         client: manager.client,
-                        isPresented: $showDiff
+                        isPresented: $showPeek
                     )
+                    // Recreate per PR so stepping through with J/K/arrows resets the
+                    // files list + loading state and re-fetches for the new PR.
+                    .id(pr.nodeId)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
                     .zIndex(10)
                 }
 
-                if showCommandPalette, let pr = focusedPR {
-                    Color.black.opacity(0.2)
-                        .ignoresSafeArea()
-                        .onTapGesture { showCommandPalette = false }
-                    CommandPaletteView(
-                        pr: pr,
-                        writeActionsEnabled: settings.writeActionsEnabled,
-                        onAction: { action in
-                            handleTriageAction(action, on: pr)
-                        },
-                        isPresented: $showCommandPalette,
-                        manager: manager
-                    )
-                    .transition(.scale(scale: 0.96).combined(with: .opacity))
-                    .zIndex(10)
-                }
             }
 
             // Undo toast stack
@@ -199,12 +240,16 @@ struct TriageDeckView: View {
                     .zIndex(5)
             }
         }
-        .onAppear {
-            installKeyMonitor()
-        }
-        .onDisappear {
-            removeKeyMonitor()
-        }
+        // Keyboard triage capture. A first-responder NSView that overrides keyDown
+        // directly — reliable inside the MenuBarExtra popover regardless of how it
+        // was opened, unlike a global/local NSEvent monitor which needs the app to
+        // be active. `handleKeyDown` returns nil when it consumed the key.
+        .background(
+            KeyCaptureView(
+                handler: { event in handleKeyDown(event) },
+                onDismiss: { showPeek = false }
+            )
+        )
     }
 
     // MARK: - PR list
@@ -386,9 +431,10 @@ struct TriageDeckView: View {
         let isFocused = index == selectedIndex
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
-        // "Later" is HOVER-ONLY — it reveals when the pointer is over this row and
-        // never on the keyboard-focused row (keyboard users snooze via `S` / ⌘K).
-        let isHovered = hoveredRowID == pr.nodeId
+        // The trailing "Later"/"Merge" cluster reveals on the SELECTED row. Hover and
+        // keyboard drive one selection (see `.onHover` below), so the cluster follows
+        // whichever row the pointer or the keyboard last landed on.
+        let isHovered = isFocused
         let m = metrics
         return Button {
             handleRowClick(pr: pr, index: index)
@@ -424,7 +470,6 @@ struct TriageDeckView: View {
                         if isDraft {
                             DraftBadge()
                         }
-                        TrustBadgeView(tier: manager.trustLedger.tier(for: pr.author))
                         if settings.selectedTab == .forMe {
                             ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
                         }
@@ -488,31 +533,79 @@ struct TriageDeckView: View {
                         .transition(.opacity)
                 }
             }
-            // Near-instant fade in/out so the hover reveal feels snappy.
-            .animation(.easeOut(duration: 0.05), value: hoveredRowID)
-            // Track the hovered row so its Later button reveals on hover. Clearing
-            // only when THIS row was the hovered one avoids a late "mouse exited"
-            // from a previous row wiping a newer row's hover state.
+            // Hover SELECTS the row — mouse and keyboard share one selection
+            // (`selectedIndex`), so hover-then-Space/Enter acts on the pointed row.
+            // Sticky: selection stays put when the cursor leaves (no revert to a
+            // pre-hover row — that would read as a glitch). Frozen while the peek is
+            // open so stray movement over the dimmed rows can't shift selection.
+            // No animation here on purpose: the highlight + revealed actions switch
+            // instantly, which removes the cross-row hover "blink".
             .onHover { hovering in
-                hoveredRowID = hovering ? pr.nodeId : (hoveredRowID == pr.nodeId ? nil : hoveredRowID)
+                guard hovering, !showPeek else { return }
+                selectedIndex = index
             }
             .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.vertical, m.rowVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isFocused ? Color.accentColor.opacity(0.08) : .clear)
+            .background(isFocused ? Color.accentColor.opacity(0.22) : .clear)
             // Focus / multi-select indication rendered as a leading accent bar in
             // the row's leading padding, so it never consumes a layout column and
             // the shared LeadingColumn stays aligned with the Needs-a-Human rows.
             .overlay(alignment: .leading) {
                 Rectangle()
-                    .fill(isSelected
-                          ? Color.accentColor
-                          : (isFocused ? Color.accentColor.opacity(0.4) : Color.clear))
+                    .fill(isSelected || isFocused ? Color.accentColor : Color.clear)
                     .frame(width: 3)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu { rowContextMenu(for: pr) }
+    }
+
+    /// Native right-click action menu for a PR row — the discoverable home for
+    /// every triage verb (replaces the old ⌘K command palette). Write actions are
+    /// disabled while `writeActionsEnabled` is off. Dispatches through the same
+    /// `handleTriageAction` path as the single-key verbs.
+    @ViewBuilder
+    private func rowContextMenu(for pr: PRSnapshot) -> some View {
+        let writeOff = !settings.writeActionsEnabled
+        Button { handleTriageAction(.approve, on: pr) } label: {
+            Label("Approve PR", systemImage: "checkmark.circle")
+        }
+        .disabled(writeOff)
+        Button { handleTriageAction(.merge, on: pr) } label: {
+            Label("Merge PR", systemImage: "arrow.triangle.merge")
+        }
+        .disabled(writeOff)
+        Button { handleTriageAction(.requestChanges, on: pr) } label: {
+            Label("Request Changes", systemImage: "text.bubble")
+        }
+        .disabled(writeOff)
+
+        Divider()
+
+        Menu {
+            ForEach(SnoozeDuration.allCases) { duration in
+                Button(duration.title) { handleTriageAction(.snooze(duration), on: pr) }
+            }
+        } label: {
+            Label("Later", systemImage: "clock")
+        }
+        Button { handleTriageAction(.markSeen, on: pr) } label: {
+            Label("Mark as Seen", systemImage: "eye")
+        }
+        Button { handleTriageAction(.dismiss, on: pr) } label: {
+            Label("Dismiss", systemImage: "xmark")
+        }
+
+        Divider()
+
+        Button { handleTriageAction(.viewDiff, on: pr) } label: {
+            Label("View Details", systemImage: "rectangle.stack")
+        }
+        Button { handleTriageAction(.openInBrowser, on: pr) } label: {
+            Label("Open in Browser", systemImage: "safari")
+        }
     }
 
     /// The hover-only trailing action pill drawn as an `.overlay` on top of a
@@ -764,32 +857,35 @@ struct TriageDeckView: View {
         return ordered[selectedIndex]
     }
 
-    // MARK: - Key monitor (macOS 13 compatible)
-
-    private func installKeyMonitor() {
-        // Force first-responder so key events reach the panel
-        DispatchQueue.main.async {
-            NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
-        }
-
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
-            return self.handleKeyDown(event)
-        }
-    }
-
-    private func removeKeyMonitor() {
-        if let monitor = eventMonitor {
-            NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
-        }
-    }
+    // MARK: - Keyboard triage
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
-        // Don't intercept when overlays are showing (they handle their own keys)
-        if showDiff || showCommandPalette { return event }
-
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let cmd = event.modifierFlags.contains(.command)
+
+        // Return opens the selected PR in the browser — regardless of whether the
+        // peek card is open (focusedPR stays in sync with the card as you step).
+        if event.keyCode == 36 {   // Return
+            if let pr = focusedPR { handleTriageAction(.openInBrowser, on: pr) }
+            return nil
+        }
+
+        // While the peek overlay is showing: J/K/arrows step through PRs and update
+        // the card in place; Space (the key that opened it) or Esc closes it. Other
+        // keys are swallowed so deck verbs don't fire behind the card.
+        if showPeek {
+            switch (chars, cmd) {
+            case ("j", false), ("\u{F701}", false):   // j or ↓
+                moveDown(); peekPR = focusedPR; return nil
+            case ("k", false), ("\u{F700}", false):   // k or ↑
+                moveUp(); peekPR = focusedPR; return nil
+            case (" ", false):                         // Space closes
+                showPeek = false; return nil
+            default:
+                if event.keyCode == 53 { showPeek = false; return nil }   // Esc
+                return event
+            }
+        }
 
         switch (chars, cmd) {
         // Navigation
@@ -800,15 +896,13 @@ struct TriageDeckView: View {
             moveUp()
             return nil
 
-        // Diff preview
+        // Peek (glance + files)
         case (" ", false):
-            showDiff = true
-            TelemetryService.shared.recordTriageInteraction("diff_preview")
-            return nil
-
-        // Command palette
-        case ("k", true):
-            showCommandPalette = true
+            if let pr = focusedPR {
+                peekPR = pr
+                showPeek = true
+                TelemetryService.shared.recordTriageInteraction("diff_preview")
+            }
             return nil
 
         // Undo
@@ -830,7 +924,7 @@ struct TriageDeckView: View {
         // Non-write verbs
         case ("s", false):
             // Quick "Later" — postpone with the default duration (1 day). The clock
-            // button + command palette expose the full duration menu.
+            // button + row context menu expose the full duration menu.
             if let pr = focusedPR {
                 postpone(pr, for: .quickDefault)
             }
@@ -851,6 +945,12 @@ struct TriageDeckView: View {
         // Multi-select toggle
         case ("v", false):
             multiSelectMode.toggle()
+            return nil
+
+        // Toggle draft visibility
+        case ("d", false):
+            settings.showDrafts.toggle()
+            TelemetryService.shared.recordTriageInteraction("toggle_drafts")
             return nil
 
         default:
@@ -897,7 +997,7 @@ struct TriageDeckView: View {
         Task { await manager.performAction(action) }
     }
 
-    // MARK: - Triage action from command palette
+    // MARK: - Triage action from context menu
 
     private func handleTriageAction(_ action: TriageAction, on pr: PRSnapshot) {
         switch action {
@@ -916,7 +1016,8 @@ struct TriageDeckView: View {
             Task { await manager.performAction(.dismiss(pr)) }
             pushUndo(label: "Dismissed \(pr.title)", pr: pr) {}
         case .viewDiff:
-            showDiff = true
+            peekPR = pr
+            showPeek = true
             TelemetryService.shared.recordTriageInteraction("diff_preview")
         case .openInBrowser:
             if let url = URL(string: pr.htmlUrl) {
@@ -987,7 +1088,7 @@ struct TriageDeckView: View {
 /// ready-to-merge PR row. It has its own borderless hit area so a tap never
 /// triggers the row's click-to-open; the
 /// `onMerge` closure routes through the SAME write-action confirm path used by
-/// the `M` keyboard verb / command palette (`dispatchVerb(.merge)` →
+/// the `M` keyboard verb / row context menu (`dispatchVerb(.merge)` →
 /// confirmation dialog → `performAction(.merge)`).
 ///
 /// When write actions are disabled the button stays visible (discoverable) and
@@ -1231,5 +1332,113 @@ struct ReviewSourceBadge: View {
             .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
             .foregroundStyle(color)
             .accessibilityLabel(text == "you" ? "Directly requested" : "Team requested: \(text)")
+    }
+}
+
+// MARK: - KeyCaptureView
+
+/// A zero-size `NSView` that takes first responder and handles `keyDown` directly,
+/// giving the triage deck reliable keyboard capture inside the MenuBarExtra popover.
+///
+/// Why not an `NSEvent` local monitor: a local monitor only fires while the app is
+/// active, and clicking the menu bar icon does not activate an accessory app — so
+/// J/K/arrows silently did nothing on click-open. A first-responder view receives
+/// `keyDown` whenever its window is key (which the popover is, since it hosts
+/// interactive controls), independent of app-active state.
+///
+/// `handler` returns nil when it consumed the key (so it is not passed to `super`).
+/// It is refreshed every SwiftUI update via `updateNSView`, so it never captures
+/// stale `@State`.
+private struct KeyCaptureView: NSViewRepresentable {
+    let handler: (NSEvent) -> NSEvent?
+    /// Called when the popover window resigns key — i.e. the menu bar popover was
+    /// closed. Used to dismiss transient overlays (the peek card) so they aren't
+    /// still open when the popover is reopened.
+    var onDismiss: (() -> Void)? = nil
+
+    func makeNSView(context: Context) -> KeyView {
+        let view = KeyView()
+        view.handler = handler
+        view.onDismiss = onDismiss
+        return view
+    }
+
+    func updateNSView(_ nsView: KeyView, context: Context) {
+        nsView.handler = handler
+        nsView.onDismiss = onDismiss
+        nsView.reassertFocusIfIdle()
+    }
+
+    final class KeyView: NSView {
+        var handler: ((NSEvent) -> NSEvent?)?
+        var onDismiss: (() -> Void)?
+        private var resignObserver: NSObjectProtocol?
+        override var acceptsFirstResponder: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observeResignKey()
+            guard window != nil else { return }
+            takeFocus(attempt: 0)
+        }
+
+        /// Fire `onDismiss` when this view's window resigns key (popover closed).
+        private func observeResignKey() {
+            if let resignObserver {
+                NotificationCenter.default.removeObserver(resignObserver)
+                self.resignObserver = nil
+            }
+            guard let window else { return }
+            resignObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.onDismiss?()
+            }
+        }
+
+        deinit {
+            if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        }
+
+        /// Reclaim first responder only when nothing meaningful holds it (the window
+        /// or its contentView) — so we don't steal focus from a real control, but we
+        /// do recover if SwiftUI reset the responder chain on a re-render. There are
+        /// no text fields in the deck, so this is safe.
+        func reassertFocusIfIdle() {
+            guard let window else { return }
+            let fr = window.firstResponder
+            if fr !== self && (fr == nil || fr === window || fr === window.contentView) {
+                window.makeFirstResponder(self)
+            }
+        }
+
+        /// Claim first responder so keyDown routes here. Retry briefly because the
+        /// popover window may not be key in the first runloop tick after it opens.
+        private func takeFocus(attempt: Int) {
+            guard let window else { return }
+            window.makeFirstResponder(self)
+            if window.firstResponder !== self, attempt < 12 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    self?.takeFocus(attempt: attempt + 1)
+                }
+            }
+        }
+
+        override func keyDown(with event: NSEvent) {
+            // handler returns nil == consumed (e.g. an overlay handled it); non-nil
+            // == not consumed.
+            if let handler, handler(event) == nil { return }
+            // Esc that no overlay consumed dismisses the popover. This view is the
+            // popover's first responder (so it can capture J/K/etc.), which otherwise
+            // swallows the popover's built-in Esc-to-close — a plain NSView's keyDown
+            // doesn't route Esc to cancelOperation, so handle it explicitly here.
+            if event.keyCode == 53 {   // Esc
+                window?.close()
+                return
+            }
+            super.keyDown(with: event)
+        }
     }
 }

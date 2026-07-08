@@ -46,13 +46,11 @@ private struct MenuBarLabel: View {
     @ObservedObject var manager: PRManager
     @ObservedObject private var settings: MainlineSettings
     @ObservedObject private var scopeStore: ScopeStore
-    @ObservedObject private var trustLedger: TrustLedgerStore
 
     init(manager: PRManager) {
         self.manager = manager
         self.settings = manager.settings
         self.scopeStore = manager.scopeStore
-        self.trustLedger = manager.trustLedger
     }
 
     var body: some View {

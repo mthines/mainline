@@ -23,7 +23,6 @@ enum PREvent: String, Codable, CaseIterable {
     case prMerged            // PR was merged
     case prClosed            // PR was closed (not merged)
     case ciPassedOnMyPR      // CI turned green on my PR
-    case autopilotApproved   // autopilot auto-approved a PR
     case draftCreated        // new draft PR created
 
     /// Human-readable label for Settings UI.
@@ -39,7 +38,6 @@ enum PREvent: String, Codable, CaseIterable {
         case .prMerged:           return "PR merged"
         case .prClosed:           return "PR closed"
         case .ciPassedOnMyPR:     return "CI passed on my PR"
-        case .autopilotApproved:  return "Autopilot auto-approved"
         case .draftCreated:       return "Draft PR created"
         }
     }
@@ -60,7 +58,6 @@ extension PREvent {
         .prMerged:           .quiet,   // good news / terminal — no focus steal
         .prClosed:           .quiet,   // terminal state
         .ciPassedOnMyPR:     .quiet,   // good news — silent update
-        .autopilotApproved:  .quiet,   // informational only
         .draftCreated:       .quiet,   // not actionable yet
     ]
 }

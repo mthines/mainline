@@ -8,7 +8,6 @@ struct MenuBarView: View {
     // these directly, mutations (e.g. tapping a scope chip) don't re-render the
     // view until the popover is reopened.
     @ObservedObject private var scopeStore: ScopeStore
-    @ObservedObject private var trustLedger: TrustLedgerStore
 
     /// Natural (unclamped) height of the single scrollable body — the tabbed
     /// browse deck. Measured via a `GeometryReader` background on the body content
@@ -21,7 +20,6 @@ struct MenuBarView: View {
         self.manager = manager
         self.settings = manager.settings
         self.scopeStore = manager.scopeStore
-        self.trustLedger = manager.trustLedger
     }
 
     var body: some View {
@@ -62,6 +60,10 @@ struct MenuBarView: View {
             // fixed nested ScrollViews (the crash source) AND the separate top
             // "Needs a Human" bucket (which duplicated the "Needs attention" group).
             scrollableBody
+
+            Divider()
+
+            keyboardLegend
 
             Divider()
 
@@ -172,8 +174,14 @@ struct MenuBarView: View {
         return max(0, value)
     }
 
-    /// Absolute floor for the scroll region so it is never a zero/one-pixel sliver.
-    private let regionFloor: CGFloat = 120
+    /// Floor for the scroll region — derived from the user's MIN panel height so the
+    /// panel never shrinks below it with few PRs. The min is a TOTAL panel height, so
+    /// convert to a scroll-region floor (minus fixed chrome), clamped not to exceed
+    /// the max (`panelHeight`) and never below an absolute sliver guard (80pt).
+    private var regionFloor: CGFloat {
+        let effMin = min(CGFloat(settings.panelMinHeight), CGFloat(settings.panelHeight))
+        return max(safe(effMin - chromeReserve, fallback: 120), 80)
+    }
 
     /// The MAXIMUM total budget for the whole panel: the smaller of the user's
     /// preferred `panelHeight` and the real space below the menu bar (visibleFrame
@@ -191,14 +199,14 @@ struct MenuBarView: View {
     /// Fixed reserve for the always-present (non-scrolling) chrome. Summed from
     /// the real elements so it is not under-counted:
     ///   header ~44 + badge explainer ~22 + tab picker ~44 + scope/drafts row ~44 +
-    ///   footer ~48 + dividers/padding ~30
+    ///   keyboard legend ~22 + footer ~48 + dividers/padding ~38
     ///   (+ For-me sub-filter ~36 only when the For-me tab is active).
     /// The old ~40pt reserve for the top "Needs a Human" header is gone — that
     /// header was removed when the browse list's "Needs attention" group became the
     /// single view. The rest of the crash-safe invariant is unchanged:
     /// chromeReserve + scrollRegionHeight <= cap <= screen, every term finite/>= 0.
     private var chromeReserve: CGFloat {
-        let base: CGFloat = 44 + 22 + 44 + 44 + 48 + 30   // = 232
+        let base: CGFloat = 44 + 22 + 44 + 44 + 22 + 48 + 38   // = 262
         let forMeFilter: CGFloat = settings.selectedTab == .forMe ? 36 : 0
         return base + forMeFilter
     }
@@ -563,6 +571,24 @@ struct MenuBarView: View {
         case .forMe:   return "Nothing to review"
         case .created: return "No PRs created"
         }
+    }
+
+    // MARK: - Keyboard legend
+
+    /// Always-visible discoverability strip for the deck's keyboard verbs and the
+    /// row context menu — replaces the ⌘K command palette as the "what can I do
+    /// here?" affordance.
+    private var keyboardLegend: some View {
+        HStack(spacing: 0) {
+            Text("J/K move · Space peek · ↵ open · A/M/R act · S later · ⌘Z undo · right-click ▸ all")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 
     // MARK: - Footer (AC-21: 44pt hit targets, Quit separated)

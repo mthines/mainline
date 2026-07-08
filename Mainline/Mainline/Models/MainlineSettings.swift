@@ -89,13 +89,13 @@ final class MainlineSettings: ObservableObject {
         static let selectedTab          = "selectedTab"
         // Triage Cockpit additions
         static let writeActionsEnabled  = "writeActionsEnabled"
-        static let autopilotEnabled     = "autopilotEnabled"
         static let mergeMethodPreference = "mergeMethodPreference"
         static let collapsedSectionsRaw = "collapsedSectionsRaw"
         static let snoozeMapData        = "snoozeMapData"
         static let attentionPolicy      = "attentionPolicy"
         static let unreadPRIds          = "unreadPRIds"
         static let panelHeight          = "panelHeight"
+        static let panelMinHeight       = "panelMinHeight"
         static let menuBarMetric        = "menuBarMetric"
         static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
@@ -178,11 +178,6 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(writeActionsEnabled, forKey: Keys.writeActionsEnabled) }
     }
 
-    /// Whether autopilot auto-approve is active. Requires writeActionsEnabled. Default OFF.
-    @Published var autopilotEnabled: Bool {
-        didSet { defaults.set(autopilotEnabled, forKey: Keys.autopilotEnabled) }
-    }
-
     /// The user's preferred merge method for in-app merges. Default `.auto`.
     @Published var mergeMethodPreference: MergeMethodPreference {
         didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
@@ -214,9 +209,16 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(unreadPRIdsList, forKey: Keys.unreadPRIds) }
     }
 
-    /// Preferred panel content height. Options: 400/480/560/640. Default 560.
+    /// Preferred MAX panel content height. The panel sizes to content and grows up
+    /// to this (capped to the display). Default 560.
     @Published var panelHeight: Int {
         didSet { defaults.set(panelHeight, forKey: Keys.panelHeight) }
+    }
+
+    /// Preferred MIN panel content height — the panel never shrinks below this even
+    /// with few PRs. Clamped not to exceed `panelHeight` downstream. Default 240.
+    @Published var panelMinHeight: Int {
+        didSet { defaults.set(panelMinHeight, forKey: Keys.panelMinHeight) }
     }
 
     /// What the menu-bar badge counts. Default `needsAHuman`.
@@ -479,25 +481,27 @@ final class MainlineSettings: ObservableObject {
 
         githubUsername = defaults.string(forKey: Keys.githubUsername) ?? ""
 
-        // Selected tab — default "For me"
+        // Selected tab — default "Created" (your own PRs)
         selectedTab = defaults.string(forKey: Keys.selectedTab)
-            .flatMap { ReviewTab(rawValue: $0) } ?? .forMe
+            .flatMap { ReviewTab(rawValue: $0) } ?? .created
 
-        // Triage Cockpit — default OFF for write actions and autopilot
+        // Triage Cockpit — default OFF for write actions
         writeActionsEnabled = defaults.bool(forKey: Keys.writeActionsEnabled)
-        autopilotEnabled    = defaults.bool(forKey: Keys.autopilotEnabled)
 
         // Merge method preference — default Auto (picks the repo's allowed method)
         mergeMethodPreference = defaults.string(forKey: Keys.mergeMethodPreference)
             .flatMap { MergeMethodPreference(rawValue: $0) } ?? .auto
 
-        // Collapsed sections — default: none collapsed
-        collapsedSectionsRaw = defaults.stringArray(forKey: Keys.collapsedSectionsRaw) ?? []
+        // Collapsed sections — default: Postponed + Done collapsed (low-priority
+        // buckets stay folded until the user expands them).
+        collapsedSectionsRaw = defaults.stringArray(forKey: Keys.collapsedSectionsRaw)
+            ?? [ActionGroup.postponed.rawValue, ActionGroup.done.rawValue]
 
         // Attention policy — defaults are baked into PREvent.defaults
         attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
         unreadPRIdsList = defaults.stringArray(forKey: Keys.unreadPRIds) ?? []
         panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 560 : defaults.integer(forKey: Keys.panelHeight)
+        panelMinHeight  = defaults.object(forKey: Keys.panelMinHeight) == nil ? 240 : defaults.integer(forKey: Keys.panelMinHeight)
 
         // Menu-bar badge — default: count "Needs a Human", follow selected scope
         menuBarMetric = defaults.string(forKey: Keys.menuBarMetric)
@@ -508,8 +512,10 @@ final class MainlineSettings: ObservableObject {
 
         // Needs-a-Human focus — default OFF (CI-focused, conflicts don't dominate)
         includeConflictsInNeedsHuman = defaults.bool(forKey: Keys.includeConflictsInNeedsHuman)
-        // Drafts — default OFF (calmer view)
-        showDrafts = defaults.bool(forKey: Keys.showDrafts)
+        // Drafts — default ON (show your drafts by default)
+        showDrafts = defaults.object(forKey: Keys.showDrafts) == nil
+            ? true
+            : defaults.bool(forKey: Keys.showDrafts)
         // Split drafts into their own section — default OFF (mixed inline)
         splitDrafts = defaults.bool(forKey: Keys.splitDrafts)
 

@@ -34,8 +34,7 @@ Mainline/Mainline/                     ← Source root
 ├── Models/
 │   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
-│   ├── MainlineSettings.swift      ← UserDefaults-backed settings
-│   └── TrustLedger.swift        ← VerdictRecord, TrustTier, TrustCalculator (pure)
+│   └── MainlineSettings.swift      ← UserDefaults-backed settings
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor)
 │   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files
@@ -43,20 +42,17 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRDiffEngine.swift       ← Pure diff(previous:next:myLogin:)
 │   ├── PRPoller.swift           ← Task-based poll loop + pollOnce()
 │   ├── NotificationService.swift← UNNotificationRequest per transition
-│   ├── PRManager.swift          ← @MainActor orchestrator + write actions + autopilot
+│   ├── PRManager.swift          ← @MainActor orchestrator + write actions
 │   ├── SensitivePathMatcher.swift ← Pure path/branch-name heuristic classifier
 │   ├── TriageClassifier.swift   ← Pure needsHuman predicate engine
-│   ├── TrustLedgerStore.swift   ← @MainActor JSON persistence (Application Support)
 │   └── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView
-    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions/autopilot
+    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
-    ├── TriageDeckView.swift      ← Keyboard triage: J/K/Space/A/M/R/S/E/X/⌘K/⌘Z
-    ├── DiffPreviewView.swift     ← Quick Look diff overlay (REST .diff fetch)
-    ├── CommandPaletteView.swift  ← ⌘K Raycast-style palette
-    ├── UndoToastView.swift       ← Batched undo toast stack
-    └── TrustBadgeView.swift      ← Compact P/T/A tier dot for PR rows
+    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/A/M/R/S/E/X/V/⌘Z) + TriageAction enum + per-row context menu
+    ├── PRPeekView.swift          ← Space peek: instant glance card + async files list
+    └── UndoToastView.swift       ← Batched undo toast stack
 ```
 
 ## Key Patterns
@@ -79,14 +75,14 @@ Every new Swift source file **must** appear in all three places:
 Missing any one silently breaks the build with no obvious error.
 
 ### Thread model
-`PRManager`, `PRPoller`, `PRStateStore`, `TrustLedgerStore`, `SnoozeStore` are all `@MainActor`. Background work (Keychain, URLSession, JSON I/O) uses `Task.detached` and bridges back via the async boundary.
+`PRManager`, `PRPoller`, `PRStateStore`, `SnoozeStore` are all `@MainActor`. Background work (Keychain, URLSession, JSON I/O) uses `Task.detached` and bridges back via the async boundary.
 
 ### Pure-shell pattern
-Pure logic (no I/O): `PRDiffEngine`, `TriageClassifier`, `TrustCalculator`, `SensitivePathMatcher` — testable without mocks.
-Impure shell (I/O or state): `PRStateStore`, `TrustLedgerStore`, `SnoozeStore` — own persistence.
+Pure logic (no I/O): `PRDiffEngine`, `TriageClassifier`, `SensitivePathMatcher` — testable without mocks.
+Impure shell (I/O or state): `PRStateStore`, `SnoozeStore` — own persistence.
 
 ### Write actions
-Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActionsEnabled` (default OFF). Always show an `NSAlert` confirmation before calling the GitHub API. Autopilot auto-approve requires both `writeActionsEnabled` AND `autopilotEnabled`.
+Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActionsEnabled` (default OFF). Always show an `NSAlert` confirmation before calling the GitHub API.
 
 ### Keyboard events in MenuBarExtra
 `.onKeyPress` requires macOS 14+. Use `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` for macOS 13 compatibility. Install in `.onAppear`, remove in `.onDisappear`. Force first-responder in `.onAppear` via `NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)`.
@@ -109,13 +105,8 @@ Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActi
 | `githubUsername` | String | `""` |
 | `etag_<url>` | String | — |
 | `writeActionsEnabled` | Bool | false |
-| `autopilotEnabled` | Bool | false |
 | `collapsedSectionsRaw` | [String] | [] |
 | `snoozeMapData` | Data (JSON) | {} |
-
-## Trust Ledger
-
-JSON file at `~/Library/Application Support/com.mainline.github-pr-notifier/trust-ledger.json`. Keyed by author login → `[VerdictRecord]`. `TrustLedgerStore.load()` returns empty dict silently on missing/corrupt file.
 
 ## Bundle ID
 

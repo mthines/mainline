@@ -4,7 +4,7 @@ import Foundation
 
 /// The specific reason a PR has been routed to the "Needs a Human" bucket.
 enum TriageTrigger: Equatable {
-    case failingCIOnTrustedAgent
+    case failingCI
     case changesRequested
     case unresolvedThreads(Int)
     case mergeConflict
@@ -28,17 +28,15 @@ enum TriageClassifier {
     static func needsHuman(
         _ pr: PRSnapshot,
         myLogin: String,
-        trustTier: TrustTier,
         includeConflicts: Bool = false
     ) -> Bool {
-        !triggers(pr, myLogin: myLogin, trustTier: trustTier, includeConflicts: includeConflicts).isEmpty
+        !triggers(pr, myLogin: myLogin, includeConflicts: includeConflicts).isEmpty
     }
 
     /// Returns the full list of triage triggers that apply to this PR.
     static func triggers(
         _ pr: PRSnapshot,
         myLogin: String,
-        trustTier: TrustTier,
         includeConflicts: Bool = false
     ) -> [TriageTrigger] {
         var result: [TriageTrigger] = []
@@ -50,10 +48,10 @@ enum TriageClassifier {
         // are gated behind an opt-in below.
         let isDraft = pr.classifiedState == .draft
 
-        // Failing CI — any non-draft PR with red CI surfaces, regardless of trust
-        // tier or authorship. Red CI must always be visible.
+        // Failing CI — any non-draft PR with red CI surfaces, regardless of
+        // authorship. Red CI must always be visible.
         if !isDraft && (pr.ciStatus == .failure || pr.ciStatus == .error) {
-            result.append(.failingCIOnTrustedAgent)
+            result.append(.failingCI)
         }
 
         // Changes formally requested by a reviewer — the PR still needs the author.
