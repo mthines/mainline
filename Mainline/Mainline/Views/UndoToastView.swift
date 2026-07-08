@@ -34,13 +34,14 @@ struct UndoToastView: View {
             Text(entry.label)
                 .font(.caption)
                 .lineLimit(1)
-            Spacer()
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
             Button("Undo") {
                 entry.undo()
                 entries.removeAll { $0.id == entry.id }
             }
             .buttonStyle(.plain)
-            .font(.caption)
+            .font(.caption.weight(.semibold))
             .foregroundStyle(.blue)
 
             Button {
@@ -53,8 +54,25 @@ struct UndoToastView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Dismiss")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        // Opaque floating card: a solid base under a material blur so the PR
+        // rows/section headers beneath the toast never bleed through (the old
+        // translucent `.quaternary` fill let them ghost into view). A hairline
+        // border and drop shadow lift it clearly above the list.
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.regularMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
     }
 }
