@@ -98,38 +98,90 @@ final class PRManager: ObservableObject {
     /// snooze exclusion. Shared by `currentViewPRs` (which then drops snoozed) and
     /// `postponedPRs` (which keeps only the snoozed ones). Not sorted.
     private var tabScopeFilteredPRs: [PRSnapshot] {
-        // 1. Tab.
-        let tabFiltered = prs.filter { $0.tabs.contains(settings.selectedTab) }
+        tabFiltered(applyScope: true)
+    }
 
-        // 2. Scope.
-        let scopeFiltered: [PRSnapshot]
-        if let scope = scopeStore.selectedScope {
-            scopeFiltered = tabFiltered.filter { pr in
-                switch scope {
-                case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
-                case .repo(let r): return pr.repoFullName == r
-                }
-            }
-        } else {
-            scopeFiltered = tabFiltered
+    /// Tab + drafts + For-me sub-filter applied to `prs`. The scope filter is
+    /// applied only when `applyScope` is true; the scope-chip base
+    /// (`scopeSelectorBasePRs`) omits it so each chip can show its own count.
+    /// Snooze is NOT applied here.
+    private func tabFiltered(applyScope: Bool) -> [PRSnapshot] {
+        // 1. Tab.
+        var result = prs.filter { $0.tabs.contains(settings.selectedTab) }
+
+        // 2. Scope (optional).
+        if applyScope, let scope = scopeStore.selectedScope {
+            result = result.filter { Self.pr($0, matches: scope) }
         }
 
         // 3. Drafts.
-        let draftFiltered = settings.showDrafts
-            ? scopeFiltered
-            : scopeFiltered.filter { $0.classifiedState != .draft }
+        if !settings.showDrafts {
+            result = result.filter { $0.classifiedState != .draft }
+        }
 
         // 4. For-me Direct/Team sub-filter (only on the For-me tab; `.all` no-op).
         guard settings.selectedTab == .forMe, settings.forMeReviewFilter != .all else {
-            return draftFiltered
+            return result
         }
         let myLogin = settings.githubUsername
-        return draftFiltered.filter { pr in
+        return result.filter { pr in
             switch settings.forMeReviewFilter {
             case .all:    return true
             case .direct: return pr.reviewRequestSource(myLogin: myLogin) == .direct
             case .team:   return pr.reviewRequestSource(myLogin: myLogin) == .team
             }
+        }
+    }
+
+    /// Whether a PR falls under a given scope. Shared by the list filter and the
+    /// scope-chip counts so both agree on membership.
+    private static func pr(_ pr: PRSnapshot, matches scope: PRScope) -> Bool {
+        switch scope {
+        case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
+        case .repo(let r): return pr.repoFullName == r
+        }
+    }
+
+    // MARK: - Scope chips (tab-aware)
+
+    /// The population the scope chips derive from: everything `currentViewPRs`
+    /// applies EXCEPT the scope filter itself (tab + drafts + For-me + snooze
+    /// exclusion). So a chip's number equals what you'd see in the deck if you
+    /// selected that scope on the current tab.
+    private var scopeSelectorBasePRs: [PRSnapshot] {
+        tabFiltered(applyScope: false)
+            .filter { !snoozeStore.snoozedNodeIds.contains($0.nodeId) }
+    }
+
+    /// Per-org counts for the scope chips, matching the visible list. Previously
+    /// the chips counted the full `prs` across BOTH tabs, so a chip could read
+    /// "dash0hq 115" while the current tab's list was empty ("Queue clear"). These
+    /// counts follow the selected tab, drafts, For-me, and snooze filters.
+    var scopeCounts: [PRScope: Int] {
+        var counts: [PRScope: Int] = [:]
+        for pr in scopeSelectorBasePRs {
+            guard let owner = pr.repoFullName.split(separator: "/", maxSplits: 1)
+                .first.map(String.init) else { continue }
+            counts[.org(owner), default: 0] += 1
+        }
+        return counts
+    }
+
+    /// Scope chips to show: every org present on the current tab (count > 0),
+    /// ordered by count descending then name — plus the selected scope even when
+    /// it has 0 on this tab, so its chip stays visible and highlighted. Cross-poll
+    /// selection invalidation still lives in `ScopeStore.rebuild`.
+    var availableScopes: [PRScope] {
+        let counts = scopeCounts
+        var scopes = Array(counts.keys)
+        if let sel = scopeStore.selectedScope, !scopes.contains(sel) {
+            scopes.append(sel)
+        }
+        return scopes.sorted {
+            let c1 = counts[$0] ?? 0
+            let c2 = counts[$1] ?? 0
+            if c1 != c2 { return c1 > c2 }
+            return $0.displayName < $1.displayName
         }
     }
 

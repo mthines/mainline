@@ -420,10 +420,10 @@ struct MenuBarView: View {
     private var scopeFilter: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                if !scopeStore.availableScopes.isEmpty {
+                if !manager.availableScopes.isEmpty {
                     scopeChip(label: "All", scope: nil)
-                    ForEach(scopeStore.availableScopes, id: \.rawValue) { scope in
-                        let count = scopeStore.scopeCounts[scope] ?? 0
+                    ForEach(manager.availableScopes, id: \.rawValue) { scope in
+                        let count = manager.scopeCounts[scope] ?? 0
                         scopeChip(label: "\(scope.displayName) \(count)", scope: scope)
                     }
                     Divider().frame(height: 16)
@@ -485,7 +485,7 @@ struct MenuBarView: View {
     // MARK: - Scope cycling
 
     private func cycleScopeForward() {
-        let all: [PRScope?] = [nil] + scopeStore.availableScopes
+        let all: [PRScope?] = [nil] + manager.availableScopes
         let current = scopeStore.selectedScope
         if let idx = all.firstIndex(where: { $0 == current }) {
             let next = all[(idx + 1) % all.count]
@@ -496,7 +496,7 @@ struct MenuBarView: View {
     }
 
     private func cycleScopeBackward() {
-        let all: [PRScope?] = [nil] + scopeStore.availableScopes
+        let all: [PRScope?] = [nil] + manager.availableScopes
         let current = scopeStore.selectedScope
         if let idx = all.firstIndex(where: { $0 == current }) {
             let prev = all[(idx - 1 + all.count) % all.count]

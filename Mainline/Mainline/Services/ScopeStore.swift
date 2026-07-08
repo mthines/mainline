@@ -44,11 +44,11 @@ final class ScopeStore: ObservableObject {
         didSet { persist() }
     }
 
-    /// All available org-level scopes, ordered by count descending.
+    /// All org-level scopes present across ALL PRs (both tabs). Used only to
+    /// invalidate a persisted `selectedScope` when its org disappears entirely.
+    /// The displayed chips and their counts are tab-aware and live on
+    /// `PRManager.availableScopes` / `PRManager.scopeCounts`.
     @Published private(set) var availableScopes: [PRScope] = []
-
-    /// Count per scope for the most recent rebuild call.
-    @Published private(set) var scopeCounts: [PRScope: Int] = [:]
 
     private let defaults = UserDefaults.standard
     private static let selectedScopeKey = "selectedScope2"
@@ -59,8 +59,9 @@ final class ScopeStore: ObservableObject {
 
     // MARK: - Rebuild
 
-    /// Derive available scopes and counts from the current PR list.
-    /// Call after every poll to keep counts fresh.
+    /// Derive the global set of available scopes from the full PR list.
+    /// Call after every poll. Drives only `selectedScope` invalidation — the
+    /// displayed chips/counts are tab-aware and computed on `PRManager`.
     func rebuild(from prs: [PRSnapshot]) {
         var counts: [PRScope: Int] = [:]
         for pr in prs {
@@ -79,7 +80,6 @@ final class ScopeStore: ObservableObject {
         }
 
         availableScopes = sorted
-        scopeCounts = counts
 
         // Invalidate selectedScope only when the derived list is non-empty AND
         // genuinely lacks the selection. An early launch poll can call rebuild
