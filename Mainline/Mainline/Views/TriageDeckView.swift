@@ -266,7 +266,17 @@ struct TriageDeckView: View {
     /// drafts in the index while the display rendered the draft-heavy "Needs
     /// attention" group first, so pressing J/K jumped focus into the group above.)
     private var orderedPRs: [PRSnapshot] {
-        actionabilitySections.flatMap { $0.prs }
+        var list = actionabilitySections.flatMap { $0.prs }
+        // Include Postponed rows in the keyboard/hover focus space ONLY while that
+        // section is expanded (it is collapsed by default). Expanded ⇔ the section
+        // is present in `collapsedSections` — `expansionBinding` inverts the default
+        // for Postponed/Done. This lets J/K and hover focus postponed rows (and S
+        // resume them) without ever focusing a row hidden in a collapsed section.
+        // Done stays display-only (a finished PR has no triage verb).
+        if settings.collapsedSections.contains(.postponed) {
+            list += manager.postponedPRs.sorted(by: postponedWakeOrder)
+        }
+        return list
     }
 
     /// The actionability section a PR is grouped under for DISPLAY. Delegates to
@@ -379,7 +389,7 @@ struct TriageDeckView: View {
         if expansion.wrappedValue {
             ForEach(sectionPRs, id: \.nodeId) { pr in
                 if group == .postponed {
-                    postponedRow(pr: pr)
+                    postponedRow(pr: pr, index: flatIndex(of: pr))
                 } else if group == .done {
                     doneRow(pr: pr)
                 } else {
@@ -655,11 +665,12 @@ struct TriageDeckView: View {
     /// group immediately). Clicking the row body opens the PR in the browser, like
     /// the deck rows. Rendered inside the SAME single scroll region — no nested
     /// ScrollView — preserving the crash-safe height architecture.
-    private func postponedRow(pr: PRSnapshot) -> some View {
+    private func postponedRow(pr: PRSnapshot, index: Int) -> some View {
         let m = metrics
+        let isFocused = index == selectedIndex
         let wake = manager.snoozeStore.wakeTime(nodeId: pr.nodeId)
         return Button {
-            if let url = URL(string: pr.htmlUrl) { NSWorkspace.shared.open(url) }
+            handleRowClick(pr: pr, index: index)
         } label: {
             HStack(alignment: .top, spacing: m.rowHStackSpacing) {
                 LeadingColumn(metrics: m, isUnread: false) {
@@ -696,9 +707,21 @@ struct TriageDeckView: View {
                 ResumeButton(onResume: { resume(pr) })
             }
             .opacity(0.85)
+            // Hover selects the row — shared with keyboard focus — so hover-then-S
+            // resumes the pointed row, matching the deck rows. Frozen while peeking.
+            .onHover { hovering in
+                guard hovering, !showPeek else { return }
+                selectedIndex = index
+            }
             .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.vertical, m.rowVerticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isFocused ? Color.accentColor.opacity(0.22) : .clear)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(isFocused ? Color.accentColor : Color.clear)
+                    .frame(width: 3)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -924,10 +947,15 @@ struct TriageDeckView: View {
         // Non-write verbs
         case ("s", false):
             // Quick "Later" — postpone with the user's configured default duration
-            // (Settings → Appearance → Triage). The clock button + row context menu
-            // still expose the full duration menu.
+            // (Settings → Appearance → Triage). On an already-postponed row, S
+            // instead RESUMES it (removes the postpone). The clock button + row
+            // context menu still expose the full duration menu.
             if let pr = focusedPR {
-                postpone(pr, for: settings.defaultSnoozeDuration)
+                if manager.snoozeStore.isSnoozed(pr) {
+                    resume(pr)
+                } else {
+                    postpone(pr, for: settings.defaultSnoozeDuration)
+                }
             }
             return nil
         case ("e", false):
@@ -960,12 +988,13 @@ struct TriageDeckView: View {
     }
 
     private func moveDown() {
-        guard !prs.isEmpty else { return }
-        selectedIndex = min(selectedIndex + 1, prs.count - 1)
+        let count = orderedPRs.count
+        guard count > 0 else { return }
+        selectedIndex = min(selectedIndex + 1, count - 1)
     }
 
     private func moveUp() {
-        guard !prs.isEmpty else { return }
+        guard !orderedPRs.isEmpty else { return }
         selectedIndex = max(selectedIndex - 1, 0)
     }
 
