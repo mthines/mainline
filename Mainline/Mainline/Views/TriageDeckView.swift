@@ -192,7 +192,6 @@ struct TriageDeckView: View {
     @ObservedObject var settings: MainlineSettings
 
     @State private var selectedIndex: Int = 0
-    @State private var hoveredRowID: String? = nil
     @State private var showPeek: Bool = false
     /// The PR whose peek overlay is shown. Set by both the Space key (focused row)
     /// and the row context menu (the right-clicked row), so the peek always matches
@@ -432,9 +431,10 @@ struct TriageDeckView: View {
         let isFocused = index == selectedIndex
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
-        // "Later" is HOVER-ONLY — it reveals when the pointer is over this row and
-        // never on the keyboard-focused row (keyboard users snooze via `S`).
-        let isHovered = hoveredRowID == pr.nodeId
+        // The trailing "Later"/"Merge" cluster reveals on the SELECTED row. Hover and
+        // keyboard drive one selection (see `.onHover` below), so the cluster follows
+        // whichever row the pointer or the keyboard last landed on.
+        let isHovered = isFocused
         let m = metrics
         return Button {
             handleRowClick(pr: pr, index: index)
@@ -533,13 +533,16 @@ struct TriageDeckView: View {
                         .transition(.opacity)
                 }
             }
-            // Near-instant fade in/out so the hover reveal feels snappy.
-            .animation(.easeOut(duration: 0.05), value: hoveredRowID)
-            // Track the hovered row so its Later button reveals on hover. Clearing
-            // only when THIS row was the hovered one avoids a late "mouse exited"
-            // from a previous row wiping a newer row's hover state.
+            // Hover SELECTS the row — mouse and keyboard share one selection
+            // (`selectedIndex`), so hover-then-Space/Enter acts on the pointed row.
+            // Sticky: selection stays put when the cursor leaves (no revert to a
+            // pre-hover row — that would read as a glitch). Frozen while the peek is
+            // open so stray movement over the dimmed rows can't shift selection.
+            // No animation here on purpose: the highlight + revealed actions switch
+            // instantly, which removes the cross-row hover "blink".
             .onHover { hovering in
-                hoveredRowID = hovering ? pr.nodeId : (hoveredRowID == pr.nodeId ? nil : hoveredRowID)
+                guard hovering, !showPeek else { return }
+                selectedIndex = index
             }
             .padding(.horizontal, RowMetrics.horizontalPadding)
             .padding(.vertical, m.rowVerticalPadding)
@@ -1424,8 +1427,17 @@ private struct KeyCaptureView: NSViewRepresentable {
         }
 
         override func keyDown(with event: NSEvent) {
-            // handler returns nil == consumed; non-nil == pass through to super.
+            // handler returns nil == consumed (e.g. an overlay handled it); non-nil
+            // == not consumed.
             if let handler, handler(event) == nil { return }
+            // Esc that no overlay consumed dismisses the popover. This view is the
+            // popover's first responder (so it can capture J/K/etc.), which otherwise
+            // swallows the popover's built-in Esc-to-close — a plain NSView's keyDown
+            // doesn't route Esc to cancelOperation, so handle it explicitly here.
+            if event.keyCode == 53 {   // Esc
+                window?.close()
+                return
+            }
             super.keyDown(with: event)
         }
     }
