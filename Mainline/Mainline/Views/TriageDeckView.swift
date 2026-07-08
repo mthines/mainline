@@ -179,7 +179,7 @@ struct LeadingColumn<Icon: View>: View {
 ///   A      — approve (write-gated)
 ///   M      — merge (write-gated)
 ///   R      — request changes (write-gated)
-///   S      — snooze 1h
+///   S      — postpone (uses the default duration set in Settings)
 ///   E      — mark seen
 ///   X      — dismiss
 ///   V      — toggle multi-select mode
@@ -908,10 +908,11 @@ struct TriageDeckView: View {
 
         // Non-write verbs
         case ("s", false):
-            // Quick "Later" — postpone with the default duration (1 day). The clock
-            // button + row context menu expose the full duration menu.
+            // Quick "Later" — postpone with the user's configured default duration
+            // (Settings → Appearance → Triage). The clock button + row context menu
+            // still expose the full duration menu.
             if let pr = focusedPR {
-                postpone(pr, for: .quickDefault)
+                postpone(pr, for: settings.defaultSnoozeDuration)
             }
             return nil
         case ("e", false):

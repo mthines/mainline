@@ -91,6 +91,7 @@ final class MainlineSettings: ObservableObject {
         // Triage Cockpit additions
         static let writeActionsEnabled  = "writeActionsEnabled"
         static let mergeMethodPreference = "mergeMethodPreference"
+        static let defaultSnoozeDuration = "defaultSnoozeDuration"
         static let collapsedSectionsRaw = "collapsedSectionsRaw"
         static let snoozeMapData        = "snoozeMapData"
         static let attentionPolicy      = "attentionPolicy"
@@ -184,6 +185,13 @@ final class MainlineSettings: ObservableObject {
     /// The user's preferred merge method for in-app merges. Default `.auto`.
     @Published var mergeMethodPreference: MergeMethodPreference {
         didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
+    }
+
+    /// The postpone duration applied by the `S` quick-snooze verb. Default `.oneDay`
+    /// (`SnoozeDuration.quickDefault`). The clock button and row menu still expose
+    /// every duration regardless of this setting.
+    @Published var defaultSnoozeDuration: SnoozeDuration {
+        didSet { defaults.set(defaultSnoozeDuration.rawValue, forKey: Keys.defaultSnoozeDuration) }
     }
 
     /// Section raw values that are collapsed. Stored as [String] in UserDefaults.
@@ -553,6 +561,10 @@ final class MainlineSettings: ObservableObject {
         // Merge method preference — default Auto (picks the repo's allowed method)
         mergeMethodPreference = defaults.string(forKey: Keys.mergeMethodPreference)
             .flatMap { MergeMethodPreference(rawValue: $0) } ?? .auto
+
+        // Quick-snooze duration for the `S` verb — default matches `SnoozeDuration.quickDefault`
+        defaultSnoozeDuration = defaults.string(forKey: Keys.defaultSnoozeDuration)
+            .flatMap { SnoozeDuration(rawValue: $0) } ?? .quickDefault
 
         // Collapsed sections — default: Postponed + Done collapsed (low-priority
         // buckets stay folded until the user expands them).

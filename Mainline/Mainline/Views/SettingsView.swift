@@ -331,6 +331,19 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
 
+        Section("Triage") {
+            Picker("Default postpone duration", selection: $settings.defaultSnoozeDuration) {
+                ForEach(SnoozeDuration.allCases) { duration in
+                    Text(duration.title).tag(duration)
+                }
+            }
+            Label("Applied when you press S to postpone a PR. The clock button and row menu still offer every duration.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
         Section("Drafts") {
             Toggle("Show draft PRs", isOn: Binding(
                 get: { settings.showDrafts },
