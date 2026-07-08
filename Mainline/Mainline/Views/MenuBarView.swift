@@ -60,6 +60,19 @@ struct MenuBarView: View {
             // fixed nested ScrollViews (the crash source) AND the separate top
             // "Needs a Human" bucket (which duplicated the "Needs attention" group).
             scrollableBody
+                // Undo toast stack — overlaid at the bottom of the scroll region so
+                // it always pins to the true bottom of the panel body, above the
+                // legend/footer. (Previously it lived inside the scrolling deck and
+                // floated up to the content's bottom when the list was short.)
+                .overlay(alignment: .bottom) {
+                    if !manager.undoEntries.isEmpty {
+                        UndoToastView(entries: $manager.undoEntries)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 4)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: manager.undoEntries.count)
 
             Divider()
 

@@ -200,32 +200,22 @@ struct TriageDeckView: View {
     private var showPeek: Bool { manager.peekPR != nil }
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
-    @State private var undoEntries: [UndoEntry] = []
 
     // MARK: - Body
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                if prs.isEmpty {
-                    emptyState
-                } else {
-                    prList
-                }
-            }
-            // The peek overlay is NOT rendered here — it is presented at the panel
-            // level in `MenuBarView` (reading `manager.peekPR`) so the card can fill
-            // the full popover height instead of being clipped to this deck's bounds.
-
-            // Undo toast stack
-            if !undoEntries.isEmpty {
-                UndoToastView(entries: $undoEntries)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 4)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(5)
+        VStack(spacing: 0) {
+            if prs.isEmpty {
+                emptyState
+            } else {
+                prList
             }
         }
+        // Neither the peek overlay nor the undo toast is rendered here — both are
+        // presented at the PANEL level in `MenuBarView` (reading `manager.peekPR` /
+        // `manager.undoEntries`) so they pin to the true bottom of the popover
+        // instead of the bottom of this deck's (content-sized) bounds.
+        //
         // Keyboard triage capture. A first-responder NSView that overrides keyDown
         // directly — reliable inside the MenuBarExtra popover regardless of how it
         // was opened, unlike a global/local NSEvent monitor which needs the app to
@@ -1036,18 +1026,18 @@ struct TriageDeckView: View {
 
     private func pushUndo(label: String, pr: PRSnapshot, undoFn: @escaping () -> Void) {
         let entry = UndoEntry(label: label, pr: pr, undo: undoFn)
-        withAnimation { undoEntries.append(entry) }
+        withAnimation { manager.undoEntries.append(entry) }
         // Auto-dismiss after 8s
         let id = entry.id
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            withAnimation { undoEntries.removeAll { $0.id == id } }
+            withAnimation { manager.undoEntries.removeAll { $0.id == id } }
         }
     }
 
     private func undoLast() {
-        guard let last = undoEntries.last else { return }
+        guard let last = manager.undoEntries.last else { return }
         last.undo()
-        withAnimation { undoEntries.removeLast() }
+        withAnimation { manager.undoEntries.removeLast() }
     }
 
     // MARK: - Postpone / Resume

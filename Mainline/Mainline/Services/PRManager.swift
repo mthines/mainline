@@ -53,6 +53,13 @@ final class PRManager: ObservableObject {
     /// so it can use the full panel height instead of the short deck's bounds.
     @Published var peekPR: PRSnapshot?
 
+    /// The undo toast stack. Owned here (not in `TriageDeckView`) so the toast can
+    /// be presented at the PANEL level — pinned to the true bottom of the popover —
+    /// rather than inside the scrolling deck, where it floated up to the content's
+    /// bottom whenever the list was shorter than the panel. `TriageDeckView` still
+    /// pushes/undoes entries; `MenuBarView` renders them.
+    @Published var undoEntries: [UndoEntry] = []
+
     // MARK: - Services (internal for Settings access)
 
     let store:          PRStateStore
