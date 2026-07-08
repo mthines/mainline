@@ -6,7 +6,8 @@ A lightweight macOS menu bar app that keeps you on top of your GitHub pull reque
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](https://www.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-<img width="406" height="588" alt="Mainline menu bar panel showing PRs grouped by actionability" src="https://github.com/user-attachments/assets/0b1661ac-4dc7-48e3-a999-9d3a48e5a26c" />
+<img width="406" height="588" alt="Screenshot 2026-07-08 at 10 43 35" src="https://github.com/user-attachments/assets/8441bede-8201-4cb7-b826-e56dd573f05f" />
+
 
 Mainline lives in your menu bar and watches the pull requests you care about — the ones you opened and the ones waiting on your review.
 It notifies you when something changes: a PR turns green, a review lands, or CI breaks.
