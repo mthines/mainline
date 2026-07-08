@@ -89,7 +89,8 @@ To distribute outside your machine:
 ### Settings
 
 <!-- Screenshot: the Settings window showing the PAT/gh import, notification toggles, and the global shortcut recorder. -->
-<img width="406" height="661" alt="Screenshot 2026-07-07 at 21 50 26" src="https://github.com/user-attachments/assets/8d495452-b523-47f9-9739-a0d89bee7154" />
+
+<img width="1136" height="917" alt="image" src="https://github.com/user-attachments/assets/7bd80ef7-ee9e-4feb-a17f-b3100e3c2f85" />
 
 
 
