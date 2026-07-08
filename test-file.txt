@@ -1,4 +1,0 @@
-This is a test file for verifying GitHub status logic.
-
-Created by Agent0 for local testing purposes.
-This PR is not intended to be merged.
