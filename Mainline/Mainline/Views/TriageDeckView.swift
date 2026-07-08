@@ -192,11 +192,12 @@ struct TriageDeckView: View {
     @ObservedObject var settings: MainlineSettings
 
     @State private var selectedIndex: Int = 0
-    @State private var showPeek: Bool = false
-    /// The PR whose peek overlay is shown. Set by both the Space key (focused row)
-    /// and the row context menu (the right-clicked row), so the peek always matches
-    /// the row the user acted on — not merely the keyboard-focused one.
-    @State private var peekPR: PRSnapshot?
+    /// Whether the peek overlay is open. The peek TARGET lives on `manager.peekPR`
+    /// (so `MenuBarView` can present the card at the panel level and use the full
+    /// popover height); this deck only reads/sets it. Set by both the Space key
+    /// (focused row) and the row context menu (the right-clicked row), so the peek
+    /// always matches the row the user acted on — not merely the keyboard-focused one.
+    private var showPeek: Bool { manager.peekPR != nil }
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
     @State private var undoEntries: [UndoEntry] = []
@@ -212,24 +213,9 @@ struct TriageDeckView: View {
                     prList
                 }
             }
-            .overlay(alignment: .center) {
-                if showPeek, let pr = peekPR {
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                        .onTapGesture { showPeek = false }
-                    PRPeekView(
-                        pr: pr,
-                        client: manager.client,
-                        isPresented: $showPeek
-                    )
-                    // Recreate per PR so stepping through with J/K/arrows resets the
-                    // files list + loading state and re-fetches for the new PR.
-                    .id(pr.nodeId)
-                    .transition(.scale(scale: 0.96).combined(with: .opacity))
-                    .zIndex(10)
-                }
-
-            }
+            // The peek overlay is NOT rendered here — it is presented at the panel
+            // level in `MenuBarView` (reading `manager.peekPR`) so the card can fill
+            // the full popover height instead of being clipped to this deck's bounds.
 
             // Undo toast stack
             if !undoEntries.isEmpty {
@@ -247,7 +233,7 @@ struct TriageDeckView: View {
         .background(
             KeyCaptureView(
                 handler: { event in handleKeyDown(event) },
-                onDismiss: { showPeek = false }
+                onDismiss: { manager.peekPR = nil }
             )
         )
     }
@@ -876,13 +862,13 @@ struct TriageDeckView: View {
         if showPeek {
             switch (chars, cmd) {
             case ("j", false), ("\u{F701}", false):   // j or ↓
-                moveDown(); peekPR = focusedPR; return nil
+                moveDown(); manager.peekPR = focusedPR; return nil
             case ("k", false), ("\u{F700}", false):   // k or ↑
-                moveUp(); peekPR = focusedPR; return nil
+                moveUp(); manager.peekPR = focusedPR; return nil
             case (" ", false):                         // Space closes
-                showPeek = false; return nil
+                manager.peekPR = nil; return nil
             default:
-                if event.keyCode == 53 { showPeek = false; return nil }   // Esc
+                if event.keyCode == 53 { manager.peekPR = nil; return nil }   // Esc
                 return event
             }
         }
@@ -899,8 +885,7 @@ struct TriageDeckView: View {
         // Peek (glance + files)
         case (" ", false):
             if let pr = focusedPR {
-                peekPR = pr
-                showPeek = true
+                manager.peekPR = pr
                 TelemetryService.shared.recordTriageInteraction("diff_preview")
             }
             return nil
@@ -1016,8 +1001,7 @@ struct TriageDeckView: View {
             Task { await manager.performAction(.dismiss(pr)) }
             pushUndo(label: "Dismissed \(pr.title)", pr: pr) {}
         case .viewDiff:
-            peekPR = pr
-            showPeek = true
+            manager.peekPR = pr
             TelemetryService.shared.recordTriageInteraction("diff_preview")
         case .openInBrowser:
             if let url = URL(string: pr.htmlUrl) {

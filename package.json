@@ -12,7 +12,9 @@
     "install:full": "pnpm dlx nx run mainline:install:full",
     "install:full:launch": "pnpm dlx nx run mainline:install:full:launch",
     "dev": "pnpm dlx nx run mainline:dev",
-    "reset": "nx reset"
+    "reset": "nx reset",
+    "release": "bash scripts/release.sh",
+    "setup-tap": "bash scripts/setup-tap.sh"
   },
   "devDependencies": {
     "nx": "^21.0.0"

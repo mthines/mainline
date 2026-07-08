@@ -160,21 +160,26 @@ final class PRPoller {
         let unique = order.compactMap { merged[$0] }
 
         let myLogin = settings.githubUsername
-        let transitions = store.update(
+        let allTransitions = store.update(
             new: unique,
             myLogin: myLogin,
             notifyOnlyHumanComments: settings.notifyOnlyHumanComments
         )
+
+        // Suppress everything for PRs the user has postponed: postponing
+        // permanently mutes a PR, so it fires no banner AND lights up no unread dot
+        // — not while snoozed, and not after it wakes. The mute set outlives the
+        // snooze window (see `MainlineSettings.notifMutedNodeIds`). The PR still
+        // updates in the list via the store snapshot; only attention is silenced.
+        let muted = settings.notifMutedNodeIds
+        let transitions = muted.isEmpty
+            ? allTransitions
+            : allTransitions.filter { !muted.contains($0.prNodeId) }
+
         notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
 
-        // ALL transitions (notify + quiet) mark the PR as unread
-        let allTransitionNodeIds: [String] = transitions.compactMap { transition in
-            switch transition {
-            case .newPR(let pr), .readyForReview(let pr),
-                 .ciStatusChanged(let pr, _, _), .newReviewOrComment(let pr):
-                return pr.nodeId
-            }
-        }
+        // ALL surviving transitions (notify + quiet) mark the PR as unread
+        let allTransitionNodeIds = transitions.map { $0.prNodeId }
         let unreadCandidates = Array(Set(allTransitionNodeIds))
         if !unreadCandidates.isEmpty {
             NotificationCenter.default.post(

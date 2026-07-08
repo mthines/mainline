@@ -99,17 +99,44 @@ final class SnoozeStore {
     }
 
     /// Snoozes a PR (by nodeId) until the given wake time.
+    ///
+    /// Postponing also PERMANENTLY mutes the PR from notifications: the nodeId is
+    /// added to `settings.notifMutedNodeIds`, which — unlike the snooze wake time —
+    /// is never auto-cleared. So once postponed, a PR never fires a banner again,
+    /// even after it wakes and returns to its normal group. `unsnooze` does NOT lift
+    /// the mute (see its note).
     func snooze(nodeId: String, until wakeTime: Date) {
         var map = settings.snoozeMap
         map[nodeId] = wakeTime
         settings.snoozeMap = map
+
+        var muted = settings.notifMutedNodeIds
+        muted.insert(nodeId)
+        settings.notifMutedNodeIds = muted
     }
 
     /// Removes a snooze entry, returning the PR to its normal group immediately.
+    /// Intentionally does NOT lift the notification mute: a PR you postponed stays
+    /// muted even after you resume it, matching "postponed should never notify
+    /// again". Clear the mute explicitly via `unmuteNotifications` if ever needed.
     func unsnooze(nodeId: String) {
         var map = settings.snoozeMap
         map.removeValue(forKey: nodeId)
         settings.snoozeMap = map
+    }
+
+    /// Returns true if the PR has been postponed at least once and is therefore
+    /// permanently muted from notifications.
+    func isNotificationMuted(nodeId: String) -> Bool {
+        settings.notifMutedNodeIds.contains(nodeId)
+    }
+
+    /// Lifts the permanent notification mute for a PR (escape hatch — not wired to
+    /// resume, which intentionally leaves the mute in place).
+    func unmuteNotifications(nodeId: String) {
+        var muted = settings.notifMutedNodeIds
+        muted.remove(nodeId)
+        settings.notifMutedNodeIds = muted
     }
 
     /// The set of nodeIds currently snoozed (wake time in the future).

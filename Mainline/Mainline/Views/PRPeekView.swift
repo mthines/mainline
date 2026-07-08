@@ -41,11 +41,14 @@ struct PRPeekView: View {
                 }
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: 360)
+            // Fill whatever height the presenter (`MenuBarView`) allocates so the
+            // card uses the available popover height instead of a fixed cap.
+            .frame(maxHeight: .infinity)
         }
-        // Must fit inside the 360pt MenuBarExtra popover. Opaque fill so the list
-        // behind can't bleed through (`.background(.background)` is translucent here).
-        .frame(width: 344)
+        // Width fits inside the 360pt MenuBarExtra popover; height is driven by the
+        // presenter. Opaque fill so the list behind can't bleed through
+        // (`.background(.background)` is translucent here).
+        .frame(maxWidth: 344, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .windowBackgroundColor))

@@ -34,7 +34,8 @@ Mainline/Mainline/                     ← Source root
 ├── Models/
 │   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
-│   └── MainlineSettings.swift      ← UserDefaults-backed settings
+│   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); .defaults
+│   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor)
 │   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files
@@ -45,14 +46,19 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRManager.swift          ← @MainActor orchestrator + write actions
 │   ├── SensitivePathMatcher.swift ← Pure path/branch-name heuristic classifier
 │   ├── TriageClassifier.swift   ← Pure needsHuman predicate engine
-│   └── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
+│   ├── ScopeStore.swift         ← @MainActor derives org/repo scopes from PR list; drives badge
+│   ├── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
+│   ├── GlobalHotKey.swift       ← Carbon global hotkey + MenuBarPopoverOpener
+│   └── TelemetryService.swift   ← Opt-in OTel singleton (no-op when disabled)
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView
-    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions
+    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
-    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/A/M/R/S/E/X/V/⌘Z) + TriageAction enum + per-row context menu
+    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/A/M/R/S/E/X/V/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView
     ├── PRPeekView.swift          ← Space peek: instant glance card + async files list
-    └── UndoToastView.swift       ← Batched undo toast stack
+    ├── UndoToastView.swift       ← Batched undo toast stack
+    ├── TelemetryOptInBanner.swift← Dismissable Privacy-pane opt-in banner (consent-versioned)
+    └── TelemetryDetailsSheet.swift ← Full telemetry disclosure sheet
 ```
 
 ## Key Patterns
@@ -85,7 +91,10 @@ Impure shell (I/O or state): `PRStateStore`, `SnoozeStore` — own persistence.
 Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActionsEnabled` (default OFF). Always show an `NSAlert` confirmation before calling the GitHub API.
 
 ### Keyboard events in MenuBarExtra
-`.onKeyPress` requires macOS 14+. Use `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` for macOS 13 compatibility. Install in `.onAppear`, remove in `.onDisappear`. Force first-responder in `.onAppear` via `NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)`.
+`.onKeyPress` requires macOS 14+ (deployment target is 13). A local `NSEvent` monitor only fires while the app is *active*, and clicking the menu bar icon does NOT activate an accessory app — so key nav silently died on click-open. Instead `TriageDeckView` embeds a zero-size first-responder `NSView` (`KeyCaptureView`) that overrides `keyDown`: it receives keys whenever the popover window is key, independent of app-active state. It also handles Esc-to-close (the first responder otherwise swallows the popover's built-in Esc dismissal).
+
+### Global shortcut
+System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `GlobalHotKey`. Stored as `globalShortcutKeyCode` + `globalShortcutModifiers` (Cocoa `NSEvent.ModifierFlags` raw value; converted to a Carbon mask by `GlobalHotKey.carbonModifiers(from:)`). `AppDelegate.setUpGlobalHotKey()` subscribes to the three `MainlineSettings` published props so the recorder, toggle, and reset button all live re-register. Default: **⇧⌃ + ISO section key** (`kVK_ISO_Section` = 0x0A; the "$" key on a Danish layout) — see `defaultShortcutKeyCode`/`defaultShortcutModifiers`. `keyGlyph(for:)` renders the key label, falling back to `UCKeyTranslate` against the active keyboard layout for non-ANSI physical keys.
 
 ## Keychain Details
 
@@ -96,17 +105,29 @@ Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActi
 
 ## UserDefaults Keys
 
+Full list of keys is `MainlineSettings.Keys`; the notable ones:
+
 | Key | Type | Default |
 |-----|------|---------|
 | `pollIntervalSeconds` | Int | 60 |
 | `searchQueryAuthor` | String | `is:open is:pr author:@me` |
 | `searchQueryReviewer` | String | `is:open is:pr review-requested:@me` |
 | `notifyNewPR` / `Ready` / `CI` / `Comment` | Bool | true |
+| `notifyOnlyHumanComments` | Bool | true |
 | `githubUsername` | String | `""` |
 | `etag_<url>` | String | — |
 | `writeActionsEnabled` | Bool | false |
+| `mergeMethodPreference` | String | `auto` |
 | `collapsedSectionsRaw` | [String] | [] |
 | `snoozeMapData` | Data (JSON) | {} |
+| `attentionPolicy` | Data (JSON) | `PREvent.defaults` |
+| `panelHeight` | Int | 560 |
+| `panelMinHeight` | Int | 240 |
+| `menuBarMetric` | String | `needsAHuman` |
+| `globalShortcutEnabled` | Bool | true |
+| `globalShortcutKeyCode` | Int | `0x0A` (ISO section key) |
+| `globalShortcutModifiers` | UInt | ⇧⌃ |
+| `telemetryEnabled` | Bool | false |
 
 ## Bundle ID
 

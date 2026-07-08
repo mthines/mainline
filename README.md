@@ -2,18 +2,37 @@
 
 A lightweight macOS menu bar app that notifies you about GitHub pull requests.
 
+<!-- HERO IMAGE — replace with a screenshot (or short GIF) of the menu bar panel open, showing PRs grouped by actionability. Recommended width ~900px. -->
+![Mainline menu bar panel open, showing pull requests grouped by actionability with CI status](docs/images/hero.png)
+
 ## Features
 
+### Stay notified
 - **New PR** — fires a notification when a new PR appears in your search queries
 - **Ready for Review** — notifies when a draft PR becomes ready, or when you're added as a reviewer
 - **CI Status Changed** — fires when CI passes or fails on any tracked PR
-- **New Review / Comment** — notifies when a review or comment is added
-- **Menu bar dropdown** — click the bird icon to see open PRs with CI status indicators; click any row to open the PR in your browser
+- **New Review / Comment** — notifies when a review or comment is added (human comments only, by default — bot noise is filtered)
+- **Per-event attention levels** — set each event type to a loud or quiet notification independently
+
+### Triage fast
+- **Menu bar panel** — click the icon to see your PRs grouped by actionability (Needs a Human, Ready to merge, Waiting, …), each with CI status
+- **Keyboard triage** — drive the whole panel from the keyboard: `J`/`K` to move, `Space` to preview the diff, `A`/`M`/`R` to approve / merge / request changes, `S` to snooze, `E` to mark seen, `X` to dismiss, `V` for multi-select, `⌘Z` to undo
+- **Command palette** — `⌘K` opens a Raycast-style palette for every action
+- **Diff preview** — `Space` shows the PR diff inline via Quick Look
+- **Global shortcut** — open Mainline from any app with a system-wide hotkey (default ⇧⌃ + the key left of `1`; customizable in Settings)
+- **Scope filter** — narrow the panel and badge to a single org or repo
+- **Trust ledger** — tracks how each author's PRs have turned out, surfaced as a compact tier badge per row
+
+### Act (optional, off by default)
+- **Write actions** — approve, merge, or request changes without leaving the menu bar (each behind a confirmation; enable in Settings)
+- **Autopilot** — auto-approve trusted, low-risk PRs (requires write actions to be enabled)
+
+### Configure & secure
 - **Configurable polling** — default 60s interval; adjustable in Settings (30s – 3600s)
 - **Custom search queries** — default `is:open is:pr author:@me` and `is:open is:pr review-requested:@me`
-- **Per-event notification toggles** — enable or disable each notification type independently
 - **Keychain storage** — your PAT is stored securely in the macOS Keychain; never in UserDefaults or on disk
 - **Import from gh CLI** — click "Import from gh" to automatically pull your token from `gh auth token`
+- **Opt-in telemetry** — anonymous usage data is **off** by default; enable it in Settings → Privacy (see [`docs/telemetry.md`](docs/telemetry.md))
 
 ## Requirements
 
@@ -64,7 +83,31 @@ To distribute outside your machine:
 
 ## Screenshots
 
-<!-- TODO: Add screenshots after first working build -->
+<!--
+  Replace each placeholder below with a real screenshot.
+  Drop the image files in docs/images/ using these exact filenames (or update the paths).
+  Recommended: retina PNGs, ~800–900px wide, light or dark mode consistent across the set.
+-->
+
+### Triage panel
+
+<!-- Screenshot: the menu bar panel with PRs grouped into Needs a Human / Ready to merge / Waiting, each row showing CI status and a trust badge. -->
+![Menu bar panel with PRs grouped by actionability](docs/images/triage-panel.png)
+
+### Keyboard triage & command palette
+
+<!-- Screenshot: a PR row selected via keyboard, or the ⌘K command palette open over the panel. -->
+![Keyboard triage with the command palette open](docs/images/command-palette.png)
+
+### Diff preview
+
+<!-- Screenshot: the Quick Look diff overlay (Space) showing a PR's changes. -->
+![Quick Look diff preview of a pull request](docs/images/diff-preview.png)
+
+### Settings
+
+<!-- Screenshot: the Settings window showing the PAT/gh import, notification toggles, and the global shortcut recorder. -->
+![Settings window with token entry, notification toggles, and the global shortcut recorder](docs/images/settings.png)
 
 ## Releasing / Homebrew
 

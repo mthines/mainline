@@ -46,6 +46,13 @@ final class PRManager: ObservableObject {
     /// PRs the user has not yet looked at. Persisted across launches.
     @Published var unreadPRIds: Set<String> = []
 
+    /// The PR whose peek overlay is currently shown (Space / "View Details"), or
+    /// `nil` when no peek is open. Lifted out of `TriageDeckView` so the overlay
+    /// can be presented at the panel level in `MenuBarView` — a modal peek belongs
+    /// above the whole popover, not anchored inside the scrolling deck content,
+    /// so it can use the full panel height instead of the short deck's bounds.
+    @Published var peekPR: PRSnapshot?
+
     // MARK: - Services (internal for Settings access)
 
     let store:          PRStateStore

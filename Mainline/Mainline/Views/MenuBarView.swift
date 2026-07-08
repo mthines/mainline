@@ -106,6 +106,34 @@ struct MenuBarView: View {
                     .opacity(0)
             }
         }
+        // Peek overlay — presented at the PANEL level (not inside the scrolling
+        // deck) so the card can use the full popover height. Target lives on
+        // `manager.peekPR`; the deck only sets it.
+        .overlay {
+            if let pr = manager.peekPR {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { manager.peekPR = nil }
+                    PRPeekView(
+                        pr: pr,
+                        client: manager.client,
+                        isPresented: Binding(
+                            get: { manager.peekPR != nil },
+                            set: { if !$0 { manager.peekPR = nil } }
+                        )
+                    )
+                    // Recreate per PR so stepping through with J/K/arrows resets the
+                    // files list + loading state and re-fetches for the new PR.
+                    .id(pr.nodeId)
+                    .frame(height: peekHeight)
+                    .padding(.horizontal, 8)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                }
+                .zIndex(10)
+            }
+        }
+        .animation(.easeInOut(duration: 0.12), value: manager.peekPR?.nodeId)
     }
 
     // MARK: - Derived data
@@ -232,6 +260,16 @@ struct MenuBarView: View {
         let effective = measured > 0 ? measured : regionCap
         let clamped = min(max(effective, regionFloor), regionCap)
         return safe(clamped, fallback: regionFloor)
+    }
+
+    /// Height for the peek card. Tracks the ACTUAL rendered panel height
+    /// (`chromeReserve + scrollRegionHeight`) minus a small margin, so the card
+    /// fills the available popover height rather than floating small — while never
+    /// exceeding the panel bounds (which macOS would clip, not scroll). Floored so
+    /// it stays usable on a short panel.
+    private var peekHeight: CGFloat {
+        let panel = chromeReserve + scrollRegionHeight
+        return max(safe(panel - 48, fallback: 320), 320)
     }
 
     // MARK: - Header
