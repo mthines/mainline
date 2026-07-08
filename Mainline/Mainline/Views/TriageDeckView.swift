@@ -240,12 +240,38 @@ struct TriageDeckView: View {
 
     // MARK: - PR list
 
-    /// PRs in canonical triage order — Open/InReview/Approved above Draft,
-    /// then most-recently-updated first. Drafts never appear above open PRs.
-    /// This flat order is the index space that J/K keyboard navigation walks,
-    /// even though rows are displayed grouped into collapsible sections.
-    private var orderedPRs: [PRSnapshot] {
+    /// PRs in the raw flat triage sort — Open/InReview/Approved above Draft, then
+    /// most-recently-updated first. This is the WITHIN-GROUP ordering base only; it
+    /// is NOT the keyboard index space. J/K navigation walks `orderedPRs` below,
+    /// which follows the grouped display order so focus never crosses a group
+    /// boundary in the wrong visual direction.
+    private var triageSorted: [PRSnapshot] {
         prs.sorted(by: PRSnapshot.triageOrder)
+    }
+
+    /// The focusable actionability sections (Needs attention → Ready to merge →
+    /// Waiting → Draft → …) in canonical display order, excluding the display-only
+    /// Postponed and Done sections. Both `sections` (display) and `orderedPRs`
+    /// (keyboard index space) build on this, so the two orderings never diverge.
+    private var actionabilitySections: [(group: ActionGroup, prs: [PRSnapshot])] {
+        let grouped = Dictionary(grouping: triageSorted, by: { groupFor($0) })
+        return ActionGroup.allCases
+            .filter { $0 != .postponed }
+            .sorted { $0.sortIndex < $1.sortIndex }
+            .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
+                guard let prs = grouped[group], !prs.isEmpty else { return nil }
+                return (group, prs.sorted(by: PRSnapshot.triageOrder))
+            }
+    }
+
+    /// The keyboard index space that J/K navigation walks. Flattens the focusable
+    /// actionability sections IN DISPLAY ORDER so the flat index matches the on-
+    /// screen top-to-bottom row order. (Previously this was a single flat
+    /// `triageOrder` sort that ignored grouping — which put non-draft PRs above
+    /// drafts in the index while the display rendered the draft-heavy "Needs
+    /// attention" group first, so pressing J/K jumped focus into the group above.)
+    private var orderedPRs: [PRSnapshot] {
+        actionabilitySections.flatMap { $0.prs }
     }
 
     /// The actionability section a PR is grouped under for DISPLAY. Delegates to
@@ -264,14 +290,7 @@ struct TriageDeckView: View {
     /// `manager.postponedPRs` (snoozed & not expired for the current tab + scope),
     /// so it is always LAST and its membership is independent of actionability.
     private var sections: [(group: ActionGroup, prs: [PRSnapshot])] {
-        let grouped = Dictionary(grouping: orderedPRs, by: { groupFor($0) })
-        var result = ActionGroup.allCases
-            .filter { $0 != .postponed }
-            .sorted { $0.sortIndex < $1.sortIndex }
-            .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
-                guard let prs = grouped[group], !prs.isEmpty else { return nil }
-                return (group, prs.sorted(by: PRSnapshot.triageOrder))
-            }
+        var result = actionabilitySections
 
         let postponed = manager.postponedPRs.sorted(by: postponedWakeOrder)
         if !postponed.isEmpty {
@@ -298,8 +317,9 @@ struct TriageDeckView: View {
     }
 
     /// The single main list: the keyboard-navigable deck grouped into
-    /// collapsible actionability sections. Row focus indices map back into the flat
-    /// `orderedPRs` array so J/K navigation is unaffected by grouping.
+    /// collapsible actionability sections. Row focus indices map back into
+    /// `orderedPRs`, which is itself flattened from these sections in display order,
+    /// so J/K navigation follows the on-screen top-to-bottom row order.
     ///
     /// Renders as a plain (NON-lazy, NON-scrolling) `VStack`: this view is hosted
     /// inside `MenuBarView`'s SINGLE outer `ScrollView`, so it must contribute its
