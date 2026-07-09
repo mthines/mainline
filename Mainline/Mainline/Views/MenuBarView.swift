@@ -144,9 +144,12 @@ struct MenuBarView: View {
                         // filling the panel.
                         maxHeight: peekHeight
                     )
-                    // Recreate per PR so stepping through with J/K/arrows resets the
-                    // files list + loading state and re-fetches for the new PR.
-                    .id(pr.nodeId)
+                    // NB: no `.id(pr.nodeId)` here on purpose. Tagging identity to the
+                    // node id recreated the view on every J/K step, which re-fired the
+                    // insertion transition below — so the fade/scale replayed on each
+                    // navigation. Keeping one stable identity means stepping only swaps
+                    // the card's CONTENT (no re-animation); PRPeekView reloads its
+                    // files list off `.task(id: pr.nodeId)` instead.
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
@@ -154,7 +157,9 @@ struct MenuBarView: View {
                 .zIndex(10)
             }
         }
-        .animation(.easeInOut(duration: 0.12), value: manager.peekPR?.nodeId)
+        // Animate only the OPEN/CLOSE boundary (nil ↔ present), not PR-to-PR steps.
+        // Keying on the node id animated every navigation and replayed the fade.
+        .animation(.easeInOut(duration: 0.12), value: manager.peekPR != nil)
     }
 
     // MARK: - Derived data

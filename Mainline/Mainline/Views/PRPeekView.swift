@@ -89,7 +89,10 @@ struct PRPeekView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .shadow(radius: 12)
-        .task { await loadFiles() }
+        // Reload when the PR changes. The presenter no longer recreates this view per
+        // PR (that replayed the open animation on every J/K step), so bind the fetch
+        // to the node id: `.task(id:)` cancels + restarts whenever it changes.
+        .task(id: pr.nodeId) { await loadFiles() }
     }
 
     /// Height of the scroll region: the measured content height, capped so the
@@ -270,6 +273,9 @@ struct PRPeekView: View {
     }
 
     private func loadFiles() async {
+        // Clear the previous PR's files so stepping doesn't flash a stale list under
+        // the new header (the view is reused across PRs now, not recreated).
+        files = []
         isLoadingFiles = true
         filesError = nil
         guard let token = await KeychainHelper.loadToken(), !token.isEmpty else {
