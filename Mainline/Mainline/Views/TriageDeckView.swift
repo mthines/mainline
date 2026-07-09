@@ -933,15 +933,18 @@ struct TriageDeckView: View {
             undoLast()
             return nil
 
-        // Write verbs (gated by writeActionsEnabled)
-        case ("a", false):
-            if let pr = focusedPR { dispatchVerb(.approve(pr)) }
-            return nil
+        // Write verb (gated by writeActionsEnabled). Approve (A) and Request
+        // Changes (R) are intentionally NOT bound here — you review a PR on GitHub,
+        // not from the menu bar. R is repurposed to Refresh (below); Approve /
+        // Request Changes remain available via the row context menu.
         case ("m", false):
             if let pr = focusedPR { dispatchVerb(.merge(pr)) }
             return nil
+
+        // Refresh the PR list (same as the footer Refresh button). Works whether or
+        // not a row is focused.
         case ("r", false):
-            if let pr = focusedPR { dispatchVerb(.requestChanges(pr)) }
+            Task { await manager.triggerSingleRefresh() }
             return nil
 
         // Non-write verbs
