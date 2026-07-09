@@ -91,6 +91,28 @@ final class PRStateStore: ObservableObject {
         return suppress ? [] : transitions
     }
 
+    /// Patches Vercel preview fields onto already-tracked snapshots WITHOUT running
+    /// the diff engine — a preview URL is enrichment, never a notifiable transition.
+    /// Mutating the published dict republishes it so the row indicators refresh, and
+    /// the new baseline is persisted so the cache survives relaunches.
+    ///
+    /// `updates` maps nodeId → (extracted url or nil, the `updatedAt` it was checked
+    /// at). Entries for PRs no longer tracked are ignored.
+    func applyVercelPreviews(_ updates: [String: (url: String?, checkedAt: String)]) {
+        guard !updates.isEmpty else { return }
+        var changed = false
+        for (nodeId, info) in updates {
+            guard var snap = snapshots[nodeId] else { continue }
+            if snap.vercelPreviewUrl != info.url || snap.vercelPreviewCheckedAt != info.checkedAt {
+                snap.vercelPreviewUrl = info.url
+                snap.vercelPreviewCheckedAt = info.checkedAt
+                snapshots[nodeId] = snap
+                changed = true
+            }
+        }
+        if changed { persist(snapshots) }
+    }
+
     /// All currently tracked PRs as a flat array, sorted by updatedAt descending.
     var allPRs: [PRSnapshot] {
         snapshots.values.sorted { $0.updatedAt > $1.updatedAt }

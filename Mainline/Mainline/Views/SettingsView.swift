@@ -195,6 +195,32 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+
+        Section("Preview Deployments") {
+            Toggle("Detect Vercel preview deployments", isOn: $settings.vercelPreviewEnabled)
+            if settings.vercelPreviewEnabled {
+                TextField("Preview domains", text: previewDomainsBinding, prompt: Text("dash0-preview.com, vercel.app"))
+                    .textFieldStyle(.roundedBorder)
+                Label("Comma-separated host suffixes to match in the Vercel bot comment, most-preferred first. A matching PR shows a “Preview” badge; press P to open it.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Bridges the `[String]` preview-domains setting to a single comma-separated
+    /// text field. Splitting on commas and trimming keeps the stored list clean
+    /// regardless of spacing.
+    private var previewDomainsBinding: Binding<String> {
+        Binding(
+            get: { settings.vercelPreviewDomains.joined(separator: ", ") },
+            set: { newValue in
+                settings.vercelPreviewDomains = newValue
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        )
     }
 
     // MARK: - Notifications

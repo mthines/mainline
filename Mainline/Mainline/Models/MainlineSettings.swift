@@ -107,6 +107,9 @@ final class MainlineSettings: ObservableObject {
         static let forMeReviewFilter    = "forMeReviewFilter"
         static let compactRows          = "compactRows"
         static let needsHumanExpanded   = "needsHumanExpanded"
+        // Vercel preview detection
+        static let vercelPreviewEnabled = "vercelPreviewEnabled"
+        static let vercelPreviewDomains = "vercelPreviewDomains"
         // Global shortcut
         static let globalShortcutEnabled   = "globalShortcutEnabled"
         static let globalShortcutKeyCode   = "globalShortcutKeyCode"
@@ -299,6 +302,26 @@ final class MainlineSettings: ObservableObject {
     @Published var needsHumanExpanded: Bool {
         didSet { defaults.set(needsHumanExpanded, forKey: Keys.needsHumanExpanded) }
     }
+
+    // MARK: - Vercel preview detection
+
+    /// Whether Mainline detects a Vercel preview deployment for each PR (from the
+    /// `vercel[bot]` comment) and surfaces the "Preview" indicator + `P` verb.
+    /// Default ON. Turning it off stops the extra per-PR comment fetches.
+    @Published var vercelPreviewEnabled: Bool {
+        didSet { defaults.set(vercelPreviewEnabled, forKey: Keys.vercelPreviewEnabled) }
+    }
+
+    /// Ordered list of host suffixes a preview URL must match, most-preferred
+    /// first — the extractor returns the first suffix that yields a match (mirrors
+    /// the Alfred workflow: custom `dash0-preview.com` before generic `vercel.app`).
+    /// Extend this in Settings to support other custom preview domains.
+    @Published var vercelPreviewDomains: [String] {
+        didSet { defaults.set(vercelPreviewDomains, forKey: Keys.vercelPreviewDomains) }
+    }
+
+    /// Default preview host suffixes, in priority order.
+    static let defaultVercelPreviewDomains = ["dash0-preview.com", "vercel.app"]
 
     // MARK: - Global shortcut
 
@@ -605,6 +628,13 @@ final class MainlineSettings: ObservableObject {
 
         // Needs-a-Human expanded — default collapsed (false); persisted on change
         needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
+
+        // Vercel preview detection — default ON, with the dash0 + vercel.app suffixes
+        vercelPreviewEnabled = defaults.object(forKey: Keys.vercelPreviewEnabled) == nil
+            ? true
+            : defaults.bool(forKey: Keys.vercelPreviewEnabled)
+        vercelPreviewDomains = defaults.stringArray(forKey: Keys.vercelPreviewDomains)
+            ?? Self.defaultVercelPreviewDomains
 
         // Global shortcut — default ON, ⇧⌃ + ISO section key ("$" on Danish)
         globalShortcutEnabled = defaults.object(forKey: Keys.globalShortcutEnabled) == nil

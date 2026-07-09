@@ -123,6 +123,17 @@ struct PRPeekView: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 8)
+            if let preview = pr.vercelPreviewUrl, let previewURL = URL(string: preview) {
+                Button {
+                    TelemetryService.shared.recordTriageInteraction("open_preview")
+                    NSWorkspace.shared.open(previewURL)
+                } label: {
+                    Image(systemName: "globe").foregroundStyle(Color(nsColor: .systemTeal))
+                }
+                .buttonStyle(.plain)
+                .help("Open Vercel preview (P)")
+                .accessibilityLabel("Open Vercel preview")
+            }
             Button {
                 if let url = URL(string: pr.htmlUrl) { NSWorkspace.shared.open(url) }
             } label: {

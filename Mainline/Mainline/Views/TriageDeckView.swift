@@ -14,6 +14,7 @@ enum TriageAction: Identifiable {
     case dismiss
     case viewDiff
     case openInBrowser
+    case openPreview
 
     var id: String { label }
 
@@ -27,6 +28,7 @@ enum TriageAction: Identifiable {
         case .dismiss:            return "Dismiss"
         case .viewDiff:           return "View Details"
         case .openInBrowser:      return "Open in Browser"
+        case .openPreview:        return "Open Preview"
         }
     }
 
@@ -40,6 +42,7 @@ enum TriageAction: Identifiable {
         case .dismiss:         return "xmark"
         case .viewDiff:        return "rectangle.stack"
         case .openInBrowser:   return "safari"
+        case .openPreview:     return "globe"
         }
     }
 
@@ -484,6 +487,7 @@ struct TriageDeckView: View {
                         if settings.selectedTab == .forMe {
                             ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
                         }
+                        PreviewBadge(pr: pr)
                         FeedbackBadge(pr: pr)
                     }
                 }
@@ -616,6 +620,11 @@ struct TriageDeckView: View {
         }
         Button { handleTriageAction(.openInBrowser, on: pr) } label: {
             Label("Open in Browser", systemImage: "safari")
+        }
+        if pr.vercelPreviewUrl != nil {
+            Button { handleTriageAction(.openPreview, on: pr) } label: {
+                Label("Open Preview", systemImage: "globe")
+            }
         }
     }
 
@@ -905,6 +914,9 @@ struct TriageDeckView: View {
                 moveUp(); manager.peekPR = focusedPR; return nil
             case (" ", false):                         // Space closes
                 manager.peekPR = nil; return nil
+            case ("p", false):                         // P opens the preview (if any)
+                if let pr = focusedPR { openPreview(pr) }
+                return nil
             default:
                 if event.keyCode == 53 { manager.peekPR = nil; return nil }   // Esc
                 return event
@@ -945,6 +957,12 @@ struct TriageDeckView: View {
         // not a row is focused.
         case ("r", false):
             Task { await manager.triggerSingleRefresh() }
+            return nil
+
+        // Open the PR's Vercel preview deployment in the browser. Silent no-op when
+        // no preview was detected for the focused row.
+        case ("p", false):
+            if let pr = focusedPR { openPreview(pr) }
             return nil
 
         // Non-write verbs
@@ -1056,7 +1074,17 @@ struct TriageDeckView: View {
                 TelemetryService.shared.recordTriageInteraction("open_in_browser")
                 NSWorkspace.shared.open(url)
             }
+        case .openPreview:
+            openPreview(pr)
         }
+    }
+
+    /// Opens the PR's Vercel preview deployment in the browser. Silent no-op when
+    /// the PR has no detected preview URL — matches how M/S no-op when inapplicable.
+    private func openPreview(_ pr: PRSnapshot) {
+        guard let preview = pr.vercelPreviewUrl, let url = URL(string: preview) else { return }
+        TelemetryService.shared.recordTriageInteraction("open_preview")
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: - Undo
@@ -1330,6 +1358,34 @@ struct FeedbackBadge: View {
                     ? "\(pr.commentCount) comment\(pr.commentCount == 1 ? "" : "s")"
                     : "Has review feedback"
             )
+        }
+    }
+}
+
+// MARK: - PreviewBadge
+
+/// Compact indicator shown on the repo/#number metadata line when a Vercel
+/// preview deployment was detected for the PR. Cyan globe + "Preview" label,
+/// styled like the other row badges. Its presence is the affordance for the `P`
+/// verb ("press P to open the preview"); hidden entirely when no preview exists.
+struct PreviewBadge: View {
+    let pr: PRSnapshot
+
+    var body: some View {
+        if pr.vercelPreviewUrl != nil {
+            HStack(spacing: 2) {
+                Image(systemName: "globe")
+                    .font(.caption2)
+                Text("Preview")
+                    .font(.caption2)
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Color(nsColor: .systemTeal).opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
+            .foregroundStyle(Color(nsColor: .systemTeal))
+            .help("Vercel preview available — press P to open")
+            .accessibilityLabel("Preview deployment available")
         }
     }
 }

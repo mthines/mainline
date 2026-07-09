@@ -222,6 +222,19 @@ struct PRSnapshot: Codable, Equatable {
     /// Whether the PR's repository allows rebase merges (`allow_rebase_merge`).
     var rebaseMergeAllowed: Bool
 
+    // MARK: - Vercel preview deployment
+
+    /// The Vercel preview deployment URL for this PR, extracted lazily from the
+    /// `vercel[bot]` PR comment. nil = no preview detected (or not yet checked).
+    /// Drives the row "Preview" indicator and the `P` open-preview verb.
+    var vercelPreviewUrl: String?
+
+    /// The `updatedAt` value at which the Vercel preview was last checked. Used as
+    /// a cache key by the poller: while a PR's `updatedAt` is unchanged the cached
+    /// `vercelPreviewUrl` is carried forward (no extra comment fetch); a new commit
+    /// bumps `updatedAt`, which re-triggers the check. nil = never checked.
+    var vercelPreviewCheckedAt: String?
+
     /// Total lines changed in this PR.
     var totalLines: Int { linesAdded + linesDeleted }
 
@@ -255,7 +268,9 @@ struct PRSnapshot: Codable, Equatable {
         unresolvedThreadCount: Int = 0,
         mergeCommitAllowed: Bool = true,
         squashMergeAllowed: Bool = true,
-        rebaseMergeAllowed: Bool = true
+        rebaseMergeAllowed: Bool = true,
+        vercelPreviewUrl: String? = nil,
+        vercelPreviewCheckedAt: String? = nil
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -287,6 +302,8 @@ struct PRSnapshot: Codable, Equatable {
         self.mergeCommitAllowed = mergeCommitAllowed
         self.squashMergeAllowed = squashMergeAllowed
         self.rebaseMergeAllowed = rebaseMergeAllowed
+        self.vercelPreviewUrl = vercelPreviewUrl
+        self.vercelPreviewCheckedAt = vercelPreviewCheckedAt
     }
 
     // MARK: - Bot detection

@@ -54,7 +54,7 @@ Mainline/Mainline/                     ← Source root
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView
     ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
-    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/A/M/R/S/E/X/V/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView
+    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/P/M/R/S/E/X/V/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView
     ├── PRPeekView.swift          ← Space peek: instant glance card + async files list
     ├── UndoToastView.swift       ← Batched undo toast stack
     ├── TelemetryOptInBanner.swift← Dismissable Privacy-pane opt-in banner (consent-versioned)
@@ -96,6 +96,9 @@ Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActi
 ### Global shortcut
 System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `GlobalHotKey`. Stored as `globalShortcutKeyCode` + `globalShortcutModifiers` (Cocoa `NSEvent.ModifierFlags` raw value; converted to a Carbon mask by `GlobalHotKey.carbonModifiers(from:)`). `AppDelegate.setUpGlobalHotKey()` subscribes to the three `MainlineSettings` published props so the recorder, toggle, and reset button all live re-register. Default: **⇧⌃ + ISO section key** (`kVK_ISO_Section` = 0x0A; the "$" key on a Danish layout) — see `defaultShortcutKeyCode`/`defaultShortcutModifiers`. `keyGlyph(for:)` renders the key label, falling back to `UCKeyTranslate` against the active keyboard layout for non-ANSI physical keys.
 
+### Vercel preview detection
+Each PR can carry a `vercelPreviewUrl` extracted from its `vercel[bot]` issue comment (REST `GitHubClient.fetchVercelPreviewURL`, pure `extractPreviewURL(from:domains:)`). The row shows a `PreviewBadge` when present, and `P` (deck or peek) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition). Match domains (priority order) and the on/off toggle are `MainlineSettings.vercelPreviewDomains` / `vercelPreviewEnabled`.
+
 ## Keychain Details
 
 - Service: `"com.mainline.github-pr-notifier"`
@@ -127,6 +130,8 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `globalShortcutEnabled` | Bool | true |
 | `globalShortcutKeyCode` | Int | `0x0A` (ISO section key) |
 | `globalShortcutModifiers` | UInt | ⇧⌃ |
+| `vercelPreviewEnabled` | Bool | true |
+| `vercelPreviewDomains` | [String] | `["dash0-preview.com","vercel.app"]` |
 | `telemetryEnabled` | Bool | false |
 
 ## Bundle ID

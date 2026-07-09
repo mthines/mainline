@@ -157,7 +157,21 @@ final class PRPoller {
                 order.append(snapshot.nodeId)
             }
         }
-        let unique = order.compactMap { merged[$0] }
+        var unique = order.compactMap { merged[$0] }
+
+        // Carry forward cached Vercel preview URLs before the diff/persist: a PR's
+        // preview only changes when a new commit bumps `updatedAt`, so while
+        // `updatedAt` is unchanged we reuse the previously-extracted value and skip
+        // the per-PR comment fetch entirely. Fresh/changed PRs stay unenriched here
+        // and are fetched by `enrichVercelPreviews` after the store update.
+        let previousSnapshots = store.snapshots
+        for i in unique.indices {
+            if let prev = previousSnapshots[unique[i].nodeId],
+               prev.vercelPreviewCheckedAt == unique[i].updatedAt {
+                unique[i].vercelPreviewUrl = prev.vercelPreviewUrl
+                unique[i].vercelPreviewCheckedAt = prev.vercelPreviewCheckedAt
+            }
+        }
 
         let myLogin = settings.githubUsername
         let allTransitions = store.update(
@@ -197,6 +211,52 @@ final class PRPoller {
         // are pushed to the caller's separate `donePRs` collection and NEVER go
         // through the diff engine / notifications.
         await fetchDonePRs(token: token)
+
+        // Enrich the open set with Vercel preview URLs. Runs LAST so it never blocks
+        // notifications or the Done section, and only fetches PRs whose preview
+        // wasn't already carried forward above.
+        await enrichVercelPreviews(from: unique, token: token)
+    }
+
+    /// Fetches and applies Vercel preview URLs for the PRs that weren't carried
+    /// forward this poll (new PRs, or PRs whose `updatedAt` changed). Sequential
+    /// with small batched applies so indicators appear progressively on first load;
+    /// the natural upper bound is the search page size, so no extra cap is needed.
+    /// Every error is non-critical: the PR is simply left unchecked and retried on
+    /// the next poll. Skipped entirely when the feature is off or no domains are set.
+    private func enrichVercelPreviews(from snapshots: [PRSnapshot], token: String) async {
+        guard settings.vercelPreviewEnabled else { return }
+        let domains = settings.vercelPreviewDomains
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !domains.isEmpty else { return }
+
+        // Only PRs whose preview hasn't been checked at their current `updatedAt`.
+        let toFetch = snapshots.filter { $0.vercelPreviewCheckedAt != $0.updatedAt }
+        guard !toFetch.isEmpty else { return }
+
+        var pending: [String: (url: String?, checkedAt: String)] = [:]
+        for pr in toFetch {
+            if Task.isCancelled { break }
+            let url: String?
+            do {
+                url = try await client.fetchVercelPreviewURL(
+                    repoFullName: pr.repoFullName,
+                    number: pr.number,
+                    domains: domains,
+                    token: token
+                )
+            } catch {
+                // Non-critical (auth/rate-limit/5xx/decoding/cancellation): leave the
+                // PR unchecked so the next poll retries it, and keep going.
+                continue
+            }
+            pending[pr.nodeId] = (url: url, checkedAt: pr.updatedAt)
+            if pending.count >= 8 {
+                store.applyVercelPreviews(pending)
+                pending.removeAll()
+            }
+        }
+        store.applyVercelPreviews(pending)
     }
 
     /// Fetches the recently-completed (merged/closed) PRs for both tabs, dedupes by

@@ -126,6 +126,14 @@ private struct GraphQLRequestedReviewer: Decodable {
     let name: String?   // ... on Team
 }
 
+/// Response model for REST `/repos/{owner}/{repo}/issues/{number}/comments`.
+/// Only the fields needed to find the Vercel bot comment and its body.
+private struct IssueComment: Decodable {
+    struct User: Decodable { let login: String? }
+    let user: User?
+    let body: String?
+}
+
 /// Response model for REST `/repos/{owner}/{repo}/pulls/{number}/files`.
 struct PRFile: Decodable {
     let filename: String
@@ -508,6 +516,79 @@ final class GitHubClient {
         } catch {
             throw GitHubAPIError.decodingError(error)
         }
+    }
+
+    // MARK: - Vercel preview URL (REST)
+
+    /// Login of the Vercel GitHub App that posts the deployment comment.
+    static let vercelBotLogin = "vercel[bot]"
+
+    /// Fetches the PR's issue comments and extracts the Vercel preview URL from the
+    /// `vercel[bot]` comment, mirroring the Alfred workflow: filter comments by the
+    /// bot login, then match the configured host suffixes in priority order and
+    /// take the last match. Returns nil when no preview is present.
+    ///
+    /// Uses the issue-comments endpoint (`/issues/{n}/comments`) because a PR's
+    /// conversation comments are issue comments in the REST API — that's where the
+    /// Vercel bot posts its sticky deployment comment.
+    func fetchVercelPreviewURL(
+        repoFullName: String,
+        number: Int,
+        domains: [String],
+        token: String
+    ) async throws -> String? {
+        let urlString = "https://api.github.com/repos/\(repoFullName)/issues/\(number)/comments?per_page=100"
+        guard let url = URL(string: urlString) else { throw GitHubAPIError.unknown(0) }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
+
+        switch http.statusCode {
+        case 200: break
+        case 401: throw GitHubAPIError.unauthorized
+        case 500...599: throw GitHubAPIError.serverError(http.statusCode)
+        default:  throw GitHubAPIError.unknown(http.statusCode)
+        }
+
+        let comments: [IssueComment]
+        do {
+            comments = try JSONDecoder().decode([IssueComment].self, from: data)
+        } catch {
+            throw GitHubAPIError.decodingError(error)
+        }
+
+        let botBody = comments
+            .filter { $0.user?.login == Self.vercelBotLogin }
+            .compactMap { $0.body }
+            .joined(separator: "\n")
+
+        return Self.extractPreviewURL(from: botBody, domains: domains)
+    }
+
+    /// Pure preview-URL extractor. Scans `text` for the first configured host
+    /// suffix (in priority order) that produces a match and returns the LAST such
+    /// URL (the most recent deployment). Returns nil if no suffix matches.
+    static func extractPreviewURL(from text: String, domains: [String]) -> String? {
+        guard !text.isEmpty else { return nil }
+        for domain in domains {
+            let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let escaped = NSRegularExpression.escapedPattern(for: trimmed)
+            // https://<subdomain>.<suffix><optional path/query>, matching the
+            // Alfred workflow's character classes.
+            let pattern = "https://[a-zA-Z0-9._-]+\\.\(escaped)[a-zA-Z0-9./_?=&-]*"
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(text.startIndex..., in: text)
+            let matches = regex.matches(in: text, range: range)
+            if let last = matches.last, let r = Range(last.range, in: text) {
+                return String(text[r])
+            }
+        }
+        return nil
     }
 
     // MARK: - Perform GraphQL mutation

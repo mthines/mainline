@@ -644,7 +644,7 @@ struct MenuBarView: View {
     /// here?" affordance.
     private var keyboardLegend: some View {
         HStack(spacing: 0) {
-            Text("J/K move · Space peek · ↵ open · M merge · S later · R refresh · ⌘Z undo · right-click ▸ all")
+            Text("J/K move · Space peek · ↵ open · P preview · M merge · S later · R refresh · ⌘Z undo · right-click ▸ all")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
