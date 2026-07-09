@@ -131,7 +131,7 @@ struct PRPeekView: View {
                     Image(systemName: "globe").foregroundStyle(Color(nsColor: .systemTeal))
                 }
                 .buttonStyle(.plain)
-                .help("Open Vercel preview (P)")
+                .help("Open Vercel preview (E)")
                 .accessibilityLabel("Open Vercel preview")
             }
             Button {
