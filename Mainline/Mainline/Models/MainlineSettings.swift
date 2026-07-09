@@ -118,81 +118,235 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+// MARK: - ShortcutBinding
+
+/// A per-action binding: one base key character plus an optional modifier set.
+/// Mirrors the global-hotkey storage pattern (`NSEvent.ModifierFlags.rawValue` as
+/// `UInt`). Defaults to bare (no modifiers). Hashable so clash detection can key
+/// on the composite (key + modifiers) instead of the bare key alone.
+struct ShortcutBinding: Equatable, Hashable {
+    var key: String
+    /// Stored as `NSEvent.ModifierFlags.rawValue`, mirroring the global shortcut.
+    var modifiers: UInt = 0
+
+    /// Modifier flags relevant to in-app shortcuts: ⌘⇧⌃⌥ only.
+    /// Caps-lock, numeric-pad, and function keys are ignored.
+    static let relevantModifierMask: NSEvent.ModifierFlags = [.command, .shift, .control, .option]
+
+    /// Reconstructs `NSEvent.ModifierFlags` from the stored raw value,
+    /// masked to device-independent then to the relevant subset.
+    var modifierFlags: NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: modifiers)
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(Self.relevantModifierMask)
+    }
+}
+
+// Codable conformance: encode as { "key": "z", "modifiers": 256 }.
+// Decode supports both the new object shape and the legacy v1.25.0 bare-string
+// shape (where only the key was stored); the caller applies undo migration.
+extension ShortcutBinding: Codable {
+    enum CodingKeys: String, CodingKey { case key, modifiers }
+
+    init(from decoder: Decoder) throws {
+        // New-shape: {"key":"z","modifiers":256}
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(String.self, forKey: .key)
+        modifiers = try container.decodeIfPresent(UInt.self, forKey: .modifiers) ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(key, forKey: .key)
+        try container.encode(modifiers, forKey: .modifiers)
+    }
+}
+
 // MARK: - InAppShortcutBindings
 
-/// Codable struct holding one String key per configurable in-app shortcut.
-/// Defaults match the factory key assignments. Persisted as JSON in UserDefaults.
-struct InAppShortcutBindings: Codable, Equatable {
-    var navigateDown: String = "j"
-    var navigateUp: String = "k"
-    var peek: String = " "
-    var merge: String = "m"
-    var refresh: String = "r"
-    var openPreview: String = "e"   // NEW default (was "p")
-    var snooze: String = "s"
-    var markSeen: String = "n"      // NEW default (was "e")
-    var dismiss: String = "x"
-    var multiSelectToggle: String = "v"
-    var toggleDrafts: String = "d"
-    var undo: String = "z"
+/// Codable struct holding one `ShortcutBinding` (key + modifier set) per
+/// configurable in-app shortcut. Persisted as JSON in UserDefaults under
+/// `shortcutBindings`. Custom `Codable` decodes BOTH the new object shape and
+/// the v1.25.0 legacy bare-string shape for backward compatibility. Defaults
+/// match factory assignments; undo defaults to ⌘Z (modifiers = .command).
+struct InAppShortcutBindings: Equatable {
+    var navigateDown:    ShortcutBinding
+    var navigateUp:      ShortcutBinding
+    var peek:            ShortcutBinding
+    var merge:           ShortcutBinding
+    var refresh:         ShortcutBinding
+    var openPreview:     ShortcutBinding
+    var snooze:          ShortcutBinding
+    var markSeen:        ShortcutBinding
+    var dismiss:         ShortcutBinding
+    var multiSelectToggle: ShortcutBinding
+    var toggleDrafts:    ShortcutBinding
+    var undo:            ShortcutBinding
 
-    /// Factory defaults (all fields at their `defaultKey` values).
-    static let defaults = InAppShortcutBindings()
+    /// Factory defaults — all bindings bare except undo = ⌘Z.
+    static let defaults: InAppShortcutBindings = {
+        let cmdRaw = NSEvent.ModifierFlags.command.rawValue
+        return InAppShortcutBindings(
+            navigateDown:    ShortcutBinding(key: "j"),
+            navigateUp:      ShortcutBinding(key: "k"),
+            peek:            ShortcutBinding(key: " "),
+            merge:           ShortcutBinding(key: "m"),
+            refresh:         ShortcutBinding(key: "r"),
+            openPreview:     ShortcutBinding(key: "e"),
+            snooze:          ShortcutBinding(key: "s"),
+            markSeen:        ShortcutBinding(key: "n"),
+            dismiss:         ShortcutBinding(key: "x"),
+            multiSelectToggle: ShortcutBinding(key: "v"),
+            toggleDrafts:    ShortcutBinding(key: "d"),
+            undo:            ShortcutBinding(key: "z", modifiers: cmdRaw)
+        )
+    }()
 
-    /// Returns the bound key for a given shortcut.
-    func key(for shortcut: InAppShortcut) -> String {
+    /// Returns the binding for a given shortcut.
+    func binding(for shortcut: InAppShortcut) -> ShortcutBinding {
         switch shortcut {
-        case .navigateDown:     return navigateDown
-        case .navigateUp:       return navigateUp
-        case .peek:             return peek
-        case .merge:            return merge
-        case .refresh:          return refresh
-        case .openPreview:      return openPreview
-        case .snooze:           return snooze
-        case .markSeen:         return markSeen
-        case .dismiss:          return dismiss
+        case .navigateDown:      return navigateDown
+        case .navigateUp:        return navigateUp
+        case .peek:              return peek
+        case .merge:             return merge
+        case .refresh:           return refresh
+        case .openPreview:       return openPreview
+        case .snooze:            return snooze
+        case .markSeen:          return markSeen
+        case .dismiss:           return dismiss
         case .multiSelectToggle: return multiSelectToggle
-        case .toggleDrafts:     return toggleDrafts
-        case .undo:             return undo
+        case .toggleDrafts:      return toggleDrafts
+        case .undo:              return undo
         }
     }
 
-    /// Mutates the binding for a given shortcut to the new key.
-    mutating func setKey(_ key: String, for shortcut: InAppShortcut) {
+    /// Mutates the binding for a given shortcut.
+    mutating func setBinding(_ binding: ShortcutBinding, for shortcut: InAppShortcut) {
         switch shortcut {
-        case .navigateDown:     navigateDown = key
-        case .navigateUp:       navigateUp = key
-        case .peek:             peek = key
-        case .merge:            merge = key
-        case .refresh:          refresh = key
-        case .openPreview:      openPreview = key
-        case .snooze:           snooze = key
-        case .markSeen:         markSeen = key
-        case .dismiss:          dismiss = key
-        case .multiSelectToggle: multiSelectToggle = key
-        case .toggleDrafts:     toggleDrafts = key
-        case .undo:             undo = key
+        case .navigateDown:      navigateDown    = binding
+        case .navigateUp:        navigateUp      = binding
+        case .peek:              peek            = binding
+        case .merge:             merge           = binding
+        case .refresh:           refresh         = binding
+        case .openPreview:       openPreview     = binding
+        case .snooze:            snooze          = binding
+        case .markSeen:          markSeen        = binding
+        case .dismiss:           dismiss         = binding
+        case .multiSelectToggle: multiSelectToggle = binding
+        case .toggleDrafts:      toggleDrafts    = binding
+        case .undo:              undo            = binding
         }
     }
 
-    /// Returns pairs of shortcuts that share the same non-empty key (i.e. clash).
-    /// Each element in the returned set is a pair {a, b} where a.key == b.key.
+    /// Convenience shim: returns the bound key character for a shortcut.
+    /// Kept for existing call sites; equivalent to `binding(for:).key`.
+    func key(for shortcut: InAppShortcut) -> String {
+        binding(for: shortcut).key
+    }
+
+    /// Convenience shim: updates only the key character, preserving modifiers.
+    mutating func setKey(_ key: String, for shortcut: InAppShortcut) {
+        var b = binding(for: shortcut)
+        b.key = key
+        setBinding(b, for: shortcut)
+    }
+
+    /// Returns the set of shortcuts involved in a clash. A clash is equality of
+    /// BOTH the base key AND the modifier set — `E` and `⌘E` are NOT a clash;
+    /// two `⌘E` bindings ARE. Shortcuts with an empty key are skipped.
     var clashingShortcuts: Set<InAppShortcut> {
-        var keyToShortcuts: [String: [InAppShortcut]] = [:]
+        var bindingToShortcuts: [ShortcutBinding: [InAppShortcut]] = [:]
         for shortcut in InAppShortcut.allCases {
-            let k = key(for: shortcut)
-            guard !k.isEmpty else { continue }
-            keyToShortcuts[k, default: []].append(shortcut)
+            let b = binding(for: shortcut)
+            guard !b.key.isEmpty else { continue }
+            bindingToShortcuts[b, default: []].append(shortcut)
         }
         var clashing = Set<InAppShortcut>()
-        for (_, shortcuts) in keyToShortcuts where shortcuts.count > 1 {
+        for (_, shortcuts) in bindingToShortcuts where shortcuts.count > 1 {
             shortcuts.forEach { clashing.insert($0) }
         }
         return clashing
     }
 
-    /// True when no two shortcuts share the same non-empty key.
+    /// True when no two shortcuts share the same (key + modifiers) pair.
     var isValid: Bool { clashingShortcuts.isEmpty }
+}
+
+// MARK: - InAppShortcutBindings Codable
+
+extension InAppShortcutBindings: Codable {
+    /// CodingKeys match the persisted JSON field names (unchanged from v1.25.0
+    /// so existing stored data continues to decode).
+    enum CodingKeys: String, CodingKey {
+        case navigateDown, navigateUp, peek, merge, refresh, openPreview,
+             snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts, undo
+    }
+
+    /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
+    /// legacy bare-string shape.  Missing fields fall back to the factory
+    /// default for that action.
+    ///
+    /// Migration rule for `undo`:
+    ///   - Legacy bare-string (e.g. `"undo":"z"`) → modifiers set to `.command`
+    ///     so ⌘Z behavior is preserved for v1.25.0 users.
+    ///   - New object shape with explicit `modifiers` → used as-is.
+    ///   - Absent entirely → factory default ⌘Z.
+    init(from decoder: Decoder) throws {
+        let d = InAppShortcutBindings.defaults
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let cmdRaw = NSEvent.ModifierFlags.command.rawValue
+
+        // Helper: try to decode as ShortcutBinding first; on failure try bare String.
+        func decodeBinding(_ key: CodingKeys, default def: ShortcutBinding) throws -> ShortcutBinding {
+            if let b = try? container.decodeIfPresent(ShortcutBinding.self, forKey: key) {
+                return b
+            }
+            if let s = try? container.decodeIfPresent(String.self, forKey: key) {
+                return ShortcutBinding(key: s.lowercased(), modifiers: 0)
+            }
+            return def
+        }
+
+        navigateDown    = try decodeBinding(.navigateDown,    default: d.navigateDown)
+        navigateUp      = try decodeBinding(.navigateUp,      default: d.navigateUp)
+        peek            = try decodeBinding(.peek,            default: d.peek)
+        merge           = try decodeBinding(.merge,           default: d.merge)
+        refresh         = try decodeBinding(.refresh,         default: d.refresh)
+        openPreview     = try decodeBinding(.openPreview,     default: d.openPreview)
+        snooze          = try decodeBinding(.snooze,          default: d.snooze)
+        markSeen        = try decodeBinding(.markSeen,        default: d.markSeen)
+        dismiss         = try decodeBinding(.dismiss,         default: d.dismiss)
+        multiSelectToggle = try decodeBinding(.multiSelectToggle, default: d.multiSelectToggle)
+        toggleDrafts    = try decodeBinding(.toggleDrafts,    default: d.toggleDrafts)
+
+        // Undo migration: bare-string or absent → apply .command modifier.
+        if let newShape = try? container.decodeIfPresent(ShortcutBinding.self, forKey: .undo) {
+            // New-shape object — use modifiers as stored (trusts the encoder).
+            undo = newShape
+        } else if let legacyKey = try? container.decodeIfPresent(String.self, forKey: .undo) {
+            // Legacy bare string (v1.25.0) → preserve the key but restore ⌘ modifier.
+            undo = ShortcutBinding(key: legacyKey.lowercased(), modifiers: cmdRaw)
+        } else {
+            // Absent → factory default ⌘Z.
+            undo = d.undo
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(navigateDown,     forKey: .navigateDown)
+        try container.encode(navigateUp,       forKey: .navigateUp)
+        try container.encode(peek,             forKey: .peek)
+        try container.encode(merge,            forKey: .merge)
+        try container.encode(refresh,          forKey: .refresh)
+        try container.encode(openPreview,      forKey: .openPreview)
+        try container.encode(snooze,           forKey: .snooze)
+        try container.encode(markSeen,         forKey: .markSeen)
+        try container.encode(dismiss,          forKey: .dismiss)
+        try container.encode(multiSelectToggle, forKey: .multiSelectToggle)
+        try container.encode(toggleDrafts,     forKey: .toggleDrafts)
+        try container.encode(undo,             forKey: .undo)
+    }
 }
 
 // MARK: - MergeMethodPreference
@@ -577,6 +731,29 @@ final class MainlineSettings: ObservableObject {
         if flags.contains(.command) { out += "⌘" }
         out += keyGlyph(for: defaultShortcutKeyCode)
         return out
+    }
+
+    // MARK: - In-app binding glyph helpers
+
+    /// Emits modifier glyphs in the conventional Cocoa order (⇧⌃⌥⌘) for the
+    /// flags that are set. Reuses the same ordering as `globalShortcutDisplayString`.
+    static func modifierGlyphs(_ flags: NSEvent.ModifierFlags) -> String {
+        var out = ""
+        if flags.contains(.shift)   { out += "⇧" }
+        if flags.contains(.control) { out += "⌃" }
+        if flags.contains(.option)  { out += "⌥" }
+        if flags.contains(.command) { out += "⌘" }
+        return out
+    }
+
+    /// Human-readable rendering of an in-app `ShortcutBinding`, e.g. "⌘Z",
+    /// "E", "Space", "—". Modifier glyphs precede the key glyph using the
+    /// same `⇧⌃⌥⌘` order as the global shortcut display.
+    static func glyph(for binding: ShortcutBinding) -> String {
+        let mods = modifierGlyphs(binding.modifierFlags)
+        if binding.key.isEmpty { return "—" }
+        if binding.key == " "  { return mods + "Space" }
+        return mods + binding.key.uppercased()
     }
 
     /// Map a virtual key code to a display glyph/character. Covers letters,

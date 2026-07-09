@@ -30,6 +30,8 @@ struct PRPeekView: View {
     let pr: PRSnapshot
     let client: GitHubClient
     @Binding var isPresented: Bool
+    /// Settings used to resolve live binding glyphs for the action hints.
+    @ObservedObject var settings: MainlineSettings
     /// Upper bound on the card height (the available popover space). The card sizes
     /// to its CONTENT and only grows to this cap — beyond it the file list scrolls.
     var maxHeight: CGFloat = 560
@@ -131,7 +133,7 @@ struct PRPeekView: View {
                     Image(systemName: "globe").foregroundStyle(Color(nsColor: .systemTeal))
                 }
                 .buttonStyle(.plain)
-                .help("Open Vercel preview (E)")
+                .help("Open Vercel preview (\(MainlineSettings.glyph(for: settings.shortcutBindings.binding(for: .openPreview))))")
                 .accessibilityLabel("Open Vercel preview")
             }
             Button {

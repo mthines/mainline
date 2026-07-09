@@ -487,7 +487,7 @@ struct TriageDeckView: View {
                         if settings.selectedTab == .forMe {
                             ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
                         }
-                        PreviewBadge(pr: pr)
+                        PreviewBadge(pr: pr, settings: settings)
                         FeedbackBadge(pr: pr)
                     }
                 }
@@ -892,17 +892,23 @@ struct TriageDeckView: View {
 
     // MARK: - Keyboard triage
 
-    /// Returns true when the event's character (ignoring modifiers, lowercased)
-    /// matches the user-configured key for the given shortcut.
+    /// Returns true when the event matches the user-configured binding for the
+    /// given shortcut — both the base key (ignoring modifiers) AND the masked
+    /// modifier set must match. A bare binding (empty modifier set) matches
+    /// only when no relevant modifiers are held; a modified binding matches
+    /// only with exactly those modifiers held.
     private func shortcutMatches(_ shortcut: InAppShortcut, event: NSEvent) -> Bool {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        let bound = settings.shortcutBindings.key(for: shortcut)
-        return !bound.isEmpty && chars == bound
+        let binding = settings.shortcutBindings.binding(for: shortcut)
+        guard !binding.key.isEmpty, chars == binding.key else { return false }
+        let mods = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(ShortcutBinding.relevantModifierMask)
+        return mods == binding.modifierFlags
     }
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        let cmd = event.modifierFlags.contains(.command)
 
         // Return opens the selected PR in the browser — regardless of whether the
         // peek card is open (focusedPR stays in sync with the card as you step).
@@ -932,18 +938,24 @@ struct TriageDeckView: View {
             return event
         }
 
-        // Navigation (also accepts arrow keys regardless of binding).
-        if shortcutMatches(.navigateDown, event: event) || (chars == "\u{F701}" && !cmd) {
+        // Navigation (also accepts raw arrow keys).
+        // Arrow-key fallbacks apply only when no relevant modifiers are held
+        // (e.g. ⌘+Arrow must not trigger navigation).
+        let noRelevantMods = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(ShortcutBinding.relevantModifierMask)
+            .isEmpty
+        if shortcutMatches(.navigateDown, event: event) || (chars == "\u{F701}" && noRelevantMods) {
             moveDown()
             return nil
         }
-        if shortcutMatches(.navigateUp, event: event) || (chars == "\u{F700}" && !cmd) {
+        if shortcutMatches(.navigateUp, event: event) || (chars == "\u{F700}" && noRelevantMods) {
             moveUp()
             return nil
         }
 
-        // Peek (glance + files)
-        if shortcutMatches(.peek, event: event) && !cmd {
+        // Peek (glance + files). Modifier check is inside shortcutMatches.
+        if shortcutMatches(.peek, event: event) {
             if let pr = focusedPR {
                 manager.peekPR = pr
                 TelemetryService.shared.recordTriageInteraction("diff_preview")
@@ -951,35 +963,35 @@ struct TriageDeckView: View {
             return nil
         }
 
-        // Undo — configurable key + ⌘ modifier.
-        if shortcutMatches(.undo, event: event) && cmd {
+        // Undo — default ⌘Z; modifier requirement lives in the stored binding.
+        if shortcutMatches(.undo, event: event) {
             undoLast()
             return nil
         }
 
         // Write verb (gated by writeActionsEnabled). Approve and Request Changes
         // remain available via the row context menu only.
-        if shortcutMatches(.merge, event: event) && !cmd {
+        if shortcutMatches(.merge, event: event) {
             if let pr = focusedPR { dispatchVerb(.merge(pr)) }
             return nil
         }
 
         // Refresh the PR list. Works whether or not a row is focused.
-        if shortcutMatches(.refresh, event: event) && !cmd {
+        if shortcutMatches(.refresh, event: event) {
             Task { await manager.triggerSingleRefresh() }
             return nil
         }
 
         // Open the PR's Vercel preview deployment. Silent no-op when no preview
         // was detected for the focused row.
-        if shortcutMatches(.openPreview, event: event) && !cmd {
+        if shortcutMatches(.openPreview, event: event) {
             if let pr = focusedPR { openPreview(pr) }
             return nil
         }
 
         // Quick "Later" — postpone with the user's configured default duration.
         // On an already-postponed row, the same key resumes it.
-        if shortcutMatches(.snooze, event: event) && !cmd {
+        if shortcutMatches(.snooze, event: event) {
             if let pr = focusedPR {
                 if manager.snoozeStore.isSnoozed(pr) {
                     resume(pr)
@@ -991,7 +1003,7 @@ struct TriageDeckView: View {
         }
 
         // Mark seen.
-        if shortcutMatches(.markSeen, event: event) && !cmd {
+        if shortcutMatches(.markSeen, event: event) {
             if let pr = focusedPR {
                 Task { await manager.performAction(.markSeen(pr)) }
                 pushUndo(label: "Marked seen: \(pr.title)", pr: pr) {}
@@ -1000,7 +1012,7 @@ struct TriageDeckView: View {
         }
 
         // Dismiss.
-        if shortcutMatches(.dismiss, event: event) && !cmd {
+        if shortcutMatches(.dismiss, event: event) {
             if let pr = focusedPR {
                 Task { await manager.performAction(.dismiss(pr)) }
                 pushUndo(label: "Dismissed \(pr.title)", pr: pr) {}
@@ -1009,13 +1021,13 @@ struct TriageDeckView: View {
         }
 
         // Multi-select toggle.
-        if shortcutMatches(.multiSelectToggle, event: event) && !cmd {
+        if shortcutMatches(.multiSelectToggle, event: event) {
             multiSelectMode.toggle()
             return nil
         }
 
         // Toggle draft visibility.
-        if shortcutMatches(.toggleDrafts, event: event) && !cmd {
+        if shortcutMatches(.toggleDrafts, event: event) {
             settings.showDrafts.toggle()
             TelemetryService.shared.recordTriageInteraction("toggle_drafts")
             return nil
@@ -1382,17 +1394,21 @@ struct FeedbackBadge: View {
 
 /// Compact indicator shown on the repo/#number metadata line when a Vercel
 /// preview deployment was detected for the PR. Cyan globe + "Preview" label,
-/// styled like the other row badges. Its presence is the affordance for the `E`
-/// verb ("press E to open the preview"); hidden entirely when no preview exists.
+/// styled like the other row badges. Its presence is the affordance for the
+/// open-preview verb; the tooltip renders the live binding glyph so it stays
+/// accurate when the user rebinds the shortcut. Hidden entirely when no preview
+/// exists.
 struct PreviewBadge: View {
     let pr: PRSnapshot
+    @ObservedObject var settings: MainlineSettings
 
     var body: some View {
         if pr.vercelPreviewUrl != nil {
+            let glyph = MainlineSettings.glyph(for: settings.shortcutBindings.binding(for: .openPreview))
             Image(systemName: "globe")
                 .font(.caption2)
                 .foregroundStyle(Color(nsColor: .systemTeal))
-                .help("Vercel preview available — press E to open")
+                .help("Vercel preview available — press \(glyph) to open")
                 .accessibilityLabel("Preview deployment available")
         }
     }
