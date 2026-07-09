@@ -111,7 +111,11 @@ struct PRPeekView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(pr.title)
                     .font(.headline)
-                    .lineLimit(2)
+                    // Always reserve two lines so a one-line title and a wrapping
+                    // two-line title occupy the same height — otherwise the header
+                    // (and everything below it) shifts a line as you step through
+                    // PRs with J/K.
+                    .lineLimit(2, reservesSpace: true)
                 Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
