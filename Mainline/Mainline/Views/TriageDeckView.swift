@@ -174,20 +174,20 @@ struct LeadingColumn<Icon: View>: View {
 /// single-key verb dispatch, multi-select, PR peek, a per-row context
 /// menu (right-click), and the undo toast stack.
 ///
-/// Key bindings:
-///   J / ↓  — next PR
-///   K / ↑  — previous PR
-///   Space  — peek: glance card + files (PRPeekView)
+/// Key bindings (user-configurable in Settings → Keyboard):
+///   J / ↓  — next PR (default: j)
+///   K / ↑  — previous PR (default: k)
+///   Space  — peek: glance card + files (PRPeekView) (default: space)
 ///   ↵      — open selected PR in browser (works while peek is open too)
-///   A      — approve (write-gated)
-///   M      — merge (write-gated)
-///   R      — request changes (write-gated)
-///   S      — postpone (uses the default duration set in Settings)
-///   E      — mark seen
-///   X      — dismiss
-///   V      — toggle multi-select mode
-///   D      — toggle draft visibility
-///   ⌘Z     — undo last action
+///   M      — merge (write-gated) (default: m)
+///   R      — refresh (default: r)
+///   E      — open preview (default: e; was p)
+///   S      — postpone (uses the default duration set in Settings) (default: s)
+///   N      — mark seen (default: n; was e)
+///   X      — dismiss (default: x)
+///   V      — toggle multi-select mode (default: v)
+///   D      — toggle draft visibility (default: d)
+///   ⌘Z     — undo last action (default: z with ⌘)
 ///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
     let prs: [PRSnapshot]
@@ -892,6 +892,14 @@ struct TriageDeckView: View {
 
     // MARK: - Keyboard triage
 
+    /// Returns true when the event's character (ignoring modifiers, lowercased)
+    /// matches the user-configured key for the given shortcut.
+    private func shortcutMatches(_ shortcut: InAppShortcut, event: NSEvent) -> Bool {
+        let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        let bound = settings.shortcutBindings.key(for: shortcut)
+        return !bound.isEmpty && chars == bound
+    }
+
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let cmd = event.modifierFlags.contains(.command)
@@ -907,70 +915,71 @@ struct TriageDeckView: View {
         // the card in place; Space (the key that opened it) or Esc closes it. Other
         // keys are swallowed so deck verbs don't fire behind the card.
         if showPeek {
-            switch (chars, cmd) {
-            case ("j", false), ("\u{F701}", false):   // j or ↓
+            if shortcutMatches(.navigateDown, event: event) || chars == "\u{F701}" {
                 moveDown(); manager.peekPR = focusedPR; return nil
-            case ("k", false), ("\u{F700}", false):   // k or ↑
+            }
+            if shortcutMatches(.navigateUp, event: event) || chars == "\u{F700}" {
                 moveUp(); manager.peekPR = focusedPR; return nil
-            case (" ", false):                         // Space closes
+            }
+            if shortcutMatches(.peek, event: event) {   // configured peek key closes peek
                 manager.peekPR = nil; return nil
-            case ("p", false):                         // P opens the preview (if any)
+            }
+            if shortcutMatches(.openPreview, event: event) {
                 if let pr = focusedPR { openPreview(pr) }
                 return nil
-            default:
-                if event.keyCode == 53 { manager.peekPR = nil; return nil }   // Esc
-                return event
             }
+            if event.keyCode == 53 { manager.peekPR = nil; return nil }   // Esc
+            return event
         }
 
-        switch (chars, cmd) {
-        // Navigation
-        case ("j", false), ("\u{F701}", false):  // j or ↓
+        // Navigation (also accepts arrow keys regardless of binding).
+        if shortcutMatches(.navigateDown, event: event) || (chars == "\u{F701}" && !cmd) {
             moveDown()
             return nil
-        case ("k", false), ("\u{F700}", false):  // k or ↑
+        }
+        if shortcutMatches(.navigateUp, event: event) || (chars == "\u{F700}" && !cmd) {
             moveUp()
             return nil
+        }
 
         // Peek (glance + files)
-        case (" ", false):
+        if shortcutMatches(.peek, event: event) && !cmd {
             if let pr = focusedPR {
                 manager.peekPR = pr
                 TelemetryService.shared.recordTriageInteraction("diff_preview")
             }
             return nil
+        }
 
-        // Undo
-        case ("z", true):
+        // Undo — configurable key + ⌘ modifier.
+        if shortcutMatches(.undo, event: event) && cmd {
             undoLast()
             return nil
+        }
 
-        // Write verb (gated by writeActionsEnabled). Approve (A) and Request
-        // Changes (R) are intentionally NOT bound here — you review a PR on GitHub,
-        // not from the menu bar. R is repurposed to Refresh (below); Approve /
-        // Request Changes remain available via the row context menu.
-        case ("m", false):
+        // Write verb (gated by writeActionsEnabled). Approve and Request Changes
+        // remain available via the row context menu only.
+        if shortcutMatches(.merge, event: event) && !cmd {
             if let pr = focusedPR { dispatchVerb(.merge(pr)) }
             return nil
+        }
 
-        // Refresh the PR list (same as the footer Refresh button). Works whether or
-        // not a row is focused.
-        case ("r", false):
+        // Refresh the PR list. Works whether or not a row is focused.
+        if shortcutMatches(.refresh, event: event) && !cmd {
             Task { await manager.triggerSingleRefresh() }
             return nil
+        }
 
-        // Open the PR's Vercel preview deployment in the browser. Silent no-op when
-        // no preview was detected for the focused row.
-        case ("p", false):
+        // Open the PR's Vercel preview deployment. Silent no-op when no preview
+        // was detected for the focused row.
+        if shortcutMatches(.openPreview, event: event) && !cmd {
             if let pr = focusedPR { openPreview(pr) }
             return nil
+        }
 
-        // Non-write verbs
-        case ("s", false):
-            // Quick "Later" — postpone with the user's configured default duration
-            // (Settings → Appearance → Triage). On an already-postponed row, S
-            // instead RESUMES it (removes the postpone). The clock button + row
-            // context menu still expose the full duration menu.
+        // Quick "Later" — postpone with the user's configured default duration.
+        // On an already-postponed row, the same key resumes it.
+        if shortcutMatches(.snooze, event: event) && !cmd {
             if let pr = focusedPR {
                 if manager.snoozeStore.isSnoozed(pr) {
                     resume(pr)
@@ -979,33 +988,40 @@ struct TriageDeckView: View {
                 }
             }
             return nil
-        case ("e", false):
+        }
+
+        // Mark seen.
+        if shortcutMatches(.markSeen, event: event) && !cmd {
             if let pr = focusedPR {
                 Task { await manager.performAction(.markSeen(pr)) }
                 pushUndo(label: "Marked seen: \(pr.title)", pr: pr) {}
             }
             return nil
-        case ("x", false):
+        }
+
+        // Dismiss.
+        if shortcutMatches(.dismiss, event: event) && !cmd {
             if let pr = focusedPR {
                 Task { await manager.performAction(.dismiss(pr)) }
                 pushUndo(label: "Dismissed \(pr.title)", pr: pr) {}
             }
             return nil
+        }
 
-        // Multi-select toggle
-        case ("v", false):
+        // Multi-select toggle.
+        if shortcutMatches(.multiSelectToggle, event: event) && !cmd {
             multiSelectMode.toggle()
             return nil
+        }
 
-        // Toggle draft visibility
-        case ("d", false):
+        // Toggle draft visibility.
+        if shortcutMatches(.toggleDrafts, event: event) && !cmd {
             settings.showDrafts.toggle()
             TelemetryService.shared.recordTriageInteraction("toggle_drafts")
             return nil
-
-        default:
-            return event
         }
+
+        return event
     }
 
     private func moveDown() {
@@ -1366,8 +1382,8 @@ struct FeedbackBadge: View {
 
 /// Compact indicator shown on the repo/#number metadata line when a Vercel
 /// preview deployment was detected for the PR. Cyan globe + "Preview" label,
-/// styled like the other row badges. Its presence is the affordance for the `P`
-/// verb ("press P to open the preview"); hidden entirely when no preview exists.
+/// styled like the other row badges. Its presence is the affordance for the `E`
+/// verb ("press E to open the preview"); hidden entirely when no preview exists.
 struct PreviewBadge: View {
     let pr: PRSnapshot
 
@@ -1376,7 +1392,7 @@ struct PreviewBadge: View {
             Image(systemName: "globe")
                 .font(.caption2)
                 .foregroundStyle(Color(nsColor: .systemTeal))
-                .help("Vercel preview available — press P to open")
+                .help("Vercel preview available — press E to open")
                 .accessibilityLabel("Preview deployment available")
         }
     }

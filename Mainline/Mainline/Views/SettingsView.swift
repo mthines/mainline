@@ -11,6 +11,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
     case notifications
     case menuBar
     case appearance
+    case keyboard
     case privacy
 
     var id: String { rawValue }
@@ -21,6 +22,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .notifications: return "Notifications"
         case .menuBar:       return "Menu Bar"
         case .appearance:    return "Appearance"
+        case .keyboard:      return "Keyboard"
         case .privacy:       return "Privacy"
         }
     }
@@ -31,6 +33,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .notifications: return "bell.fill"
         case .menuBar:       return "menubar.rectangle"
         case .appearance:    return "slider.horizontal.3"
+        case .keyboard:      return "keyboard"
         case .privacy:       return "hand.raised.fill"
         }
     }
@@ -110,6 +113,7 @@ struct SettingsView: View {
                 case .notifications: notificationsSection
                 case .menuBar:       menuBarSection
                 case .appearance:    appearanceSection
+                case .keyboard:      keyboardSection
                 case .privacy:       privacySection
                 }
             }
@@ -391,6 +395,13 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    // MARK: - Keyboard
+
+    @ViewBuilder
+    private var keyboardSection: some View {
+        KeyboardShortcutsView(settings: settings)
     }
 
     // MARK: - Privacy

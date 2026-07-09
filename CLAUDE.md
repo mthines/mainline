@@ -35,7 +35,7 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
 │   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); .defaults
-│   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults
+│   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `InAppShortcutBindings` Codable struct for configurable deck/peek shortcuts
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor)
 │   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files
@@ -52,9 +52,10 @@ Mainline/Mainline/                     ← Source root
 │   └── TelemetryService.swift   ← Opt-in OTel singleton (no-op when disabled)
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView
-    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height
+    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.keyboard` SettingsCategory routing to KeyboardShortcutsView
+    ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
-    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/P/M/R/S/E/X/V/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView
+    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/E/M/R/S/N/X/V/D/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView; deck keys are user-configurable via settings.shortcutBindings
     ├── PRPeekView.swift          ← Space peek: instant glance card + async files list
     ├── UndoToastView.swift       ← Batched undo toast stack
     ├── TelemetryOptInBanner.swift← Dismissable Privacy-pane opt-in banner (consent-versioned)
@@ -93,11 +94,13 @@ Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActi
 ### Keyboard events in MenuBarExtra
 `.onKeyPress` requires macOS 14+ (deployment target is 13). A local `NSEvent` monitor only fires while the app is *active*, and clicking the menu bar icon does NOT activate an accessory app — so key nav silently died on click-open. Instead `TriageDeckView` embeds a zero-size first-responder `NSView` (`KeyCaptureView`) that overrides `keyDown`: it receives keys whenever the popover window is key, independent of app-active state. It also handles Esc-to-close (the first responder otherwise swallows the popover's built-in Esc dismissal).
 
+All 12 in-popover deck/peek action keys are now **user-configurable** via Settings → Keyboard (`KeyboardShortcutsView`). `handleKeyDown` reads bindings from `settings.shortcutBindings` at runtime via `shortcutMatches(_:event:)` — never hardcoded literals. Default bindings: E=preview (was P), N=markSeen (was E), J/K/Space/M/R/S/X/V/D/⌘Z unchanged. In-app shortcuts are single-character, modifier-free. The `InAppShortcutRecorder` in `KeyboardShortcutsView` uses the same `NSEvent.addLocalMonitorForEvents` pattern as `ShortcutRecorder` but without the modifier guard.
+
 ### Global shortcut
 System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `GlobalHotKey`. Stored as `globalShortcutKeyCode` + `globalShortcutModifiers` (Cocoa `NSEvent.ModifierFlags` raw value; converted to a Carbon mask by `GlobalHotKey.carbonModifiers(from:)`). `AppDelegate.setUpGlobalHotKey()` subscribes to the three `MainlineSettings` published props so the recorder, toggle, and reset button all live re-register. Default: **⇧⌃ + ISO section key** (`kVK_ISO_Section` = 0x0A; the "$" key on a Danish layout) — see `defaultShortcutKeyCode`/`defaultShortcutModifiers`. `keyGlyph(for:)` renders the key label, falling back to `UCKeyTranslate` against the active keyboard layout for non-ANSI physical keys.
 
 ### Vercel preview detection
-Each PR can carry a `vercelPreviewUrl` extracted from its `vercel[bot]` issue comment (REST `GitHubClient.fetchVercelPreviewURL`, pure `extractPreviewURL(from:domains:)`). The row shows a `PreviewBadge` when present, and `P` (deck or peek) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition). Match domains (priority order) and the on/off toggle are `MainlineSettings.vercelPreviewDomains` / `vercelPreviewEnabled`.
+Each PR can carry a `vercelPreviewUrl` extracted from its `vercel[bot]` issue comment (REST `GitHubClient.fetchVercelPreviewURL`, pure `extractPreviewURL(from:domains:)`). The row shows a `PreviewBadge` when present, and `E` (deck or peek, default binding — user-configurable) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition). Match domains (priority order) and the on/off toggle are `MainlineSettings.vercelPreviewDomains` / `vercelPreviewEnabled`.
 
 ## Keychain Details
 
@@ -133,6 +136,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `vercelPreviewEnabled` | Bool | true |
 | `vercelPreviewDomains` | [String] | `["dash0-preview.com","vercel.app"]` |
 | `telemetryEnabled` | Bool | false |
+| `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` (E=preview, N=markSeen, J/K/Space/M/R/S/X/V/D/⌘Z) |
 
 ## Bundle ID
 

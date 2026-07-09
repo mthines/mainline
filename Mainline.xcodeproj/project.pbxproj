@@ -30,6 +30,7 @@
 		PC0000000000000000000019 /* UndoToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001C /* UndoToastView.swift */; };
 		PC000000000000000000001B /* AttentionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001E /* AttentionPolicy.swift */; };
 		PC000000000000000000001C /* ScopeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001F /* ScopeStore.swift */; };
+		PC000000000000000000001D /* KeyboardShortcutsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000020 /* KeyboardShortcutsView.swift */; };
 		PC0000000000000000000099 /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000099 /* GlobalHotKey.swift */; };
 		/* OTel framework linkage */
 		OT00000000000000000000C1 /* OpenTelemetryApi in Frameworks */ = {isa = PBXBuildFile; productRef = OT00000000000000000000D1 /* OpenTelemetryApi */; };
@@ -68,6 +69,7 @@
 		PF000000000000000000001C /* UndoToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoToastView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001E /* AttentionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionPolicy.swift; sourceTree = "<group>"; };
 		PF000000000000000000001F /* ScopeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopeStore.swift; sourceTree = "<group>"; };
+		PF0000000000000000000020 /* KeyboardShortcutsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutsView.swift; sourceTree = "<group>"; };
 		PF0000000000000000000099 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
 		/* OTel source file references */
 		OT00000000000000000000A1 /* TelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryService.swift; sourceTree = "<group>"; };
@@ -151,6 +153,7 @@
 				PF0000000000000000000019 /* TriageDeckView.swift */,
 				PF000000000000000000001A /* PRPeekView.swift */,
 				PF000000000000000000001C /* UndoToastView.swift */,
+				PF0000000000000000000020 /* KeyboardShortcutsView.swift */,
 				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
 				OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */,
 			);
@@ -268,6 +271,7 @@
 				PC0000000000000000000019 /* UndoToastView.swift in Sources */,
 				PC000000000000000000001B /* AttentionPolicy.swift in Sources */,
 				PC000000000000000000001C /* ScopeStore.swift in Sources */,
+				PC000000000000000000001D /* KeyboardShortcutsView.swift in Sources */,
 				PC0000000000000000000099 /* GlobalHotKey.swift in Sources */,
 				OT00000000000000000000B1 /* TelemetryService.swift in Sources */,
 				OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */,

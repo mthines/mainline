@@ -46,6 +46,155 @@ enum ForMeReviewFilter: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - InAppShortcut
+
+/// All configurable in-popover keyboard shortcuts. Each case maps to one deck
+/// action. The default key assignments are baked into `InAppShortcutBindings`.
+enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
+    case navigateDown
+    case navigateUp
+    case peek
+    case merge
+    case refresh
+    case openPreview
+    case snooze
+    case markSeen
+    case dismiss
+    case multiSelectToggle
+    case toggleDrafts
+    case undo
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .navigateDown:     return "Navigate Down"
+        case .navigateUp:       return "Navigate Up"
+        case .peek:             return "Peek (Space)"
+        case .merge:            return "Merge PR"
+        case .refresh:          return "Refresh"
+        case .openPreview:      return "Open Preview"
+        case .snooze:           return "Postpone"
+        case .markSeen:         return "Mark Seen"
+        case .dismiss:          return "Dismiss"
+        case .multiSelectToggle: return "Toggle Multi-Select"
+        case .toggleDrafts:     return "Toggle Drafts"
+        case .undo:             return "Undo (⌘+key)"
+        }
+    }
+
+    var defaultKey: String {
+        switch self {
+        case .navigateDown:     return "j"
+        case .navigateUp:       return "k"
+        case .peek:             return " "
+        case .merge:            return "m"
+        case .refresh:          return "r"
+        case .openPreview:      return "e"   // NEW default (was "p")
+        case .snooze:           return "s"
+        case .markSeen:         return "n"   // NEW default (was "e")
+        case .dismiss:          return "x"
+        case .multiSelectToggle: return "v"
+        case .toggleDrafts:     return "d"
+        case .undo:             return "z"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .navigateDown:     return "arrow.down"
+        case .navigateUp:       return "arrow.up"
+        case .peek:             return "rectangle.stack"
+        case .merge:            return "arrow.triangle.merge"
+        case .refresh:          return "arrow.clockwise"
+        case .openPreview:      return "globe"
+        case .snooze:           return "clock"
+        case .markSeen:         return "eye"
+        case .dismiss:          return "xmark"
+        case .multiSelectToggle: return "checkmark.circle"
+        case .toggleDrafts:     return "pencil.circle"
+        case .undo:             return "arrow.uturn.backward"
+        }
+    }
+}
+
+// MARK: - InAppShortcutBindings
+
+/// Codable struct holding one String key per configurable in-app shortcut.
+/// Defaults match the factory key assignments. Persisted as JSON in UserDefaults.
+struct InAppShortcutBindings: Codable, Equatable {
+    var navigateDown: String = "j"
+    var navigateUp: String = "k"
+    var peek: String = " "
+    var merge: String = "m"
+    var refresh: String = "r"
+    var openPreview: String = "e"   // NEW default (was "p")
+    var snooze: String = "s"
+    var markSeen: String = "n"      // NEW default (was "e")
+    var dismiss: String = "x"
+    var multiSelectToggle: String = "v"
+    var toggleDrafts: String = "d"
+    var undo: String = "z"
+
+    /// Factory defaults (all fields at their `defaultKey` values).
+    static let defaults = InAppShortcutBindings()
+
+    /// Returns the bound key for a given shortcut.
+    func key(for shortcut: InAppShortcut) -> String {
+        switch shortcut {
+        case .navigateDown:     return navigateDown
+        case .navigateUp:       return navigateUp
+        case .peek:             return peek
+        case .merge:            return merge
+        case .refresh:          return refresh
+        case .openPreview:      return openPreview
+        case .snooze:           return snooze
+        case .markSeen:         return markSeen
+        case .dismiss:          return dismiss
+        case .multiSelectToggle: return multiSelectToggle
+        case .toggleDrafts:     return toggleDrafts
+        case .undo:             return undo
+        }
+    }
+
+    /// Mutates the binding for a given shortcut to the new key.
+    mutating func setKey(_ key: String, for shortcut: InAppShortcut) {
+        switch shortcut {
+        case .navigateDown:     navigateDown = key
+        case .navigateUp:       navigateUp = key
+        case .peek:             peek = key
+        case .merge:            merge = key
+        case .refresh:          refresh = key
+        case .openPreview:      openPreview = key
+        case .snooze:           snooze = key
+        case .markSeen:         markSeen = key
+        case .dismiss:          dismiss = key
+        case .multiSelectToggle: multiSelectToggle = key
+        case .toggleDrafts:     toggleDrafts = key
+        case .undo:             undo = key
+        }
+    }
+
+    /// Returns pairs of shortcuts that share the same non-empty key (i.e. clash).
+    /// Each element in the returned set is a pair {a, b} where a.key == b.key.
+    var clashingShortcuts: Set<InAppShortcut> {
+        var keyToShortcuts: [String: [InAppShortcut]] = [:]
+        for shortcut in InAppShortcut.allCases {
+            let k = key(for: shortcut)
+            guard !k.isEmpty else { continue }
+            keyToShortcuts[k, default: []].append(shortcut)
+        }
+        var clashing = Set<InAppShortcut>()
+        for (_, shortcuts) in keyToShortcuts where shortcuts.count > 1 {
+            shortcuts.forEach { clashing.insert($0) }
+        }
+        return clashing
+    }
+
+    /// True when no two shortcuts share the same non-empty key.
+    var isValid: Bool { clashingShortcuts.isEmpty }
+}
+
 // MARK: - MergeMethodPreference
 
 /// The user's preferred merge method for in-app merges. `.auto` (default) picks
@@ -119,6 +268,8 @@ final class MainlineSettings: ObservableObject {
         static let telemetryInstallationId          = "telemetryInstallationId"
         static let telemetryBannerDismissedVersion  = "telemetryBannerDismissedVersion"
         static let telemetryLastLaunchedVersion     = "telemetryLastLaunchedVersion"
+        // In-app keyboard shortcut bindings
+        static let shortcutBindings                 = "shortcutBindings"
     }
 
     // MARK: - Global shortcut defaults
@@ -512,6 +663,19 @@ final class MainlineSettings: ObservableObject {
         0x29: ";", 0x27: "'", 0x2B: ",", 0x2F: ".", 0x2C: "/", 0x32: "`"
     ]
 
+    // MARK: - In-app keyboard shortcuts
+
+    /// Per-action key bindings for in-popover keyboard shortcuts. Persisted as
+    /// JSON data in UserDefaults. Defaults to `InAppShortcutBindings.defaults`
+    /// when no stored value is present.
+    @Published var shortcutBindings: InAppShortcutBindings {
+        didSet {
+            if let data = try? JSONEncoder().encode(shortcutBindings) {
+                defaults.set(data, forKey: Keys.shortcutBindings)
+            }
+        }
+    }
+
     /// Snooze map: PR nodeId → wake time. Serialized as JSON data in UserDefaults.
     @Published var snoozeMap: [String: Date] {
         didSet {
@@ -649,6 +813,14 @@ final class MainlineSettings: ObservableObject {
 
         // Telemetry consent — default OFF (opt-in)
         telemetryEnabled = defaults.bool(forKey: Keys.telemetryEnabled)
+
+        // In-app shortcut bindings — decode from JSON data; default factory bindings
+        if let data = defaults.data(forKey: Keys.shortcutBindings),
+           let decoded = try? JSONDecoder().decode(InAppShortcutBindings.self, from: data) {
+            shortcutBindings = decoded
+        } else {
+            shortcutBindings = .defaults
+        }
 
         // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {
