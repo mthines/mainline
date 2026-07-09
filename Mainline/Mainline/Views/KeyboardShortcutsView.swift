@@ -31,9 +31,9 @@ struct KeyboardShortcutsView: View {
             Text(shortcut.displayName)
             Spacer()
             InAppShortcutRecorder(
-                key: Binding(
-                    get: { draft.key(for: shortcut) },
-                    set: { newKey in draft.setKey(newKey, for: shortcut) }
+                binding: Binding(
+                    get: { draft.binding(for: shortcut) },
+                    set: { newBinding in draft.setBinding(newBinding, for: shortcut) }
                 ),
                 isClashing: isClashing
             )
@@ -47,7 +47,7 @@ struct KeyboardShortcutsView: View {
 
     var body: some View {
         Section("In-App Shortcuts") {
-            Text("Customize the keyboard shortcuts used inside the Mainline popover. Single-character bindings; no modifier keys required.")
+            Text("Customize the keyboard shortcuts used inside the Mainline popover. Each binding can be a bare key or include modifiers (⌘ ⇧ ⌃ ⌥).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -85,11 +85,14 @@ struct KeyboardShortcutsView: View {
 
 // MARK: - InAppShortcutRecorder
 
-/// A button that captures the next single-character key press and stores it as
-/// the new binding. Escape cancels without changing the binding. No modifier
-/// requirement — in-app shortcuts are modifier-free single characters.
+/// A button that captures the next key press (single character plus any
+/// combination of ⌘⇧⌃⌥ modifiers) and stores it as the new binding. Bare
+/// keys (no modifiers) and modified keys (e.g. ⌘Z) are both accepted.
+/// Escape cancels without changing the binding. Mirrors the global-hotkey
+/// recorder in SettingsView, but does NOT require a non-empty modifier set —
+/// bare keys are valid for in-app shortcuts.
 struct InAppShortcutRecorder: View {
-    @Binding var key: String
+    @Binding var binding: ShortcutBinding
     var isClashing: Bool = false
 
     @State private var isRecording = false
@@ -97,9 +100,7 @@ struct InAppShortcutRecorder: View {
 
     private var displayLabel: String {
         if isRecording { return "Press a key…" }
-        if key.isEmpty { return "—" }
-        if key == " " { return "Space" }
-        return key.uppercased()
+        return MainlineSettings.glyph(for: binding)
     }
 
     var body: some View {
@@ -110,7 +111,7 @@ struct InAppShortcutRecorder: View {
         }
         .buttonStyle(.bordered)
         .tint(isRecording ? .accentColor : (isClashing ? .red : nil))
-        .help(isRecording ? "Press a key, or Escape to cancel" : "Click to record a new shortcut")
+        .help(isRecording ? "Press a key (with optional ⌘⇧⌃⌥), or Escape to cancel" : "Click to record a new shortcut")
         .onDisappear(perform: stopRecording)
     }
 
@@ -149,7 +150,13 @@ struct InAppShortcutRecorder: View {
         let chars = event.charactersIgnoringModifiers ?? ""
         guard chars.count == 1 else { return }
 
-        key = chars.lowercased()
+        // Capture modifiers (masked to relevant set — ⌘⇧⌃⌥ only), mirroring the
+        // global-hotkey recorder in SettingsView.swift.
+        let mods = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(ShortcutBinding.relevantModifierMask)
+
+        binding = ShortcutBinding(key: chars.lowercased(), modifiers: mods.rawValue)
         stopRecording()
     }
 }

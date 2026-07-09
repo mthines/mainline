@@ -139,6 +139,7 @@ struct MenuBarView: View {
                             get: { manager.peekPR != nil },
                             set: { if !$0 { manager.peekPR = nil } }
                         ),
+                        settings: settings,
                         // Cap only — the card sizes to its content and grows to at
                         // most this, so short PRs render a compact card instead of
                         // filling the panel.

@@ -35,7 +35,7 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
 │   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); .defaults
-│   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `InAppShortcutBindings` Codable struct for configurable deck/peek shortcuts
+│   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding)
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor)
 │   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files
@@ -94,7 +94,7 @@ Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActi
 ### Keyboard events in MenuBarExtra
 `.onKeyPress` requires macOS 14+ (deployment target is 13). A local `NSEvent` monitor only fires while the app is *active*, and clicking the menu bar icon does NOT activate an accessory app — so key nav silently died on click-open. Instead `TriageDeckView` embeds a zero-size first-responder `NSView` (`KeyCaptureView`) that overrides `keyDown`: it receives keys whenever the popover window is key, independent of app-active state. It also handles Esc-to-close (the first responder otherwise swallows the popover's built-in Esc dismissal).
 
-All 12 in-popover deck/peek action keys are now **user-configurable** via Settings → Keyboard (`KeyboardShortcutsView`). `handleKeyDown` reads bindings from `settings.shortcutBindings` at runtime via `shortcutMatches(_:event:)` — never hardcoded literals. Default bindings: E=preview (was P), N=markSeen (was E), J/K/Space/M/R/S/X/V/D/⌘Z unchanged. In-app shortcuts are single-character, modifier-free. The `InAppShortcutRecorder` in `KeyboardShortcutsView` uses the same `NSEvent.addLocalMonitorForEvents` pattern as `ShortcutRecorder` but without the modifier guard.
+All 12 in-popover deck/peek action keys are **user-configurable** via Settings → Keyboard (`KeyboardShortcutsView`). Each binding stores a base key AND a modifier set (⌘⇧⌃⌥) as a `ShortcutBinding { key: String, modifiers: UInt }` value type — `modifiers` mirrors the global-hotkey's `NSEvent.ModifierFlags.rawValue` storage. `handleKeyDown` reads bindings from `settings.shortcutBindings` at runtime via `shortcutMatches(_:event:)`, which compares BOTH the base key (from `charactersIgnoringModifiers`) AND the masked modifier flags — never hardcoded literals. Default bindings: E=preview, N=markSeen, J/K/Space/M/R/S/X/V/D bare; **undo=⌘Z** (⌘ stored in the binding, not a hardcoded branch). The `InAppShortcutRecorder` captures modifiers alongside the key (mirroring `ShortcutRecorder` but without the non-empty-modifier guard, since bare keys are valid in-app). Persisted as JSON in UserDefaults (`shortcutBindings`); the custom `Codable` decodes BOTH the new `ShortcutBinding` object shape and the v1.25.0 legacy bare-string shape. Migration rule: a v1.25.0 `undo` bare string gets `.command` applied so ⌘Z is preserved on upgrade; all other bare-string fields decode with empty modifiers.
 
 ### Global shortcut
 System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `GlobalHotKey`. Stored as `globalShortcutKeyCode` + `globalShortcutModifiers` (Cocoa `NSEvent.ModifierFlags` raw value; converted to a Carbon mask by `GlobalHotKey.carbonModifiers(from:)`). `AppDelegate.setUpGlobalHotKey()` subscribes to the three `MainlineSettings` published props so the recorder, toggle, and reset button all live re-register. Default: **⇧⌃ + ISO section key** (`kVK_ISO_Section` = 0x0A; the "$" key on a Danish layout) — see `defaultShortcutKeyCode`/`defaultShortcutModifiers`. `keyGlyph(for:)` renders the key label, falling back to `UCKeyTranslate` against the active keyboard layout for non-ANSI physical keys.
@@ -136,7 +136,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `vercelPreviewEnabled` | Bool | true |
 | `vercelPreviewDomains` | [String] | `["dash0-preview.com","vercel.app"]` |
 | `telemetryEnabled` | Bool | false |
-| `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` (E=preview, N=markSeen, J/K/Space/M/R/S/X/V/D/⌘Z) |
+| `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` — 12 `ShortcutBinding { key, modifiers }` entries; all bare except undo=⌘Z (`modifiers = NSEvent.ModifierFlags.command.rawValue`). Decoded with custom `Codable` that handles both the new object shape and the v1.25.0 legacy bare-string shape; undo bare-string → `.command` migration preserves ⌘Z for existing users. |
 
 ## Bundle ID
 
