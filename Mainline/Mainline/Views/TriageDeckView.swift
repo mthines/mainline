@@ -1373,19 +1373,11 @@ struct PreviewBadge: View {
 
     var body: some View {
         if pr.vercelPreviewUrl != nil {
-            HStack(spacing: 2) {
-                Image(systemName: "globe")
-                    .font(.caption2)
-                Text("Preview")
-                    .font(.caption2)
-            }
-            .lineLimit(1)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(Color(nsColor: .systemTeal).opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
-            .foregroundStyle(Color(nsColor: .systemTeal))
-            .help("Vercel preview available — press P to open")
-            .accessibilityLabel("Preview deployment available")
+            Image(systemName: "globe")
+                .font(.caption2)
+                .foregroundStyle(Color(nsColor: .systemTeal))
+                .help("Vercel preview available — press P to open")
+                .accessibilityLabel("Preview deployment available")
         }
     }
 }
