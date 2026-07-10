@@ -13,57 +13,61 @@ import SwiftUI
 ///  - Inbox mute rules — `InboxMuteEngine.muteVerdict(...)`
 ///    (Muted / low-priority).
 ///
-/// If that logic changes, update the copy here so the FAQ stays honest.
+/// Keep the copy short and correlated to what the user actually sees in the
+/// deck. If the logic changes, update the copy here so the FAQ stays honest.
 struct HelpSettingsView: View {
     var body: some View {
         Section {
-            Text("Every open PR is sorted into exactly one section, based on the first rule below that matches. This is how Mainline decides what needs you now versus what can wait.")
+            Text("Every open PR lands in exactly one section — the first one below that fits. That's how the deck decides what needs you now versus what can wait.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
 
-        Section("How PRs are grouped") {
+        Section("The sections you see") {
             FAQItem(
                 icon: "exclamationmark.triangle.fill",
                 tint: .orange,
                 title: "Needs attention",
-                blurb: "The PR is blocked and there's something you can act on. A PR lands here if any of these are true:",
+                blurb: "The ball is in your court. Lands here if any of:",
                 bullets: [
-                    "CI is failing or errored",
-                    "A reviewer requested changes",
-                    "There are unresolved review threads (open conversations)"
-                ]
+                    "CI is red (failing)",
+                    "Someone requested changes",
+                    "There are open review comments to resolve"
+                ],
+                youSee: "The top group. Look for the red \"changes\" badge or a 💬 comment count."
             )
 
             FAQItem(
                 icon: "checkmark.circle.fill",
                 tint: .green,
                 title: "Ready to merge",
-                blurb: "Everything is clear — the only thing left is to merge. This requires all three at once:",
+                blurb: "Nothing left but the merge button. Needs all three:",
                 bullets: [
-                    "The PR is approved",
-                    "GitHub reports it mergeable (no conflicts)",
-                    "CI has passed"
-                ]
+                    "Approved",
+                    "No conflicts (mergeable)",
+                    "CI is green"
+                ],
+                youSee: "Only appears once a PR is fully cleared. Hit M to merge."
             )
 
             FAQItem(
                 icon: "clock.fill",
                 tint: .secondary,
                 title: "Waiting",
-                blurb: "Everything else that's open. The PR isn't blocked on you, but it isn't fully clear to merge either — it's waiting on someone or something else. Typically:",
+                blurb: "Not on you — waiting on someone or something else:",
                 bullets: [
-                    "CI is still running",
-                    "It hasn't been approved yet",
-                    "It's approved but not yet mergeable"
-                ]
+                    "CI still running",
+                    "Not approved yet",
+                    "Approved but not mergeable yet"
+                ],
+                youSee: "Most PRs live here. A green ✓ shows CI passed — but it's still waiting on a review."
             )
         }
 
-        Section("A common surprise") {
+        Section("The gotcha") {
             Label(
-                "A green CI check by itself does NOT mean \"Ready to merge.\" A PR with passing CI still sits in Waiting until it's also approved AND mergeable. Approval + mergeable + green CI together are what promote it.",
+                "A green ✓ alone is NOT \"Ready to merge.\" A PR with passing CI stays in Waiting until it's also approved and conflict-free. All three together promote it.",
                 systemImage: "lightbulb.fill"
             )
             .font(.callout)
@@ -71,28 +75,25 @@ struct HelpSettingsView: View {
             .fixedSize(horizontal: false, vertical: true)
         }
 
-        Section("Drafts") {
-            Label(
-                "Draft PRs are shown in their own \"Draft\" section when \"split drafts\" is enabled. Otherwise a draft mixes into whichever group its signals imply, marked with a Draft badge and dimmed.",
-                systemImage: "pencil.and.outline"
+        Section("Two more sections") {
+            FAQItem(
+                icon: "pencil.and.outline",
+                tint: .secondary,
+                title: "Draft",
+                blurb: "Work in progress, not ready for review.",
+                youSee: "Its own group (or a dimmed \"Draft\" badge inline)."
             )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            FAQItem(
+                icon: "moon.zzz.fill",
+                tint: .secondary,
+                title: "Snoozed",
+                blurb: "You pressed S to deal with it later.",
+                youSee: "A \"Later\" badge; it steps aside until the snooze ends."
+            )
         }
 
-        Section("Snoozed ('Later')") {
-            Label(
-                "Pressing S (or choosing Later) snoozes a PR. It shows a \"Later\" badge and drops out of the active groups until its snooze expires, so it stops competing for your attention in the meantime.",
-                systemImage: "moon.zzz.fill"
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-
-        Section("Muted / low-priority (Inbox only)") {
-            Text("Separate from actionability, the Inbox demotes noisy PRs into a collapsed \"Muted / low-priority\" group at the bottom. A PR is muted by the first of these rules that matches:")
+        Section("Muted / low-priority — Inbox only") {
+            Text("The Inbox tucks noisy PRs into a collapsed group at the very bottom. A PR is muted by the first rule that matches:")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -100,30 +101,30 @@ struct HelpSettingsView: View {
             FAQItem(
                 icon: "text.magnifyingglass",
                 tint: .secondary,
-                title: "Title / branch pattern",
-                blurb: "Its title or head branch matches one of your mute glob patterns (e.g. chore(deps)*)."
+                title: "Matches a pattern",
+                blurb: "Title or branch matches a mute pattern (e.g. chore(deps)*)."
             )
             FAQItem(
                 icon: "gearshape.2.fill",
                 tint: .secondary,
-                title: "Bot author",
-                blurb: "It was opened by a bot (login ending in [bot], or a known dependency bot like dependabot / renovate) and \"Mute bot-authored PRs\" is on."
+                title: "From a bot",
+                blurb: "Opened by dependabot, renovate, or any [bot] account."
             )
             FAQItem(
                 icon: "tag.fill",
                 tint: .secondary,
-                title: "Label",
-                blurb: "It carries one of your muted labels (e.g. dependencies, automated)."
+                title: "Has a muted label",
+                blurb: "Carries a label you've muted (e.g. dependencies)."
             )
             FAQItem(
                 icon: "person.2.slash.fill",
                 tint: .secondary,
-                title: "Outside review focus",
-                blurb: "When a review-focus allow-list is set, a PR needing your review whose author (or requested team) isn't on the list is muted. Your own PRs are never muted by focus."
+                title: "Outside your focus",
+                blurb: "Needs your review but the author/team isn't on your focus list. Your own PRs are never muted this way."
             )
 
             Label(
-                "Configure all of these in Settings › Inbox. Muting only reorders and collapses — nothing is hidden, and you can always expand the Muted group.",
+                "Set all of these in Settings › Inbox. Nothing is hidden — the Muted group is always there to expand.",
                 systemImage: "info.circle"
             )
             .font(.caption)
@@ -135,14 +136,16 @@ struct HelpSettingsView: View {
 
 // MARK: - FAQItem
 
-/// One labelled explanation row: a tinted SF Symbol, a bold title, a short
-/// blurb, and an optional bullet list of the exact conditions.
+/// One labelled explanation row: a tinted SF Symbol, a bold title, a one-line
+/// blurb, an optional bullet list of the exact conditions, and an optional
+/// "you see" line that ties it back to what appears in the deck.
 private struct FAQItem: View {
     let icon: String
     let tint: Color
     let title: String
     let blurb: String
     var bullets: [String] = []
+    var youSee: String? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -174,6 +177,14 @@ private struct FAQItem: View {
                         }
                     }
                     .padding(.top, 1)
+                }
+
+                if let youSee {
+                    Label(youSee, systemImage: "eye")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 1)
                 }
             }
         }

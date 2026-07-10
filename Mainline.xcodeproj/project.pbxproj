@@ -43,6 +43,7 @@
 		/* Inbox noise-filter source compilation */
 		IB000000000000000000000B1 /* InboxMuteEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = IB000000000000000000000A1 /* InboxMuteEngine.swift */; };
 		IB000000000000000000000B2 /* InboxSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = IB000000000000000000000A2 /* InboxSettingsView.swift */; };
+		HP000000000000000000000B1 /* HelpSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = HP000000000000000000000A1 /* HelpSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -81,6 +82,7 @@
 		/* Inbox noise-filter source file references */
 		IB000000000000000000000A1 /* InboxMuteEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxMuteEngine.swift; sourceTree = "<group>"; };
 		IB000000000000000000000A2 /* InboxSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxSettingsView.swift; sourceTree = "<group>"; };
+		HP000000000000000000000A1 /* HelpSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -164,6 +166,7 @@
 				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
 				OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */,
 				IB000000000000000000000A2 /* InboxSettingsView.swift */,
+				HP000000000000000000000A1 /* HelpSettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -283,6 +286,7 @@
 				PC0000000000000000000099 /* GlobalHotKey.swift in Sources */,
 				IB000000000000000000000B1 /* InboxMuteEngine.swift in Sources */,
 				IB000000000000000000000B2 /* InboxSettingsView.swift in Sources */,
+				HP000000000000000000000B1 /* HelpSettingsView.swift in Sources */,
 				OT00000000000000000000B1 /* TelemetryService.swift in Sources */,
 				OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */,
 				OT00000000000000000000B3 /* TelemetryDetailsSheet.swift in Sources */,

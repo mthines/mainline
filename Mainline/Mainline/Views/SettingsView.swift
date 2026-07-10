@@ -14,6 +14,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
     case appearance
     case keyboard
     case privacy
+    case help
 
     var id: String { rawValue }
 
@@ -26,6 +27,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .appearance:    return "Appearance"
         case .keyboard:      return "Keyboard"
         case .privacy:       return "Privacy"
+        case .help:          return "Help"
         }
     }
 
@@ -38,6 +40,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .appearance:    return "slider.horizontal.3"
         case .keyboard:      return "keyboard"
         case .privacy:       return "hand.raised.fill"
+        case .help:          return "questionmark.circle.fill"
         }
     }
 }
@@ -137,6 +140,7 @@ struct SettingsView: View {
                 case .appearance:    appearanceSection
                 case .keyboard:      keyboardSection
                 case .privacy:       privacySection
+                case .help:          helpSection
                 }
             }
             .formStyle(.grouped)
@@ -267,6 +271,13 @@ struct SettingsView: View {
     @ViewBuilder
     private var inboxSection: some View {
         InboxSettingsView(settings: settings)
+    }
+
+    // MARK: - Help
+
+    @ViewBuilder
+    private var helpSection: some View {
+        HelpSettingsView()
     }
 
     // MARK: - Notifications
