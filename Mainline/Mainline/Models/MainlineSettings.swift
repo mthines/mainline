@@ -98,7 +98,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .dismiss:          return "x"
         case .multiSelectToggle: return "v"
         case .toggleDrafts:     return "d"
-        case .toggleMute:       return "l"   // "low-priority"
+        case .toggleMute:       return "q"   // "quiet" — left-hand key (see left-hand default policy)
         case .undo:             return "z"
         }
     }
@@ -203,7 +203,7 @@ struct InAppShortcutBindings: Equatable {
             dismiss:         ShortcutBinding(key: "x"),
             multiSelectToggle: ShortcutBinding(key: "v"),
             toggleDrafts:    ShortcutBinding(key: "d"),
-            toggleMute:      ShortcutBinding(key: "l"),
+            toggleMute:      ShortcutBinding(key: "q"),
             undo:            ShortcutBinding(key: "z", modifiers: cmdRaw)
         )
     }()
