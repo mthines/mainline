@@ -429,6 +429,22 @@ enum PROpenTarget: String, CaseIterable, Identifiable {
               !comps.path.isEmpty else { return nil }
         return comps.path
     }
+
+    /// Whether a repo should open in Linear given the user's repo filter, when the
+    /// target is Linear. An EMPTY filter means "all repos" (Linear everywhere).
+    /// A non-empty filter is an allowlist: a repo opens in Linear only if it matches
+    /// an entry — either an org (`owner`, matching every repo under it) or an exact
+    /// repo (`owner/repo`). Comparison is case-insensitive. Repos not on the list
+    /// fall back to GitHub. Pure (no I/O), testable — mirrors `SensitivePathMatcher`.
+    static func repoUsesLinear(repoFullName: String, filter: [String]) -> Bool {
+        guard !filter.isEmpty else { return true }
+        let name = repoFullName.lowercased()
+        return filter.contains { entry in
+            let e = entry.trimmingCharacters(in: .whitespaces).lowercased()
+            guard !e.isEmpty else { return false }
+            return name == e || name.hasPrefix(e + "/")
+        }
+    }
 }
 
 /// All non-secret app settings backed by UserDefaults.
@@ -454,6 +470,7 @@ final class MainlineSettings: ObservableObject {
         static let writeActionsEnabled  = "writeActionsEnabled"
         static let mergeMethodPreference = "mergeMethodPreference"
         static let prOpenTarget         = "prOpenTarget"
+        static let linearRepoFilter     = "linearRepoFilter"
         static let defaultSnoozeDuration = "defaultSnoozeDuration"
         static let collapsedSectionsRaw = "collapsedSectionsRaw"
         static let snoozeMapData        = "snoozeMapData"
@@ -565,6 +582,15 @@ final class MainlineSettings: ObservableObject {
     /// Where the primary "open PR" action sends the user. Default `.github`.
     @Published var prOpenTarget: PROpenTarget {
         didSet { defaults.set(prOpenTarget.rawValue, forKey: Keys.prOpenTarget) }
+    }
+
+    /// Repo allowlist for the Linear open target (only consulted when
+    /// `prOpenTarget == .linear`). Entries are an org (`owner`) or an exact repo
+    /// (`owner/repo`). EMPTY = all repos open in Linear. Non-empty = only matching
+    /// repos open in Linear; the rest fall back to GitHub — so work repos can use
+    /// Linear while personal repos stay on GitHub.
+    @Published var linearRepoFilter: [String] {
+        didSet { defaults.set(linearRepoFilter, forKey: Keys.linearRepoFilter) }
     }
 
     /// The postpone duration applied by the `S` quick-snooze verb. Default `.oneDay`
@@ -1113,9 +1139,11 @@ final class MainlineSettings: ObservableObject {
         }
 
         // PR open target — default GitHub. Linear needs no extra config (the review
-        // deep link is derived from the PR URL alone).
+        // deep link is derived from the PR URL alone); the optional repo filter
+        // narrows which repos use Linear (empty = all).
         prOpenTarget = defaults.string(forKey: Keys.prOpenTarget)
             .flatMap { PROpenTarget(rawValue: $0) } ?? .github
+        linearRepoFilter = defaults.stringArray(forKey: Keys.linearRepoFilter) ?? []
 
         // Vercel preview detection — default ON, with the dash0 + vercel.app suffixes
         vercelPreviewEnabled = defaults.object(forKey: Keys.vercelPreviewEnabled) == nil

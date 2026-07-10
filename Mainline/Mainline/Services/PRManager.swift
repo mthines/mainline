@@ -702,8 +702,10 @@ final class PRManager: ObservableObject {
     // MARK: - Opening PRs
 
     /// Opens a PR honoring `settings.prOpenTarget`. GitHub is the default and the
-    /// universal fallback. For Linear the PR's review view is derived from the PR
-    /// URL alone (no API key, no workspace slug):
+    /// universal fallback. Linear is used only when the PR's repo passes the
+    /// `linearRepoFilter` allowlist (empty = all repos) — so e.g. work repos open
+    /// in Linear while personal repos stay on GitHub. For Linear the PR's review
+    /// view is derived from the PR URL alone (no API key, no workspace slug):
     ///   1. `linear://linear.app/review/…` — opens the review in the Linear desktop
     ///      app (custom scheme; the only form that hands off to the app).
     ///   2. If the desktop app isn't installed (`open` returns false), the
@@ -714,6 +716,7 @@ final class PRManager: ObservableObject {
         TelemetryService.shared.recordTriageInteraction("open_in_browser")
 
         if settings.prOpenTarget == .linear,
+           PROpenTarget.repoUsesLinear(repoFullName: pr.repoFullName, filter: settings.linearRepoFilter),
            let desktop = PROpenTarget.linearDesktopURL(fromPRURL: pr.htmlUrl) {
             if NSWorkspace.shared.open(desktop) {
                 print("[Mainline][Open] linear desktop app")
