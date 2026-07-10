@@ -849,10 +849,15 @@ struct TriageDeckView: View {
             Label("Approve PR", systemImage: "checkmark.circle")
         }
         .disabled(writeOff)
-        Button { handleTriageAction(.merge, on: pr) } label: {
-            Label("Merge PR", systemImage: "arrow.triangle.merge")
+        // Merge is only offered when the PR can actually be merged (approved, clean,
+        // green CI, open) — the same `readyToMerge` gate as the inline Merge button.
+        // An unmergeable PR shows no Merge item rather than a dead confirm dialog.
+        if pr.readyToMerge {
+            Button { handleTriageAction(.merge, on: pr) } label: {
+                Label("Merge PR", systemImage: "arrow.triangle.merge")
+            }
+            .disabled(writeOff)
         }
-        .disabled(writeOff)
         Button { handleTriageAction(.requestChanges, on: pr) } label: {
             Label("Request Changes", systemImage: "text.bubble")
         }
@@ -1244,9 +1249,12 @@ struct TriageDeckView: View {
         }
 
         // Write verb (gated by writeActionsEnabled). Approve and Request Changes
-        // remain available via the row context menu only.
+        // remain available via the row context menu only. Merge only fires when the
+        // PR is actually mergeable (`readyToMerge` — same condition that shows the
+        // inline Merge button); on any other PR M is a silent no-op, so we never
+        // pop a confirm dialog for an action that can't be performed.
         if shortcutMatches(.merge, event: event) {
-            if let pr = focusedPR { dispatchVerb(.merge(pr)) }
+            if let pr = focusedPR, pr.readyToMerge { dispatchVerb(.merge(pr)) }
             return nil
         }
 
