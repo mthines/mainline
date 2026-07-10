@@ -49,7 +49,7 @@ extension PREvent {
     /// The default attention level — baked in to be attention-respectful.
     static let defaults: [PREvent: AttentionLevel] = [
         .newPRByMe:          .notify,
-        .reviewRequested:    .notify,   // DIRECT request — actionable
+        .reviewRequested:    .quiet,   // DIRECT request — surfaced in badge, no banner
         .reviewRequestedTeam: .quiet,   // team pulled it in — lower noise
         .ciFailedOnMyPR:     .notify,
         .changesRequested:   .notify,

@@ -7,11 +7,11 @@ import Carbon.HIToolbox
 
 /// What the menu-bar badge counts. User-configurable in Settings.
 enum MenuBarMetric: String, CaseIterable, Identifiable {
-    case needsAHuman        // PRs in the "Needs a Human" bucket (default)
+    case needsAHuman        // PRs in the "Needs a Human" bucket
     case failingCI          // open PRs with failing/errored CI
     case reviewRequests     // PRs where the user is a requested reviewer
     case unread             // PRs the user hasn't looked at yet
-    case totalOpen          // all open (non-merged, non-closed) PRs
+    case totalOpen          // all open (non-merged, non-closed) PRs (default)
 
     var id: String { rawValue }
 
@@ -545,18 +545,18 @@ final class MainlineSettings: ObservableObject {
     }
 
     /// Preferred MAX panel content height. The panel sizes to content and grows up
-    /// to this (capped to the display). Default 560.
+    /// to this (capped to the display). Default 1600.
     @Published var panelHeight: Int {
         didSet { defaults.set(panelHeight, forKey: Keys.panelHeight) }
     }
 
     /// Preferred MIN panel content height — the panel never shrinks below this even
-    /// with few PRs. Clamped not to exceed `panelHeight` downstream. Default 240.
+    /// with few PRs. Clamped not to exceed `panelHeight` downstream. Default 600.
     @Published var panelMinHeight: Int {
         didSet { defaults.set(panelMinHeight, forKey: Keys.panelMinHeight) }
     }
 
-    /// What the menu-bar badge counts. Default `needsAHuman`.
+    /// What the menu-bar badge counts. Default `totalOpen`.
     @Published var menuBarMetric: MenuBarMetric {
         didSet { defaults.set(menuBarMetric.rawValue, forKey: Keys.menuBarMetric) }
     }
@@ -611,8 +611,8 @@ final class MainlineSettings: ObservableObject {
     // MARK: - Vercel preview detection
 
     /// Whether Mainline detects a Vercel preview deployment for each PR (from the
-    /// `vercel[bot]` comment) and surfaces the "Preview" indicator + `P` verb.
-    /// Default ON. Turning it off stops the extra per-PR comment fetches.
+    /// `vercel[bot]` comment) and surfaces the "Preview" indicator + `E` verb.
+    /// Default OFF (opt-in). Turning it on adds per-PR comment fetches.
     @Published var vercelPreviewEnabled: Bool {
         didSet { defaults.set(vercelPreviewEnabled, forKey: Keys.vercelPreviewEnabled) }
     }
@@ -888,9 +888,9 @@ final class MainlineSettings: ObservableObject {
     // MARK: - Init
 
     private init() {
-        // Poll interval — default 60s
+        // Poll interval — default 30s
         if defaults.object(forKey: Keys.pollIntervalSeconds) == nil {
-            defaults.set(60, forKey: Keys.pollIntervalSeconds)
+            defaults.set(30, forKey: Keys.pollIntervalSeconds)
         }
         pollIntervalSeconds = defaults.integer(forKey: Keys.pollIntervalSeconds)
 
@@ -939,12 +939,12 @@ final class MainlineSettings: ObservableObject {
         attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
         unreadPRIdsList = defaults.stringArray(forKey: Keys.unreadPRIds) ?? []
         notifMutedNodeIdsList = defaults.stringArray(forKey: Keys.notifMutedNodeIds) ?? []
-        panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 560 : defaults.integer(forKey: Keys.panelHeight)
-        panelMinHeight  = defaults.object(forKey: Keys.panelMinHeight) == nil ? 240 : defaults.integer(forKey: Keys.panelMinHeight)
+        panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 1600 : defaults.integer(forKey: Keys.panelHeight)
+        panelMinHeight  = defaults.object(forKey: Keys.panelMinHeight) == nil ? 600 : defaults.integer(forKey: Keys.panelMinHeight)
 
-        // Menu-bar badge — default: count "Needs a Human", follow selected scope
+        // Menu-bar badge — default: count "Total Open", follow selected scope
         menuBarMetric = defaults.string(forKey: Keys.menuBarMetric)
-            .flatMap { MenuBarMetric(rawValue: $0) } ?? .needsAHuman
+            .flatMap { MenuBarMetric(rawValue: $0) } ?? .totalOpen
         menuBarScopeFollowsSelection = defaults.object(forKey: Keys.menuBarScopeFollows) == nil
             ? true
             : defaults.bool(forKey: Keys.menuBarScopeFollows)
@@ -970,9 +970,9 @@ final class MainlineSettings: ObservableObject {
         // Needs-a-Human expanded — default collapsed (false); persisted on change
         needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
 
-        // Vercel preview detection — default ON, with the dash0 + vercel.app suffixes
+        // Vercel preview detection — default OFF (opt-in), with the dash0 + vercel.app suffixes
         vercelPreviewEnabled = defaults.object(forKey: Keys.vercelPreviewEnabled) == nil
-            ? true
+            ? false
             : defaults.bool(forKey: Keys.vercelPreviewEnabled)
         vercelPreviewDomains = defaults.stringArray(forKey: Keys.vercelPreviewDomains)
             ?? Self.defaultVercelPreviewDomains

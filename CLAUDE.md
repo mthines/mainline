@@ -115,7 +115,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 
 | Key | Type | Default |
 |-----|------|---------|
-| `pollIntervalSeconds` | Int | 60 |
+| `pollIntervalSeconds` | Int | 30 |
 | `searchQueryAuthor` | String | `is:open is:pr author:@me` |
 | `searchQueryReviewer` | String | `is:open is:pr review-requested:@me` |
 | `notifyNewPR` / `Ready` / `CI` / `Comment` | Bool | true |
@@ -126,14 +126,14 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `mergeMethodPreference` | String | `auto` |
 | `collapsedSectionsRaw` | [String] | [] |
 | `snoozeMapData` | Data (JSON) | {} |
-| `attentionPolicy` | Data (JSON) | `PREvent.defaults` |
-| `panelHeight` | Int | 560 |
-| `panelMinHeight` | Int | 240 |
-| `menuBarMetric` | String | `needsAHuman` |
+| `attentionPolicy` | Data (JSON) | `PREvent.defaults` (reviewRequested = quiet) |
+| `panelHeight` | Int | 1600 |
+| `panelMinHeight` | Int | 600 |
+| `menuBarMetric` | String | `totalOpen` |
 | `globalShortcutEnabled` | Bool | true |
 | `globalShortcutKeyCode` | Int | `0x0A` (ISO section key) |
 | `globalShortcutModifiers` | UInt | ⇧⌃ |
-| `vercelPreviewEnabled` | Bool | true |
+| `vercelPreviewEnabled` | Bool | false |
 | `vercelPreviewDomains` | [String] | `["dash0-preview.com","vercel.app"]` |
 | `telemetryEnabled` | Bool | false |
 | `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` — 12 `ShortcutBinding { key, modifiers }` entries; all bare except undo=⌘Z (`modifiers = NSEvent.ModifierFlags.command.rawValue`). Decoded with custom `Codable` that handles both the new object shape and the v1.25.0 legacy bare-string shape; undo bare-string → `.command` migration preserves ⌘Z for existing users. |
