@@ -204,6 +204,21 @@ struct SettingsView: View {
             }
         }
 
+        Section("Opening PRs") {
+            Picker("Open PRs in", selection: $settings.prOpenTarget) {
+                ForEach(PROpenTarget.allCases) { target in
+                    Text(target.displayName).tag(target)
+                }
+            }
+            if settings.prOpenTarget == .linear {
+                TextField("Linear workspace", text: $settings.linearWorkspaceSlug, prompt: Text("your-workspace"))
+                    .textFieldStyle(.roundedBorder)
+                Label("The workspace slug from your Linear URL (linear.app/<workspace>). Clicking a PR opens its linked Linear issue in the desktop app, derived from the branch name (e.g. eng-1234). Falls back to GitHub when no issue id is found. The peek card's Safari button always opens GitHub.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
         Section("Preview Deployments") {
             Toggle("Detect Vercel preview deployments", isOn: $settings.vercelPreviewEnabled)
             if settings.vercelPreviewEnabled {
