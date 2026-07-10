@@ -619,7 +619,7 @@ struct TriageDeckView: View {
             Label("View Details", systemImage: "rectangle.stack")
         }
         Button { handleTriageAction(.openInBrowser, on: pr) } label: {
-            Label("Open in Browser", systemImage: "safari")
+            Label(openActionLabel, systemImage: openActionSymbol)
         }
         if pr.vercelPreviewUrl != nil {
             Button { handleTriageAction(.openPreview, on: pr) } label: {
@@ -746,7 +746,7 @@ struct TriageDeckView: View {
     private func doneRow(pr: PRSnapshot) -> some View {
         let m = metrics
         return Button {
-            if let url = URL(string: pr.htmlUrl) { NSWorkspace.shared.open(url) }
+            if let url = pr.openURL(settings: settings) { NSWorkspace.shared.open(url) }
         } label: {
             HStack(alignment: .top, spacing: m.rowHStackSpacing) {
                 LeadingColumn(metrics: m, isUnread: false) {
@@ -795,7 +795,7 @@ struct TriageDeckView: View {
                 selectedPRs.insert(pr.nodeId)
             }
         } else {
-            if let url = URL(string: pr.htmlUrl) {
+            if let url = pr.openURL(settings: settings) {
                 TelemetryService.shared.recordTriageInteraction("open_in_browser")
                 NSWorkspace.shared.open(url)
             }
@@ -1078,6 +1078,17 @@ struct TriageDeckView: View {
 
     // MARK: - Triage action from context menu
 
+    /// Context-menu label for the open action, tracking the configured target so
+    /// right-click reads "Open in Linear" instead of "Open in Browser" under Linear.
+    private var openActionLabel: String {
+        settings.prOpenTarget == .linear ? "Open in Linear" : "Open in Browser"
+    }
+
+    /// Matching SF Symbol for the open action's target.
+    private var openActionSymbol: String {
+        settings.prOpenTarget == .linear ? "arrow.up.forward.app" : "safari"
+    }
+
     private func handleTriageAction(_ action: TriageAction, on pr: PRSnapshot) {
         switch action {
         case .approve:
@@ -1098,7 +1109,7 @@ struct TriageDeckView: View {
             manager.peekPR = pr
             TelemetryService.shared.recordTriageInteraction("diff_preview")
         case .openInBrowser:
-            if let url = URL(string: pr.htmlUrl) {
+            if let url = pr.openURL(settings: settings) {
                 TelemetryService.shared.recordTriageInteraction("open_in_browser")
                 NSWorkspace.shared.open(url)
             }

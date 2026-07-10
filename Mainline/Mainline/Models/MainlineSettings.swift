@@ -372,6 +372,45 @@ enum MergeMethodPreference: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where the primary "open PR" action (click / ↵ / open verb) sends the user:
+/// the GitHub PR page (default) or the linked Linear issue in the Linear desktop
+/// app (via an `https://linear.app` universal link, which macOS routes to the
+/// installed Linear app).
+enum PROpenTarget: String, CaseIterable, Identifiable {
+    case github
+    case linear
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .github: return "GitHub"
+        case .linear: return "Linear"
+        }
+    }
+
+    /// Derives a Linear issue deep link from a PR head branch name, or `nil` when
+    /// no Linear issue id can be found (or no workspace slug is configured).
+    ///
+    /// Relies on Linear's default git-branch format, which embeds the issue
+    /// identifier — e.g. `mthines/eng-1234-fix-the-thing` → `ENG-1234`. The first
+    /// `<letters>-<digits>` token in the branch is treated as the identifier. Pure
+    /// (no I/O) so it is testable in isolation, matching `SensitivePathMatcher`.
+    static func linearIssueURL(branch: String, workspaceSlug: String) -> URL? {
+        let slug = workspaceSlug.trimmingCharacters(in: .whitespaces)
+        guard !slug.isEmpty, let identifier = linearIdentifier(inBranch: branch) else { return nil }
+        return URL(string: "https://linear.app/\(slug)/issue/\(identifier)")
+    }
+
+    /// Extracts the uppercased Linear issue identifier (`TEAM-123`) from a branch
+    /// name, or `nil` when the branch contains no `<letters>-<digits>` token.
+    static func linearIdentifier(inBranch branch: String) -> String? {
+        let pattern = "[A-Za-z]{2,}-[0-9]+"
+        guard let range = branch.range(of: pattern, options: .regularExpression) else { return nil }
+        return branch[range].uppercased()
+    }
+}
+
 /// All non-secret app settings backed by UserDefaults.
 final class MainlineSettings: ObservableObject {
     static let shared = MainlineSettings()
@@ -394,6 +433,8 @@ final class MainlineSettings: ObservableObject {
         // Triage Cockpit additions
         static let writeActionsEnabled  = "writeActionsEnabled"
         static let mergeMethodPreference = "mergeMethodPreference"
+        static let prOpenTarget         = "prOpenTarget"
+        static let linearWorkspaceSlug  = "linearWorkspaceSlug"
         static let defaultSnoozeDuration = "defaultSnoozeDuration"
         static let collapsedSectionsRaw = "collapsedSectionsRaw"
         static let snoozeMapData        = "snoozeMapData"
@@ -493,6 +534,18 @@ final class MainlineSettings: ObservableObject {
     /// The user's preferred merge method for in-app merges. Default `.auto`.
     @Published var mergeMethodPreference: MergeMethodPreference {
         didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
+    }
+
+    /// Where the primary "open PR" action sends the user. Default `.github`.
+    @Published var prOpenTarget: PROpenTarget {
+        didSet { defaults.set(prOpenTarget.rawValue, forKey: Keys.prOpenTarget) }
+    }
+
+    /// The Linear workspace URL slug (e.g. "dash0") used to build issue deep links
+    /// when `prOpenTarget == .linear`. Empty disables Linear opening — the open
+    /// action then falls back to the GitHub PR page.
+    @Published var linearWorkspaceSlug: String {
+        didSet { defaults.set(linearWorkspaceSlug, forKey: Keys.linearWorkspaceSlug) }
     }
 
     /// The postpone duration applied by the `S` quick-snooze verb. Default `.oneDay`
@@ -970,6 +1023,11 @@ final class MainlineSettings: ObservableObject {
         // Needs-a-Human expanded — default collapsed (false); persisted on change
         needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
 
+        // PR open target — default GitHub; Linear also needs a workspace slug
+        prOpenTarget = defaults.string(forKey: Keys.prOpenTarget)
+            .flatMap { PROpenTarget(rawValue: $0) } ?? .github
+        linearWorkspaceSlug = defaults.string(forKey: Keys.linearWorkspaceSlug) ?? ""
+
         // Vercel preview detection — default ON, with the dash0 + vercel.app suffixes
         vercelPreviewEnabled = defaults.object(forKey: Keys.vercelPreviewEnabled) == nil
             ? true
@@ -1015,5 +1073,22 @@ final class MainlineSettings: ObservableObject {
         if !snoozeMap.isEmpty {
             notifMutedNodeIds = notifMutedNodeIds.union(snoozeMap.keys)
         }
+    }
+}
+
+// MARK: - PR open target resolution
+
+extension PRSnapshot {
+    /// The URL to open when the user "opens" this PR, honoring `prOpenTarget`.
+    /// When Linear is selected but no Linear issue can be derived (no workspace
+    /// slug configured, or the branch carries no issue id), transparently falls
+    /// back to the GitHub PR page — so the open action always does *something*.
+    func openURL(settings: MainlineSettings) -> URL? {
+        if settings.prOpenTarget == .linear,
+           let linear = PROpenTarget.linearIssueURL(branch: headRefName,
+                                                     workspaceSlug: settings.linearWorkspaceSlug) {
+            return linear
+        }
+        return URL(string: htmlUrl)
     }
 }
