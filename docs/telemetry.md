@@ -93,6 +93,7 @@ telemetry silently does nothing (correct for dev builds without the token).
 | `mainline.global_shortcut.used`    | counter   | —                                                        |
 | `mainline.token.invalid`           | counter   | —                                                        |
 | `mainline.setting.changed`         | counter   | `setting.name`, `setting.enabled`                        |
+| `mainline.attention_policy.changed`| counter   | `attention.event`, `attention.level`                     |
 
 ### Logs
 
@@ -108,6 +109,7 @@ Structured log records for key lifecycle events:
 | `Token imported`     | INFO     | `token.import_method`                             |
 | `Token invalid`      | WARN     | —                                                 |
 | `Setting changed`    | INFO     | `setting.name`, `setting.enabled`                 |
+| `Attention policy changed` | INFO | `attention.event`, `attention.level`            |
 
 ### Resource attributes (on every signal)
 
@@ -137,6 +139,8 @@ All attributes use **bounded, low-cardinality values** — never raw user data.
 | `interaction.type`   | `"snooze"`, `"unsnooze"`, `"mark_seen"`, `"dismiss"`, `"open_in_browser"`, `"diff_preview"`, `"open_preview"`, `"tab_switch"`, `"scope_filter_change"`, `"toggle_drafts"`, `"inbox_mute"`, `"inbox_unmute"`, `"undo"`, `"refresh"`, `"multi_select_toggle"` |
 | `notification.event_type` | `"newPR"`, `"readyForReview"`, `"ciChanged"`, `"reviewComment"`                           |
 | `notification.attention_level` | `"notify"`, `"quiet"`                                                                |
+| `attention.event`    | `PREvent` raw values (e.g. `"reviewRequested"`, `"ciFailedOnMyPR"`) — never PR content |
+| `attention.level`    | `"notify"`, `"quiet"`, `"off"`                                                                   |
 | `token.import_method`| `"gh"`, `"paste"`                                                                                |
 | `setting.name`       | UserDefaults key names (never values) — `"writeActionsEnabled"`, `"vercelPreviewEnabled"`, `"notifyOnlyHumanComments"`, `"menuBarScopeFollowsSelection"`, `"globalShortcutEnabled"`, `"compactRows"`, `"splitDrafts"`, `"muteBotAuthors"` |
 

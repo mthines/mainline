@@ -289,6 +289,10 @@ struct SettingsView: View {
                             var policy = settings.attentionPolicy
                             policy[event.rawValue] = newLevel.rawValue
                             settings.attentionPolicy = policy
+                            TelemetryService.shared.recordAttentionPolicyChanged(
+                                event: event.rawValue,
+                                level: newLevel.rawValue
+                            )
                         }
                     )) {
                         Text("Notify").tag(AttentionLevel.notify)

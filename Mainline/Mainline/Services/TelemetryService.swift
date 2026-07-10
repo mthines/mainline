@@ -90,6 +90,7 @@ final class TelemetryService {
     private var globalShortcutCounter: LongCounterSdk?
     private var tokenInvalidCounter: LongCounterSdk?
     private var settingChangedCounter: LongCounterSdk?
+    private var attentionPolicyChangedCounter: LongCounterSdk?
 
     // MARK: - Providers (kept alive for shutdown)
 
@@ -260,6 +261,12 @@ final class TelemetryService {
         settingChangedCounter = meter
             .counterBuilder(name: "mainline.setting.changed")
             .setDescription("App-wide preference changes by setting name")
+            .setUnit("1")
+            .build()
+
+        attentionPolicyChangedCounter = meter
+            .counterBuilder(name: "mainline.attention_policy.changed")
+            .setDescription("Attention-policy changes by event type and chosen level")
             .setUnit("1")
             .build()
 
@@ -531,6 +538,22 @@ final class TelemetryService {
         emitLog(severity: .info, body: "Setting changed", attributes: attrs)
     }
 
+    /// Record a change to the attention policy for a single PR event.
+    /// - Parameters:
+    ///   - event: the `PREvent` raw value (bounded — one of the enum cases)
+    ///   - level: the chosen `AttentionLevel` raw value — "notify" | "quiet" | "off"
+    func recordAttentionPolicyChanged(event: String, level: String) {
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+
+        let attrs: [String: AttributeValue] = [
+            "attention.event": .string(event),
+            "attention.level": .string(level),
+        ]
+        attentionPolicyChangedCounter?.add(value: 1, attribute: attrs)
+        emitLog(severity: .info, body: "Attention policy changed", attributes: attrs)
+    }
+
     // MARK: - Private Helpers
 
     private func buildResource() -> Resource {
@@ -589,16 +612,30 @@ final class TelemetryService {
     }
 
     /// HMAC-SHA256 of the machine's hardware UUID — stable across reinstalls, not reversible.
+    /// Emitted as the `enduser.id` resource attribute so Dash0 can differentiate users
+    /// per resource (matches SyncTray's approach). When the hardware UUID is unavailable
+    /// (IOKit miss), it falls back to the stable per-install `installationId` rather than a
+    /// fresh random UUID — otherwise `enduser.id` would change every launch and fragment
+    /// the user into many one-off identities.
     private static func anonymousUserId() -> String {
-        // Retrieve hardware UUID via IOKit
+        let key = SymmetricKey(data: Data("mainline-telemetry".utf8))
+        let mac = HMAC<SHA256>.authenticationCode(for: Data(platformUUID().utf8), using: key)
+        return Data(mac).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The machine's hardware UUID (`IOPlatformUUID`) via IOKit — stable across reinstalls.
+    /// Falls back to the persistent per-install `installationId` when IOKit returns nothing,
+    /// so the derived `enduser.id` stays stable for the life of the install.
+    private static func platformUUID() -> String {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
         defer { IOObjectRelease(service) }
-        let uuidCF = IORegistryEntryCreateCFProperty(service, "IOPlatformUUID" as CFString, kCFAllocatorDefault, 0)
-        let hwUUID = (uuidCF?.takeRetainedValue() as? String) ?? UUID().uuidString
-
-        let key = SymmetricKey(data: Data("mainline-telemetry".utf8))
-        let mac = HMAC<SHA256>.authenticationCode(for: Data(hwUUID.utf8), using: key)
-        return Data(mac).map { String(format: "%02x", $0) }.joined()
+        guard service != IO_OBJECT_NULL,
+              let uuid = IORegistryEntryCreateCFProperty(service, "IOPlatformUUID" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? String,
+              !uuid.isEmpty else {
+            return MainlineSettings.shared.installationId
+        }
+        return uuid
     }
 
     /// Type-safe categorization of GitHubAPIError for metric attributes.
