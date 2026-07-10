@@ -1018,7 +1018,7 @@ struct TriageDeckView: View {
     private func doneRow(pr: PRSnapshot) -> some View {
         let m = metrics
         return Button {
-            Task { await manager.openPR(pr) }
+            manager.openPR(pr)
         } label: {
             HStack(alignment: .top, spacing: m.rowHStackSpacing) {
                 LeadingColumn(metrics: m, isUnread: false) {
@@ -1071,7 +1071,7 @@ struct TriageDeckView: View {
                 selectedPRs.insert(pr.nodeId)
             }
         } else {
-            Task { await manager.openPR(pr) }
+            manager.openPR(pr)
         }
     }
 
@@ -1391,7 +1391,7 @@ struct TriageDeckView: View {
             manager.peekPR = pr
             TelemetryService.shared.recordTriageInteraction("diff_preview")
         case .openInBrowser:
-            Task { await manager.openPR(pr) }
+            manager.openPR(pr)
         case .openPreview:
             openPreview(pr)
         case .toggleMute:

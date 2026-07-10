@@ -702,37 +702,33 @@ final class PRManager: ObservableObject {
     // MARK: - Opening PRs
 
     /// Opens a PR honoring `settings.prOpenTarget`. GitHub is the default and the
-    /// universal fallback; Linear is resolved in two steps:
-    ///   1. Offline — a Linear-format branch (`eng-1234-…`) yields the issue link
-    ///      directly, no network.
-    ///   2. API — otherwise, when a Linear API key is stored, ask Linear which issue
-    ///      the PR is attached to (covers AI/custom branches that embed no id).
-    /// Anything unresolved falls back to the GitHub PR page, so open never no-ops.
-    /// Async because the API lookup is a network call; run from a `Task` at the
-    /// call site. Records the `open_in_browser` interaction once, centrally.
-    func openPR(_ pr: PRSnapshot) async {
+    /// universal fallback. For Linear the PR's review view is derived from the PR
+    /// URL alone (no API key, no workspace slug):
+    ///   1. `linear://linear.app/review/…` — opens the review in the Linear desktop
+    ///      app (custom scheme; the only form that hands off to the app).
+    ///   2. If the desktop app isn't installed (`open` returns false), the
+    ///      `linear.review` web URL, which Linear redirects to the review page.
+    ///   3. Anything unresolved falls back to the GitHub PR page, so open never
+    ///      no-ops. Records the `open_in_browser` interaction once, centrally.
+    func openPR(_ pr: PRSnapshot) {
         TelemetryService.shared.recordTriageInteraction("open_in_browser")
-        guard let url = await resolveOpenURL(for: pr) else { return }
-        NSWorkspace.shared.open(url)
-    }
 
-    /// Resolves the URL to open for a PR per `prOpenTarget`. See `openPR(_:)`.
-    private func resolveOpenURL(for pr: PRSnapshot) async -> URL? {
-        let githubURL = URL(string: pr.htmlUrl)
-        guard settings.prOpenTarget == .linear else { return githubURL }
+        if settings.prOpenTarget == .linear,
+           let desktop = PROpenTarget.linearDesktopURL(fromPRURL: pr.htmlUrl) {
+            if NSWorkspace.shared.open(desktop) {
+                print("[Mainline][Open] linear desktop app")
+                return
+            }
+            if let web = PROpenTarget.linearWebURL(fromPRURL: pr.htmlUrl) {
+                print("[Mainline][Open] linear web fallback (desktop app not installed)")
+                NSWorkspace.shared.open(web)
+                return
+            }
+        }
 
-        // 1. Offline: Linear-format branch carries the identifier.
-        if let linear = PROpenTarget.linearIssueURL(branch: pr.headRefName,
-                                                     workspaceSlug: settings.linearWorkspaceSlug) {
-            return linear
+        if let github = URL(string: pr.htmlUrl) {
+            NSWorkspace.shared.open(github)
         }
-        // 2. API: ask Linear which issue this PR is attached to.
-        if let key = await KeychainHelper.loadLinearKey(),
-           let linear = await LinearClient.issueURL(forPRURL: pr.htmlUrl, apiKey: key) {
-            return linear
-        }
-        // 3. Fallback: the GitHub PR page.
-        return githubURL
     }
 
     /// Returns the resolved merge method string for telemetry — uses the same logic

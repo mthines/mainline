@@ -58,9 +58,6 @@ struct SettingsView: View {
     @State private var panelHeightDraft: Int = 560
     @State private var panelMinHeightDraft: Int = 240
     @State private var showingTelemetryDetails: Bool = false
-    @State private var linearKeyDraft: String = ""
-    @State private var hasStoredLinearKey: Bool = false
-    @State private var linearKeySaved: Bool = false
 
     /// A Bool binding mirroring a `MainlineSettings` toggle that records a
     /// `setting.changed` telemetry event whenever the user flips it. Routing every
@@ -115,7 +112,6 @@ struct SettingsView: View {
         .frame(minWidth: 640, minHeight: 480)
         .onAppear {
             loadToken()
-            loadLinearKey()
             panelHeightDraft = settings.panelHeight
             panelMinHeightDraft = settings.panelMinHeight
         }
@@ -233,23 +229,7 @@ struct SettingsView: View {
                 }
             }
             if settings.prOpenTarget == .linear {
-                TextField("Linear workspace", text: $settings.linearWorkspaceSlug, prompt: Text("your-workspace"))
-                    .textFieldStyle(.roundedBorder)
-
-                HStack {
-                    SecureField(
-                        hasStoredLinearKey ? "A key is stored — paste a new one to replace" : "Linear API key (optional)",
-                        text: $linearKeyDraft
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    Button(linearKeySaved ? "Saved" : "Save") { saveLinearKey() }
-                        .disabled(linearKeyDraft.isEmpty)
-                    if hasStoredLinearKey {
-                        Button("Remove") { removeLinearKey() }
-                    }
-                }
-
-                Label("Clicking a PR opens its linked Linear issue in the desktop app. It first reads a Linear-format branch (e.g. eng-1234). For branches without an id (AI/custom branches), add a Linear API key — a personal key from Linear Settings → Security & access — and the linked issue is looked up on open. Falls back to GitHub when nothing links. The key is stored in your Keychain; the peek card's Safari button always opens GitHub.", systemImage: "info.circle")
+                Label("Clicking a PR (click / ↵ / the Open verb) opens that PR's review view in the Linear desktop app — no API key or workspace needed; it's derived from the PR URL. If the desktop app isn't installed it opens in the browser instead. The peek card's Safari button always opens GitHub.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -535,36 +515,6 @@ struct SettingsView: View {
                 patDraft = ""
             }
         }
-    }
-
-    private func loadLinearKey() {
-        Task {
-            let key = await KeychainHelper.loadLinearKey()
-            await MainActor.run {
-                hasStoredLinearKey = !(key ?? "").isEmpty
-                linearKeyDraft = ""
-            }
-        }
-    }
-
-    private func saveLinearKey() {
-        let key = linearKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty, !key.contains("•") else { return }
-        Task {
-            try? KeychainHelper.saveLinearKey(key)
-            await MainActor.run {
-                linearKeySaved = true
-                hasStoredLinearKey = true
-                linearKeyDraft = ""
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { linearKeySaved = false }
-            }
-        }
-    }
-
-    private func removeLinearKey() {
-        try? KeychainHelper.deleteLinearKey()
-        hasStoredLinearKey = false
-        linearKeyDraft = ""
     }
 
     private func saveToken() {

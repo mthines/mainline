@@ -37,9 +37,8 @@ Mainline/Mainline/                     ← Source root
 │   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); .defaults
 │   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding)
 ├── Services/
-│   ├── KeychainHelper.swift     ← PAT + Linear API key storage (async, never blocks @MainActor); account-parameterized (github-pat / linear-api-key)
+│   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor); account-parameterized
 │   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files; author now decoded with __typename for bot detection; labels(first:10) added
-│   ├── LinearClient.swift       ← Linear GraphQL `attachmentsForURL` lookup: PR html URL → linked Linear issue URL (used by PRManager.openPR when the branch has no id)
 │   ├── PRStateStore.swift       ← @MainActor [nodeId: PRSnapshot] dict
 │   ├── PRDiffEngine.swift       ← Pure diff(previous:next:myLogin:)
 │   ├── PRPoller.swift           ← Task-based poll loop + pollOnce()
@@ -110,12 +109,12 @@ The **Inbox tab** (`ReviewTab.inbox`) is a client-side derived union of the forM
 Each PR can carry a `vercelPreviewUrl` extracted from its `vercel[bot]` issue comment (REST `GitHubClient.fetchVercelPreviewURL`, pure `extractPreviewURL(from:domains:)`). The row shows a `PreviewBadge` when present, and `E` (deck or peek, default binding — user-configurable) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition). Match domains (priority order) and the on/off toggle are `MainlineSettings.vercelPreviewDomains` / `vercelPreviewEnabled`.
 
 ### PR open target (GitHub / Linear)
-The primary "open" action (click / ↵ / `openInBrowser` verb) routes through `PRManager.openPR(_:)` (async — network capable) which resolves the URL via `resolveOpenURL(for:)`: GitHub by default; for `settings.prOpenTarget == .linear` it tries (1) an **offline** branch-derived id (`PROpenTarget.linearIssueURL(branch:workspaceSlug:)`, matches `eng-1234-…`), then (2) a **Linear API** lookup (`LinearClient.issueURL(forPRURL:apiKey:)`, using the Keychain `linear-api-key`) — this covers AI/custom branches (`codex/…`, `claude/…`) that embed no id, resolving via Linear's `attachmentsForURL`, then (3) falls back to the GitHub PR page. `openPR` records the `open_in_browser` interaction once, centrally. The peek card's Safari button (`PRPeekView`) always opens GitHub via `htmlUrl`.
+The primary "open" action (click / ↵ / `openInBrowser` verb) routes through `PRManager.openPR(_:)` (sync). GitHub by default. For `settings.prOpenTarget == .linear` it opens the PR's **review view** derived from the PR URL alone (no API key, no workspace slug): `PROpenTarget.linearDesktopURL(fromPRURL:)` builds `linear://linear.app/review/<owner>/<repo>/pull/<n>` — the `linear://` custom scheme is the only form that hands off to the Linear **desktop app** (the `/review/*` path is NOT in Linear's universal-link AASA, so `https` forms only ever open the browser). If the desktop app isn't installed (`NSWorkspace.open` returns false) it falls back to `PROpenTarget.linearWebURL(fromPRURL:)` = `https://linear.review/<path>` (Linear redirects it to the review page), then to the GitHub PR page. `openPR` records the `open_in_browser` interaction once, centrally. The peek card's Safari button (`PRPeekView`) always opens GitHub via `htmlUrl`.
 
 ## Keychain Details
 
 - Service: `"com.mainline.github-pr-notifier"`
-- Accounts: `"github-pat"` (GitHub PAT) and `"linear-api-key"` (optional Linear personal API key for PR→issue resolution)
+- Account: `"github-pat"`
 - Class: `kSecClassGenericPassword`
 - No App Sandbox (non-sandboxed enables outbound network + Keychain + `gh` subprocess)
 

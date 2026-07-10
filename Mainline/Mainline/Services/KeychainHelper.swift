@@ -8,9 +8,6 @@ import Security
 enum KeychainHelper {
     private static let service = "com.mainline.github-pr-notifier"
     private static let account = "github-pat"
-    /// Account for the optional Linear personal API key — used to resolve the
-    /// Linear issue linked to a PR when the branch carries no derivable id.
-    private static let linearAccount = "linear-api-key"
 
     // MARK: - GitHub token (public API — existing call sites unchanged)
 
@@ -22,17 +19,6 @@ enum KeychainHelper {
 
     /// Removes the stored GitHub token.
     static func deleteToken() throws { try delete(account: account) }
-
-    // MARK: - Linear API key
-
-    /// Saves or updates the Linear personal API key in the Keychain.
-    static func saveLinearKey(_ key: String) throws { try save(key, account: linearAccount) }
-
-    /// Loads the Linear API key asynchronously. Returns nil if none is stored.
-    static func loadLinearKey() async -> String? { await load(account: linearAccount) }
-
-    /// Removes the stored Linear API key.
-    static func deleteLinearKey() throws { try delete(account: linearAccount) }
 
     // MARK: - Save
 
