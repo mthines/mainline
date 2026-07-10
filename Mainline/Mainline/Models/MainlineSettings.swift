@@ -612,7 +612,7 @@ final class MainlineSettings: ObservableObject {
 
     /// Whether Mainline detects a Vercel preview deployment for each PR (from the
     /// `vercel[bot]` comment) and surfaces the "Preview" indicator + `E` verb.
-    /// Default OFF (opt-in). Turning it on adds per-PR comment fetches.
+    /// Default ON. Turning it off stops the extra per-PR comment fetches.
     @Published var vercelPreviewEnabled: Bool {
         didSet { defaults.set(vercelPreviewEnabled, forKey: Keys.vercelPreviewEnabled) }
     }
@@ -970,9 +970,9 @@ final class MainlineSettings: ObservableObject {
         // Needs-a-Human expanded — default collapsed (false); persisted on change
         needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
 
-        // Vercel preview detection — default OFF (opt-in), with the dash0 + vercel.app suffixes
+        // Vercel preview detection — default ON, with the dash0 + vercel.app suffixes
         vercelPreviewEnabled = defaults.object(forKey: Keys.vercelPreviewEnabled) == nil
-            ? false
+            ? true
             : defaults.bool(forKey: Keys.vercelPreviewEnabled)
         vercelPreviewDomains = defaults.stringArray(forKey: Keys.vercelPreviewDomains)
             ?? Self.defaultVercelPreviewDomains

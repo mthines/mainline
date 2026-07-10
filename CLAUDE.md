@@ -133,7 +133,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `globalShortcutEnabled` | Bool | true |
 | `globalShortcutKeyCode` | Int | `0x0A` (ISO section key) |
 | `globalShortcutModifiers` | UInt | ⇧⌃ |
-| `vercelPreviewEnabled` | Bool | false |
+| `vercelPreviewEnabled` | Bool | true |
 | `vercelPreviewDomains` | [String] | `["dash0-preview.com","vercel.app"]` |
 | `telemetryEnabled` | Bool | false |
 | `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` — 12 `ShortcutBinding { key, modifiers }` entries; all bare except undo=⌘Z (`modifiers = NSEvent.ModifierFlags.command.rawValue`). Decoded with custom `Codable` that handles both the new object shape and the v1.25.0 legacy bare-string shape; undo bare-string → `.command` migration preserves ⌘Z for existing users. |
