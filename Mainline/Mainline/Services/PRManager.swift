@@ -105,9 +105,11 @@ final class PRManager: ObservableObject {
         }
     }
 
-    /// Non-muted PRs for the Inbox (active), grouped ready for role-section rendering.
-    /// Muted PRs are excluded here and surface in `inboxMutedPRs` instead.
-    var inboxActivePRs: [PRSnapshot] {
+    /// Non-muted union for the Inbox, WITHOUT the scope filter. This is the base
+    /// the scope chips derive from (so each org chip can show its own count and the
+    /// chip row is always populated on the Inbox tab — mirrors how the other tabs
+    /// use `tabFiltered(applyScope: false)`).
+    private var inboxActiveUnscopedPRs: [PRSnapshot] {
         let config = inboxMuteConfig
         return inboxUnionPRs.filter { pr in
             let role = pr.inboxRole(myLogin: config.myLogin)
@@ -124,11 +126,18 @@ final class PRManager: ObservableObject {
         }
     }
 
-    /// Muted PRs for the Inbox (demoted by any active rule), rendered in the
-    /// shared collapsed "Muted / low-priority" group.
+    /// Non-muted PRs for the Inbox (active), with the selected scope applied —
+    /// grouped ready for role-section rendering. Muted PRs surface in
+    /// `inboxMutedPRs` instead.
+    var inboxActivePRs: [PRSnapshot] {
+        applyingSelectedScope(inboxActiveUnscopedPRs)
+    }
+
+    /// Muted PRs for the Inbox (demoted by any active rule), with the selected
+    /// scope applied — rendered in the shared collapsed "Muted / low-priority" group.
     var inboxMutedPRs: [PRSnapshot] {
         let config = inboxMuteConfig
-        return inboxUnionPRs.filter { pr in
+        let muted = inboxUnionPRs.filter { pr in
             let role = pr.inboxRole(myLogin: config.myLogin)
             return InboxMuteEngine.muteVerdict(
                 title:          pr.title,
@@ -141,6 +150,13 @@ final class PRManager: ObservableObject {
                 config:         config
             ) != nil
         }
+        return applyingSelectedScope(muted)
+    }
+
+    /// Applies the currently-selected scope (nil = All) to an Inbox PR list.
+    private func applyingSelectedScope(_ list: [PRSnapshot]) -> [PRSnapshot] {
+        guard let scope = scopeStore.selectedScope else { return list }
+        return list.filter { Self.pr($0, matches: scope) }
     }
 
     // MARK: - Current view (drives badge + visible list)
@@ -238,7 +254,13 @@ final class PRManager: ObservableObject {
     /// exclusion). So a chip's number equals what you'd see in the deck if you
     /// selected that scope on the current tab.
     private var scopeSelectorBasePRs: [PRSnapshot] {
-        tabFiltered(applyScope: false)
+        // Inbox uses its own union pipeline (tabFiltered short-circuits to [] on
+        // .inbox), so derive the chip base from the non-muted, scope-independent
+        // Inbox set — otherwise the chips vanish whenever no scope is selected.
+        if settings.selectedTab == .inbox {
+            return inboxActiveUnscopedPRs
+        }
+        return tabFiltered(applyScope: false)
             .filter { !snoozeStore.snoozedNodeIds.contains($0.nodeId) }
     }
 

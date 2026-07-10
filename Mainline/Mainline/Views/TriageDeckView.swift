@@ -351,7 +351,7 @@ struct TriageDeckView: View {
             .sorted(by: PRSnapshot.triageOrder)
 
         var result: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] = []
-        for (role, rolePRs) in [(InboxRole.needsYourReview, needsReview), (.yourPRs, yourPRs)] {
+        for (role, rolePRs) in [(InboxRole.yourPRs, yourPRs), (.needsYourReview, needsReview)] {
             guard !rolePRs.isEmpty else { continue }
             let grouped = Dictionary(grouping: rolePRs, by: { $0.actionGroup(splitDrafts: settings.splitDrafts) })
             let actionSections: [(group: ActionGroup, prs: [PRSnapshot])] = ActionGroup.allCases
@@ -621,9 +621,13 @@ struct TriageDeckView: View {
                         .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
-                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
+                        Text(verbatim: pr.author.isEmpty
+                             ? "\(pr.repoFullName) #\(pr.number)"
+                             : "\(pr.repoFullName) #\(pr.number) · \(pr.author)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         if isDraft {
                             DraftBadge()
                         }
@@ -838,9 +842,13 @@ struct TriageDeckView: View {
                         .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
-                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
+                        Text(verbatim: pr.author.isEmpty
+                             ? "\(pr.repoFullName) #\(pr.number)"
+                             : "\(pr.repoFullName) #\(pr.number) · \(pr.author)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         if let wake {
                             Text(humanizedWake(from: wake))
                                 .font(.caption2)
@@ -903,9 +911,13 @@ struct TriageDeckView: View {
                         .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
-                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
+                        Text(verbatim: pr.author.isEmpty
+                             ? "\(pr.repoFullName) #\(pr.number)"
+                             : "\(pr.repoFullName) #\(pr.number) · \(pr.author)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         DoneBadge(pr: pr)
                         if settings.selectedTab == .forMe {
                             ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
@@ -1502,17 +1514,16 @@ struct FeedbackBadge: View {
                 .foregroundStyle(Color(nsColor: .systemRed))
                 .accessibilityLabel("Changes requested")
         } else if pr.unresolvedThreadCount > 0 {
+            // De-emphasized: just the icon + count (no "unresolved" word, no amber
+            // pill) so open threads read as a quiet comment indicator.
             HStack(spacing: 2) {
                 Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
                     .font(.caption2)
-                Text("\(pr.unresolvedThreadCount) unresolved")
+                Text("\(pr.unresolvedThreadCount)")
                     .font(.caption2)
             }
             .lineLimit(1)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(Color(nsColor: .systemOrange).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
-            .foregroundStyle(Color(nsColor: .systemOrange))
+            .foregroundStyle(.secondary)
             .accessibilityLabel("\(pr.unresolvedThreadCount) unresolved conversation\(pr.unresolvedThreadCount == 1 ? "" : "s")")
         } else if pr.reviewState == .changesRequested || pr.commentCount > 0 {
             HStack(spacing: 2) {
