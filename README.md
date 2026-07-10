@@ -1,13 +1,14 @@
+<img width="128" height="128" alt="mainline-logo" src="https://github.com/user-attachments/assets/d039c639-ef8c-4388-8423-e8e546da3e1a" />
 
 # Mainline
 
 A lightweight macOS menu bar app that keeps you on top of your GitHub pull requests.
 
+PR view made simple, focused and always available.
+
 [![CI](https://github.com/mthines/mainline/actions/workflows/ci.yml/badge.svg)](https://github.com/mthines/mainline/actions/workflows/ci.yml)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](https://www.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-<img width="406" height="588" alt="Screenshot 2026-07-08 at 10 43 35" src="https://github.com/user-attachments/assets/8441bede-8201-4cb7-b826-e56dd573f05f" />
 
 Mainline lives in your menu bar and watches the pull requests you care about — the ones you opened and the ones waiting on your review.
 It notifies you when something changes: a PR turns green, a review lands, or CI breaks.
@@ -74,6 +75,13 @@ Your token is stored in the macOS Keychain — never in a plain file or in app p
 
 ## Features
 
+A curated set of relevant PR's in your **Inbox**, or dedicated **For me** / **Created** tabs.
+
+Not relevant, hover and press `Q`. For later, press `S`.
+
+<img width="406" height="897" alt="image" src="https://github.com/user-attachments/assets/8ff42fba-bd71-4892-bae2-b1f2b1986a99" />
+
+
 ### Stay notified
 
 - **New PR** — fires a notification when a new PR appears in your search queries.
@@ -112,7 +120,22 @@ Your token is stored in the macOS Keychain — never in a plain file or in app p
 
 ### Settings
 
-<img width="1136" height="917" alt="Mainline Settings window showing token import, notification toggles, and the global shortcut recorder" src="https://github.com/user-attachments/assets/7bd80ef7-ee9e-4feb-a17f-b3100e3c2f85" />
+<img width="927" height="823" alt="Mainline Settings window showing token import, notification toggles, and the global shortcut recorder" src="https://github.com/user-attachments/assets/17bd852a-15e4-4fdc-bc58-f2407f7c1d7f" />
+
+### Inbox
+
+<img width="927" height="823" alt="image" src="https://github.com/user-attachments/assets/e57ed05a-574d-467c-861b-a0412a817978" />
+
+
+### Keyboard
+
+<img width="927" height="823" alt="image" src="https://github.com/user-attachments/assets/5f8ab6f8-16ea-4b4c-bb03-690e67111c2e" />
+
+
+### Help
+
+<img width="927" height="823" alt="image" src="https://github.com/user-attachments/assets/20a9e8a9-3d3d-4147-bc2c-6f5f23589a6c" />
+
 
 ## For developers
 
