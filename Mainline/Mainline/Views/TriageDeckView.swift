@@ -419,7 +419,11 @@ struct TriageDeckView: View {
             ForEach(inboxSections, id: \.role.rawValue) { section in
                 inboxRoleSectionHeader(for: section.role, prs: inboxRolePRs(for: section.role))
                 ForEach(section.actionSections, id: \.group) { actionSection in
-                    sectionView(group: actionSection.group, prs: actionSection.prs)
+                    sectionView(
+                        group: actionSection.group,
+                        prs: actionSection.prs,
+                        expansion: inboxExpansionBinding(for: section.role, group: actionSection.group)
+                    )
                 }
             }
             if !mutedPRs.isEmpty {
@@ -520,7 +524,7 @@ struct TriageDeckView: View {
     private var prList: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(sections, id: \.group) { section in
-                sectionView(group: section.group, prs: section.prs)
+                sectionView(group: section.group, prs: section.prs, expansion: expansionBinding(for: section.group))
             }
         }
     }
@@ -531,8 +535,11 @@ struct TriageDeckView: View {
     }
 
     @ViewBuilder
-    private func sectionView(group: ActionGroup, prs sectionPRs: [PRSnapshot]) -> some View {
-        let expansion = expansionBinding(for: group)
+    private func sectionView(
+        group: ActionGroup,
+        prs sectionPRs: [PRSnapshot],
+        expansion: Binding<Bool>
+    ) -> some View {
         // Whole-header tap toggles the section (label + count + chevron), matching
         // the Needs-a-Human header. Replaces DisclosureGroup so tapping the text or
         // count — not just the triangle — expands/collapses.
@@ -661,6 +668,32 @@ struct TriageDeckView: View {
                 var collapsed = settings.collapsedSections
                 if expanded { collapsed.remove(group) } else { collapsed.insert(group) }
                 settings.collapsedSections = collapsed
+            }
+        )
+    }
+
+    /// Collapse state for an Inbox action-group section, scoped to its `InboxRole`.
+    ///
+    /// The Inbox renders the same `ActionGroup` (e.g. `.waiting`) once under "Your
+    /// PRs" and once under "Needs your review". Keying purely by `ActionGroup` — as
+    /// `expansionBinding(for:)` does — made both collapse together. This scopes the
+    /// key by role via a composite `"inbox:<role>:<group>"` string persisted in the
+    /// SAME `collapsedSectionsRaw` store (no new UserDefaults key). Those composite
+    /// strings don't decode to any `ActionGroup`, so the non-Inbox
+    /// `collapsedSections` accessor silently ignores them. Expanded by default; the
+    /// store records an explicit collapse — matching the normal-group semantics.
+    private func inboxExpansionBinding(for role: InboxRole, group: ActionGroup) -> Binding<Bool> {
+        let key = "inbox:\(role.rawValue):\(group.rawValue)"
+        return Binding(
+            get: { !settings.collapsedSectionsRaw.contains(key) },
+            set: { expanded in
+                var raw = settings.collapsedSectionsRaw
+                if expanded {
+                    raw.removeAll { $0 == key }
+                } else if !raw.contains(key) {
+                    raw.append(key)
+                }
+                settings.collapsedSectionsRaw = raw
             }
         )
     }
