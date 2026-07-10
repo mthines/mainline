@@ -92,6 +92,11 @@ final class PRManager: ObservableObject {
     /// Union of all PRs from the two polling tabs (.forMe + .created), filtered
     /// through the standard scope + drafts guards (snooze excluded). This is the
     /// Inbox population BEFORE mute rules are applied.
+    ///
+    /// The drafts guard is applied HERE — not only in `tabFiltered` — so the
+    /// `showDrafts` toggle (⌘D) works identically on the Inbox tab as on the
+    /// For-me / Created tabs, hiding EVERY draft (colleagues' and your own) rather
+    /// than being silently ignored on the Inbox pipeline.
     private var inboxUnionPRs: [PRSnapshot] {
         let snoozed = snoozeStore.snoozedNodeIds
         // A PR can appear in both tabs (union by nodeId, keeping the last-merged copy).
@@ -99,6 +104,7 @@ final class PRManager: ObservableObject {
         return prs.filter {
             ($0.tabs.contains(.forMe) || $0.tabs.contains(.created))
                 && !snoozed.contains($0.nodeId)
+                && (settings.showDrafts || $0.classifiedState != .draft)
         }.filter { pr in
             guard seen.insert(pr.nodeId).inserted else { return false }
             return true
