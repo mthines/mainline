@@ -37,9 +37,9 @@ enum ReviewDecision: String, Codable, Equatable {
 /// Which Linear-style tab a PR belongs to.
 /// A PR can appear in both (e.g. authored a PR you were also asked to review).
 enum ReviewTab: String, Codable, Equatable, CaseIterable, Identifiable {
+    case inbox    // derived union of forMe + created with mute filtering (first/primary tab)
     case forMe    // review-requested / assigned to me
     case created  // authored by me
-    case inbox    // derived union of forMe + created with mute filtering
 
     var id: String { rawValue }
 
