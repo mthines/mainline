@@ -15,7 +15,7 @@ It notifies you when something changes: a PR turns green, a review lands, or CI 
 It groups every PR by what needs your attention, and lets you approve, merge, or snooze straight from the keyboard.
 No browser tabs, no refreshing GitHub by hand.
 
-**Jump to:** [Install](#install) · [Get started](#get-started) · [Features](#features) · [Screenshots](#screenshots)
+**Jump to:** [Install](#install) · [Get started](#get-started) · [Features](#features) · [Screenshots](#screenshots) · [Docs](docs/README.md)
 
 ## Install
 
@@ -96,22 +96,22 @@ Not relevant, hover and press `Q`. For later, press `S`.
 
 ### Triage fast
 
-- **Menu bar panel** — click the icon to see your PRs grouped by actionability (Needs a Human, Ready to merge, Waiting, …), each with CI status.
-- **Keyboard triage** — drive the whole panel from the keyboard: `J`/`K` to move, `Space` to preview the diff, `A`/`M`/`R` to approve / merge / request changes, `S` to snooze, `E` to mark seen, `X` to dismiss, `V` for multi-select, `⌘Z` to undo.
-- **Command palette** — `⌘K` opens a Raycast-style palette for every action.
-- **Diff preview** — `Space` shows the PR diff inline via Quick Look.
+- **Menu bar panel** — click the icon to see your PRs grouped by actionability (Needs attention, Ready to merge, Waiting, …), each with CI status.
+- **Keyboard triage** — drive the whole panel from the keyboard: `J`/`K` to move, `Space` to peek, `↩` to open, `M` to merge, `S` to postpone, `E` to open the preview, `N` to mark seen, `X` to dismiss, `V` for multi-select, `D` to toggle drafts, `Q` to mute (Inbox), `R` to refresh, `⌘Z` to undo. Every key is rebindable in Settings → Keyboard.
+- **Peek** — `Space` opens a glance card with the PR's changed-files list.
+- **Row menu** — right-click any PR for every action, including approve and request changes.
 - **Global shortcut** — open Mainline from any app with a system-wide hotkey (default ⇧⌃ + the key left of `1`; customizable in Settings).
 - **Scope filter** — narrow the panel and badge to a single org or repo.
-- **Trust ledger** — tracks how each author's PRs have turned out, surfaced as a compact tier badge per row.
+
+See the [keyboard reference](docs/keyboard.md) for the full list and how to rebind.
 
 ### Act (optional, off by default)
 
-- **Write actions** — approve, merge, or request changes without leaving the menu bar (each behind a confirmation; enable in Settings).
-- **Autopilot** — auto-approve trusted, low-risk PRs (requires write actions to be enabled).
+- **Write actions** — approve, merge, or request changes without leaving the menu bar (each behind a confirmation; enable in Settings). See [Write actions](docs/actions.md).
 
 ### Configure and secure
 
-- **Configurable polling** — default 60s interval; adjustable in Settings (30s – 3600s).
+- **Configurable polling** — default 30s interval; adjustable in Settings (30s – 3600s).
 - **Custom search queries** — default `is:open is:pr author:@me` and `is:open is:pr review-requested:@me`.
 - **Keychain storage** — your token is stored securely in the macOS Keychain; never in app preferences or on disk.
 - **Opt-in telemetry** — anonymous usage data is **off** by default; enable it in Settings → Privacy (see [`docs/telemetry.md`](docs/telemetry.md)).
