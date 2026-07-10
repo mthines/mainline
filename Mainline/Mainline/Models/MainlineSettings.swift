@@ -62,6 +62,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case dismiss
     case multiSelectToggle
     case toggleDrafts
+    case toggleMute
     case undo
 
     var id: String { rawValue }
@@ -79,6 +80,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .dismiss:          return "Dismiss"
         case .multiSelectToggle: return "Toggle Multi-Select"
         case .toggleDrafts:     return "Toggle Drafts"
+        case .toggleMute:       return "Mute / Move Up (Inbox)"
         case .undo:             return "Undo (⌘+key)"
         }
     }
@@ -96,6 +98,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .dismiss:          return "x"
         case .multiSelectToggle: return "v"
         case .toggleDrafts:     return "d"
+        case .toggleMute:       return "l"   // "low-priority"
         case .undo:             return "z"
         }
     }
@@ -113,6 +116,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .dismiss:          return "xmark"
         case .multiSelectToggle: return "checkmark.circle"
         case .toggleDrafts:     return "pencil.circle"
+        case .toggleMute:       return "arrow.down.circle"
         case .undo:             return "arrow.uturn.backward"
         }
     }
@@ -181,6 +185,7 @@ struct InAppShortcutBindings: Equatable {
     var dismiss:         ShortcutBinding
     var multiSelectToggle: ShortcutBinding
     var toggleDrafts:    ShortcutBinding
+    var toggleMute:      ShortcutBinding
     var undo:            ShortcutBinding
 
     /// Factory defaults — all bindings bare except undo = ⌘Z.
@@ -198,6 +203,7 @@ struct InAppShortcutBindings: Equatable {
             dismiss:         ShortcutBinding(key: "x"),
             multiSelectToggle: ShortcutBinding(key: "v"),
             toggleDrafts:    ShortcutBinding(key: "d"),
+            toggleMute:      ShortcutBinding(key: "l"),
             undo:            ShortcutBinding(key: "z", modifiers: cmdRaw)
         )
     }()
@@ -216,6 +222,7 @@ struct InAppShortcutBindings: Equatable {
         case .dismiss:           return dismiss
         case .multiSelectToggle: return multiSelectToggle
         case .toggleDrafts:      return toggleDrafts
+        case .toggleMute:        return toggleMute
         case .undo:              return undo
         }
     }
@@ -234,6 +241,7 @@ struct InAppShortcutBindings: Equatable {
         case .dismiss:           dismiss         = binding
         case .multiSelectToggle: multiSelectToggle = binding
         case .toggleDrafts:      toggleDrafts    = binding
+        case .toggleMute:        toggleMute      = binding
         case .undo:              undo            = binding
         }
     }
@@ -279,7 +287,8 @@ extension InAppShortcutBindings: Codable {
     /// so existing stored data continues to decode).
     enum CodingKeys: String, CodingKey {
         case navigateDown, navigateUp, peek, merge, refresh, openPreview,
-             snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts, undo
+             snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
+             toggleMute, undo
     }
 
     /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
@@ -318,6 +327,7 @@ extension InAppShortcutBindings: Codable {
         dismiss         = try decodeBinding(.dismiss,         default: d.dismiss)
         multiSelectToggle = try decodeBinding(.multiSelectToggle, default: d.multiSelectToggle)
         toggleDrafts    = try decodeBinding(.toggleDrafts,    default: d.toggleDrafts)
+        toggleMute      = try decodeBinding(.toggleMute,      default: d.toggleMute)
 
         // Undo migration: bare-string or absent → apply .command modifier.
         if let newShape = try? container.decodeIfPresent(ShortcutBinding.self, forKey: .undo) {
@@ -345,6 +355,7 @@ extension InAppShortcutBindings: Codable {
         try container.encode(dismiss,          forKey: .dismiss)
         try container.encode(multiSelectToggle, forKey: .multiSelectToggle)
         try container.encode(toggleDrafts,     forKey: .toggleDrafts)
+        try container.encode(toggleMute,       forKey: .toggleMute)
         try container.encode(undo,             forKey: .undo)
     }
 }
@@ -416,6 +427,7 @@ final class MainlineSettings: ObservableObject {
         static let reviewFocusAuthors   = "reviewFocusAuthors"
         static let reviewFocusTeams     = "reviewFocusTeams"
         static let muteLabels           = "muteLabels"
+        static let inboxMuteOverrides   = "inboxMuteOverrides"
         // Vercel preview detection
         static let vercelPreviewEnabled = "vercelPreviewEnabled"
         static let vercelPreviewDomains = "vercelPreviewDomains"
@@ -649,6 +661,19 @@ final class MainlineSettings: ObservableObject {
     /// Empty = disabled (no label-based muting). Edit via Settings → Inbox.
     @Published var muteLabels: [String] {
         didSet { defaults.set(muteLabels, forKey: Keys.muteLabels) }
+    }
+
+    /// Per-PR manual mute overrides for the Inbox, keyed by nodeId. A `true` value
+    /// forces the PR into the Muted group; `false` pins it into the active list even
+    /// when a rule would mute it (so the `L` shortcut can move a rule-muted PR back
+    /// up). Absent = follow the mute rules. Persisted as JSON. Toggled by the
+    /// `toggleMute` shortcut; never auto-cleared (a manual choice is permanent).
+    @Published var inboxMuteOverrides: [String: Bool] {
+        didSet {
+            if let data = try? JSONEncoder().encode(inboxMuteOverrides) {
+                defaults.set(data, forKey: Keys.inboxMuteOverrides)
+            }
+        }
     }
 
     /// Default mute patterns seeded on first run.
@@ -1026,6 +1051,12 @@ final class MainlineSettings: ObservableObject {
         reviewFocusAuthors = defaults.stringArray(forKey: Keys.reviewFocusAuthors) ?? []
         reviewFocusTeams   = defaults.stringArray(forKey: Keys.reviewFocusTeams) ?? []
         muteLabels         = defaults.stringArray(forKey: Keys.muteLabels) ?? []
+        if let data = defaults.data(forKey: Keys.inboxMuteOverrides),
+           let decoded = try? JSONDecoder().decode([String: Bool].self, from: data) {
+            inboxMuteOverrides = decoded
+        } else {
+            inboxMuteOverrides = [:]
+        }
 
         // Vercel preview detection — default ON, with the dash0 + vercel.app suffixes
         vercelPreviewEnabled = defaults.object(forKey: Keys.vercelPreviewEnabled) == nil

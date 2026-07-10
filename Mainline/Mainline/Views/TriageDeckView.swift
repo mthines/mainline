@@ -15,6 +15,7 @@ enum TriageAction: Identifiable {
     case viewDiff
     case openInBrowser
     case openPreview
+    case toggleMute
 
     var id: String { label }
 
@@ -29,6 +30,7 @@ enum TriageAction: Identifiable {
         case .viewDiff:           return "View Details"
         case .openInBrowser:      return "Open in Browser"
         case .openPreview:        return "Open Preview"
+        case .toggleMute:         return "Mute / Move Up"
         }
     }
 
@@ -43,6 +45,7 @@ enum TriageAction: Identifiable {
         case .viewDiff:        return "rectangle.stack"
         case .openInBrowser:   return "safari"
         case .openPreview:     return "globe"
+        case .toggleMute:      return "arrow.down.circle"
         }
     }
 
@@ -759,6 +762,13 @@ struct TriageDeckView: View {
         Button { handleTriageAction(.dismiss, on: pr) } label: {
             Label("Dismiss", systemImage: "xmark")
         }
+        if inboxMode {
+            let muted = manager.isInboxMuted(pr)
+            Button { handleTriageAction(.toggleMute, on: pr) } label: {
+                Label(muted ? "Move Up (Un-mute)" : "Mute / Low-priority",
+                      systemImage: muted ? "arrow.up.circle" : "arrow.down.circle")
+            }
+        }
 
         Divider()
 
@@ -1188,6 +1198,12 @@ struct TriageDeckView: View {
             return nil
         }
 
+        // Toggle Inbox mute / move-up on the focused PR.
+        if shortcutMatches(.toggleMute, event: event) {
+            if let pr = focusedPR { handleTriageAction(.toggleMute, on: pr) }
+            return nil
+        }
+
         return event
     }
 
@@ -1259,6 +1275,13 @@ struct TriageDeckView: View {
             }
         case .openPreview:
             openPreview(pr)
+        case .toggleMute:
+            let prevOverride = manager.inboxMuteOverride(for: pr)
+            let nowMuted = manager.toggleInboxMute(pr)
+            TelemetryService.shared.recordTriageInteraction(nowMuted ? "inbox_mute" : "inbox_unmute")
+            pushUndo(label: nowMuted ? "Muted: \(pr.title)" : "Moved up: \(pr.title)", pr: pr) {
+                manager.setInboxMuteOverride(prevOverride, for: pr)
+            }
         }
     }
 

@@ -111,19 +111,7 @@ final class PRManager: ObservableObject {
     /// use `tabFiltered(applyScope: false)`).
     private var inboxActiveUnscopedPRs: [PRSnapshot] {
         let config = inboxMuteConfig
-        return inboxUnionPRs.filter { pr in
-            let role = pr.inboxRole(myLogin: config.myLogin)
-            return InboxMuteEngine.muteVerdict(
-                title:          pr.title,
-                headRef:        pr.headRefName,
-                authorLogin:    pr.author,
-                authorIsBot:    pr.authorIsBot,
-                requestedTeams: pr.requestedTeams,
-                labels:         pr.labels,
-                role:           role,
-                config:         config
-            ) == nil
-        }
+        return inboxUnionPRs.filter { !effectiveMuted($0, config: config) }
     }
 
     /// Non-muted PRs for the Inbox (active), with the selected scope applied —
@@ -133,24 +121,66 @@ final class PRManager: ObservableObject {
         applyingSelectedScope(inboxActiveUnscopedPRs)
     }
 
-    /// Muted PRs for the Inbox (demoted by any active rule), with the selected
-    /// scope applied — rendered in the shared collapsed "Muted / low-priority" group.
+    /// Muted PRs for the Inbox (demoted by a rule OR a manual override), with the
+    /// selected scope applied — rendered in the collapsed "Muted / low-priority" group.
     var inboxMutedPRs: [PRSnapshot] {
         let config = inboxMuteConfig
-        let muted = inboxUnionPRs.filter { pr in
-            let role = pr.inboxRole(myLogin: config.myLogin)
-            return InboxMuteEngine.muteVerdict(
-                title:          pr.title,
-                headRef:        pr.headRefName,
-                authorLogin:    pr.author,
-                authorIsBot:    pr.authorIsBot,
-                requestedTeams: pr.requestedTeams,
-                labels:         pr.labels,
-                role:           role,
-                config:         config
-            ) != nil
+        return applyingSelectedScope(inboxUnionPRs.filter { effectiveMuted($0, config: config) })
+    }
+
+    // MARK: - Inbox mute: rules + manual override
+
+    /// Pure rule-based mute verdict (ignores manual overrides).
+    private func ruleMuted(_ pr: PRSnapshot, config: InboxMuteConfig) -> Bool {
+        let role = pr.inboxRole(myLogin: config.myLogin)
+        return InboxMuteEngine.muteVerdict(
+            title:          pr.title,
+            headRef:        pr.headRefName,
+            authorLogin:    pr.author,
+            authorIsBot:    pr.authorIsBot,
+            requestedTeams: pr.requestedTeams,
+            labels:         pr.labels,
+            role:           role,
+            config:         config
+        ) != nil
+    }
+
+    /// Effective muted state: a manual override (`settings.inboxMuteOverrides`)
+    /// wins over the rules — `true` forces Muted, `false` pins the PR active even
+    /// when a rule matches. Absent → follow the rules.
+    private func effectiveMuted(_ pr: PRSnapshot, config: InboxMuteConfig) -> Bool {
+        if let override = settings.inboxMuteOverrides[pr.nodeId] { return override }
+        return ruleMuted(pr, config: config)
+    }
+
+    /// Public accessor for the current effective muted state (used by the deck's
+    /// toggle-mute verb to decide the direction of the toggle).
+    func isInboxMuted(_ pr: PRSnapshot) -> Bool {
+        effectiveMuted(pr, config: inboxMuteConfig)
+    }
+
+    /// The stored manual override for a PR (nil = following the rules). Exposed so
+    /// the toggle verb can capture the prior value for undo.
+    func inboxMuteOverride(for pr: PRSnapshot) -> Bool? {
+        settings.inboxMuteOverrides[pr.nodeId]
+    }
+
+    /// Sets (or, with `nil`, clears) the manual override for a PR.
+    func setInboxMuteOverride(_ value: Bool?, for pr: PRSnapshot) {
+        if let value {
+            settings.inboxMuteOverrides[pr.nodeId] = value
+        } else {
+            settings.inboxMuteOverrides.removeValue(forKey: pr.nodeId)
         }
-        return applyingSelectedScope(muted)
+    }
+
+    /// Toggles a PR between the active list and the Muted group by writing a manual
+    /// override opposite to its current effective state. Returns the new muted state.
+    @discardableResult
+    func toggleInboxMute(_ pr: PRSnapshot) -> Bool {
+        let newMuted = !isInboxMuted(pr)
+        settings.inboxMuteOverrides[pr.nodeId] = newMuted
+        return newMuted
     }
 
     /// Applies the currently-selected scope (nil = All) to an Inbox PR list.
