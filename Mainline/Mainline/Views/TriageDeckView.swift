@@ -1209,6 +1209,7 @@ struct TriageDeckView: View {
         // Undo — default ⌘Z; modifier requirement lives in the stored binding.
         if shortcutMatches(.undo, event: event) {
             undoLast()
+            TelemetryService.shared.recordTriageInteraction("undo")
             return nil
         }
 
@@ -1222,6 +1223,7 @@ struct TriageDeckView: View {
         // Refresh the PR list. Works whether or not a row is focused.
         if shortcutMatches(.refresh, event: event) {
             Task { await manager.triggerSingleRefresh() }
+            TelemetryService.shared.recordTriageInteraction("refresh")
             return nil
         }
 
@@ -1266,6 +1268,7 @@ struct TriageDeckView: View {
         // Multi-select toggle.
         if shortcutMatches(.multiSelectToggle, event: event) {
             multiSelectMode.toggle()
+            TelemetryService.shared.recordTriageInteraction("multi_select_toggle")
             return nil
         }
 

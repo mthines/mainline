@@ -31,7 +31,13 @@ struct InboxSettingsView: View {
         Section("Bot Authors") {
             Toggle(
                 "Mute bot-authored PRs (dependabot, renovate, github-actions, …)",
-                isOn: $settings.muteBotAuthors
+                isOn: Binding(
+                    get: { settings.muteBotAuthors },
+                    set: { newValue in
+                        settings.muteBotAuthors = newValue
+                        TelemetryService.shared.recordSettingChanged(name: "muteBotAuthors", enabled: newValue)
+                    }
+                )
             )
             Label("Demotes PRs whose author login ends with [bot] or matches a known dependency-management bot. Helps silence automated dependency bumps in the Inbox.",
                   systemImage: "info.circle")

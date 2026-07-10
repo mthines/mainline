@@ -134,11 +134,11 @@ All attributes use **bounded, low-cardinality values** — never raw user data.
 | `write.action`       | `"approve"`, `"merge"`, `"request_changes"`                                                      |
 | `write.result`       | `"success"`, `"failure"`                                                                         |
 | `write.merge_method` | `"squash"`, `"merge"`, `"rebase"`, `"auto"` (from resolved preference, never PR title/branch)   |
-| `interaction.type`   | `"snooze"`, `"unsnooze"`, `"mark_seen"`, `"dismiss"`, `"open_in_browser"`, `"diff_preview"`, `"command_palette"`, `"tab_switch"`, `"scope_filter_change"`, `"drafts_toggle"` |
+| `interaction.type`   | `"snooze"`, `"unsnooze"`, `"mark_seen"`, `"dismiss"`, `"open_in_browser"`, `"diff_preview"`, `"open_preview"`, `"tab_switch"`, `"scope_filter_change"`, `"toggle_drafts"`, `"inbox_mute"`, `"inbox_unmute"`, `"undo"`, `"refresh"`, `"multi_select_toggle"` |
 | `notification.event_type` | `"newPR"`, `"readyForReview"`, `"ciChanged"`, `"reviewComment"`                           |
 | `notification.attention_level` | `"notify"`, `"quiet"`                                                                |
 | `token.import_method`| `"gh"`, `"paste"`                                                                                |
-| `setting.name`       | UserDefaults key names (never values)                                                            |
+| `setting.name`       | UserDefaults key names (never values) — `"writeActionsEnabled"`, `"vercelPreviewEnabled"`, `"notifyOnlyHumanComments"`, `"menuBarScopeFollowsSelection"`, `"globalShortcutEnabled"`, `"compactRows"`, `"splitDrafts"`, `"muteBotAuthors"` |
 
 ## Privacy contract
 

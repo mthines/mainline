@@ -59,6 +59,24 @@ struct SettingsView: View {
     @State private var panelMinHeightDraft: Int = 240
     @State private var showingTelemetryDetails: Bool = false
 
+    /// A Bool binding mirroring a `MainlineSettings` toggle that records a
+    /// `setting.changed` telemetry event whenever the user flips it. Routing every
+    /// preference toggle through this keeps the `mainline.setting.changed` counter
+    /// fed from one consistent path so no toggle silently escapes instrumentation.
+    /// `name` is the UserDefaults key (bounded, low-cardinality — never a value).
+    private func tracked(
+        _ keyPath: ReferenceWritableKeyPath<MainlineSettings, Bool>,
+        name: String
+    ) -> Binding<Bool> {
+        Binding(
+            get: { settings[keyPath: keyPath] },
+            set: { newValue in
+                settings[keyPath: keyPath] = newValue
+                TelemetryService.shared.recordSettingChanged(name: name, enabled: newValue)
+            }
+        )
+    }
+
     // Panel-height bounds. The setting may store a large number; the render path
     // in MenuBarView clamps it to the usable screen height, so a big value just
     // makes the panel as tall as the display allows.
@@ -191,7 +209,7 @@ struct SettingsView: View {
         }
 
         Section("Write Actions") {
-            Toggle("Enable write actions (Approve, Merge, Request Changes)", isOn: $settings.writeActionsEnabled)
+            Toggle("Enable write actions (Approve, Merge, Request Changes)", isOn: tracked(\.writeActionsEnabled, name: "writeActionsEnabled"))
             if settings.writeActionsEnabled {
                 Picker("Merge method", selection: $settings.mergeMethodPreference) {
                     ForEach(MergeMethodPreference.allCases) { method in
@@ -220,7 +238,7 @@ struct SettingsView: View {
         }
 
         Section("Preview Deployments") {
-            Toggle("Detect Vercel preview deployments", isOn: $settings.vercelPreviewEnabled)
+            Toggle("Detect Vercel preview deployments", isOn: tracked(\.vercelPreviewEnabled, name: "vercelPreviewEnabled"))
             if settings.vercelPreviewEnabled {
                 TextField("Preview domains", text: previewDomainsBinding, prompt: Text("dash0-preview.com, vercel.app"))
                     .textFieldStyle(.roundedBorder)
@@ -285,7 +303,7 @@ struct SettingsView: View {
 
         Section("Comments") {
             Toggle("Only notify for comments from people (ignore bots)",
-                   isOn: $settings.notifyOnlyHumanComments)
+                   isOn: tracked(\.notifyOnlyHumanComments, name: "notifyOnlyHumanComments"))
             Label("Skips the \"New review or comment\" banner when the latest comment or review is from a bot or app (CodeRabbit, Vercel, dependabot, Claude review bots, …). Unread and badge counts are unaffected.",
                   systemImage: "info.circle")
                 .font(.caption)
@@ -306,7 +324,7 @@ struct SettingsView: View {
             }
             .pickerStyle(.menu)
 
-            Toggle("Follow current view (tab, scope & drafts)", isOn: $settings.menuBarScopeFollowsSelection)
+            Toggle("Follow current view (tab, scope & drafts)", isOn: tracked(\.menuBarScopeFollowsSelection, name: "menuBarScopeFollowsSelection"))
 
             Label("The badge counts the chosen metric" +
                   (settings.menuBarScopeFollowsSelection ? " over exactly what the panel shows — the selected tab, scope, and drafts filter." : " across all repositories, ignoring the selected tab, scope, and drafts."),
@@ -317,7 +335,7 @@ struct SettingsView: View {
         }
 
         Section("Global Shortcut") {
-            Toggle("Open Mainline with a global shortcut", isOn: $settings.globalShortcutEnabled)
+            Toggle("Open Mainline with a global shortcut", isOn: tracked(\.globalShortcutEnabled, name: "globalShortcutEnabled"))
 
             HStack {
                 Text("Shortcut")
@@ -379,7 +397,7 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Toggle("Compact rows", isOn: $settings.compactRows)
+            Toggle("Compact rows", isOn: tracked(\.compactRows, name: "compactRows"))
             Label("Single-line titles, tighter spacing — fit more PRs.",
                   systemImage: "info.circle")
                 .font(.caption)
@@ -405,7 +423,7 @@ struct SettingsView: View {
                 get: { settings.showDrafts },
                 set: { newValue in
                     settings.showDrafts = newValue
-                    TelemetryService.shared.recordTriageInteraction("drafts_toggle")
+                    TelemetryService.shared.recordTriageInteraction("toggle_drafts")
                 }
             ))
             Label("When off, drafts are hidden from the list, sections, counts, and the Needs-a-Human bucket. Toggle in the panel with the Drafts chip or ⌘D.",
@@ -414,7 +432,7 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Toggle("Group drafts in their own section", isOn: $settings.splitDrafts)
+            Toggle("Group drafts in their own section", isOn: tracked(\.splitDrafts, name: "splitDrafts"))
             Label("When off, shown drafts are mixed into their real state group (Open, Approved, …) and marked with a Draft badge.",
                   systemImage: "info.circle")
                 .font(.caption)

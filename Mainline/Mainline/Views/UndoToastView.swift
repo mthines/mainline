@@ -39,6 +39,7 @@ struct UndoToastView: View {
             Button("Undo") {
                 entry.undo()
                 entries.removeAll { $0.id == entry.id }
+                TelemetryService.shared.recordTriageInteraction("undo")
             }
             .buttonStyle(.plain)
             .font(.caption.weight(.semibold))
