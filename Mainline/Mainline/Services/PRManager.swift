@@ -153,7 +153,7 @@ final class PRManager: ObservableObject {
     ///   4. the For-me Direct/Team sub-filter (only on the For-me tab).
     ///
     /// On the Inbox tab, returns `inboxActivePRs` (non-muted union), so the badge
-    /// counts the non-muted set (AC-10 / R12). Muted PRs are excluded upstream.
+    /// counts only non-muted PRs. Muted PRs are excluded upstream.
     ///
     /// `MenuBarView.visiblePRs` delegates to this exact computation.
     ///
