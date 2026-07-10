@@ -211,6 +211,13 @@ struct TriageDeckView: View {
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
 
+    // Scroll-thrash guard: hover selection is suppressed briefly after a scroll
+    // wheel event so that scrolling the list (which sweeps the stationary pointer
+    // across many rows, each firing `.onHover`) doesn't cause the selection — and
+    // its revealed action cluster — to jump around while you scroll.
+    @State private var lastScrollAt: Date = .distantPast
+    @State private var scrollMonitor: Any?
+
     // MARK: - Body
 
     var body: some View {
@@ -251,6 +258,34 @@ struct TriageDeckView: View {
                 onDismiss: { manager.peekPR = nil }
             )
         )
+        .onAppear { installScrollMonitor() }
+        .onDisappear { removeScrollMonitor() }
+    }
+
+    // MARK: - Scroll monitor (hover-thrash guard)
+
+    /// Installs a local scroll-wheel monitor that timestamps the last scroll, so
+    /// `.onHover` can ignore selection changes that fire merely because content
+    /// scrolled under a stationary pointer. Local monitor → only this app's events.
+    private func installScrollMonitor() {
+        guard scrollMonitor == nil else { return }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            lastScrollAt = Date()
+            return event
+        }
+    }
+
+    private func removeScrollMonitor() {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
+        }
+    }
+
+    /// True within a short window after the last scroll — used to gate hover
+    /// selection so scrolling doesn't drag the highlight around.
+    private var isScrolling: Bool {
+        Date().timeIntervalSince(lastScrollAt) < 0.18
     }
 
     // MARK: - PR list
@@ -455,10 +490,7 @@ struct TriageDeckView: View {
         .help(expansion.wrappedValue ? "Collapse muted PRs" : "Expand muted PRs")
 
         if expansion.wrappedValue {
-            ForEach(mutedPRs.sorted(by: PRSnapshot.triageOrder), id: \.nodeId) { pr in
-                deckRow(pr: pr, index: flatIndex(of: pr))
-                Divider().padding(.leading, metrics.dividerInset())
-            }
+            sectionRows(group: .muted, prs: mutedPRs.sorted(by: PRSnapshot.triageOrder))
         }
     }
 
@@ -536,22 +568,68 @@ struct TriageDeckView: View {
         .help(expansion.wrappedValue ? "Collapse \(group.title)" : "Expand \(group.title)")
 
         if expansion.wrappedValue {
-            ForEach(sectionPRs, id: \.nodeId) { pr in
-                if group == .postponed {
-                    postponedRow(pr: pr, index: flatIndex(of: pr))
-                } else if group == .done {
-                    doneRow(pr: pr)
-                } else {
-                    deckRow(pr: pr, index: flatIndex(of: pr))
-                }
-                Divider().padding(.leading, metrics.dividerInset())
-            }
+            sectionRows(group: group, prs: sectionPRs)
+        }
+    }
+
+    /// Renders a section's rows using a nodeId→index map computed ONCE (not per
+    /// row via `flatIndex`). Deck rows are memoized via `memoizedDeckRow`.
+    private func sectionRows(group: ActionGroup, prs sectionPRs: [PRSnapshot]) -> some View {
+        let indexMap = orderedIndexByNodeId
+        return ForEach(sectionPRs, id: \.nodeId) { pr in
+            rowFor(group: group, pr: pr, index: indexMap[pr.nodeId] ?? 0)
+            Divider().padding(.leading, metrics.dividerInset())
+        }
+    }
+
+    @ViewBuilder
+    private func rowFor(group: ActionGroup, pr: PRSnapshot, index: Int) -> some View {
+        if group == .postponed {
+            postponedRow(pr: pr, index: index)
+        } else if group == .done {
+            doneRow(pr: pr)
+        } else {
+            memoizedDeckRow(pr: pr, index: index)
         }
     }
 
     /// Index of a PR within the flat `orderedPRs` array (keyboard index space).
     private func flatIndex(of pr: PRSnapshot) -> Int {
         orderedPRs.firstIndex(where: { $0.nodeId == pr.nodeId }) ?? 0
+    }
+
+    /// Precomputed nodeId → keyboard-index map. Callers cache this in a local ONCE
+    /// per section render instead of calling `flatIndex(of:)` per row, which
+    /// recomputed the entire `orderedPRs` list for every row — O(n²) per render and
+    /// a major scroll/highlight cost with a large PR list.
+    private var orderedIndexByNodeId: [String: Int] {
+        var map: [String: Int] = [:]
+        let ordered = orderedPRs
+        map.reserveCapacity(ordered.count)
+        for (i, pr) in ordered.enumerated() { map[pr.nodeId] = i }
+        return map
+    }
+
+    /// Wraps `deckRow` in an `.equatable()` memoization shell keyed on the value
+    /// inputs that affect a row's appearance. SwiftUI then skips re-rendering rows
+    /// whose key is unchanged, so moving the highlight (J/K or hover) re-renders
+    /// only the two affected rows instead of the entire non-lazy VStack.
+    private func memoizedDeckRow(pr: PRSnapshot, index: Int) -> some View {
+        EquatableRow(key: DeckRowKey(
+            pr: pr,
+            isFocused: index == selectedIndex,
+            isSelected: selectedPRs.contains(pr.nodeId),
+            isUnread: manager.unreadPRIds.contains(pr.nodeId),
+            reviewSourceVisible: settings.selectedTab == .forMe,
+            myLogin: settings.githubUsername,
+            writeActionsEnabled: settings.writeActionsEnabled,
+            previewEnabled: settings.vercelPreviewEnabled,
+            showPeek: showPeek,
+            compact: settings.compactRows
+        )) {
+            deckRow(pr: pr, index: index)
+        }
+        .equatable()
     }
 
     /// Collapse state persisted to MainlineSettings, keyed by `ActionGroup`.
@@ -706,7 +784,7 @@ struct TriageDeckView: View {
             // No animation here on purpose: the highlight + revealed actions switch
             // instantly, which removes the cross-row hover "blink".
             .onHover { hovering in
-                guard hovering, !showPeek else { return }
+                guard hovering, !showPeek, !isScrolling else { return }
                 selectedIndex = index
             }
             .padding(.horizontal, RowMetrics.horizontalPadding)
@@ -880,7 +958,7 @@ struct TriageDeckView: View {
             // Hover selects the row — shared with keyboard focus — so hover-then-S
             // resumes the pointed row, matching the deck rows. Frozen while peeking.
             .onHover { hovering in
-                guard hovering, !showPeek else { return }
+                guard hovering, !showPeek, !isScrolling else { return }
                 selectedIndex = index
             }
             .padding(.horizontal, RowMetrics.horizontalPadding)
@@ -1504,6 +1582,35 @@ struct DoneBadge: View {
             .foregroundStyle(color)
             .accessibilityLabel(text)
     }
+}
+
+// MARK: - Deck row memoization
+
+/// Value bundle of everything that changes a deck row's rendered appearance.
+/// Used as the Equatable key for `EquatableRow` so unchanged rows skip
+/// re-rendering when the highlight moves. Settings-derived values are captured
+/// as plain values (not read live inside the row) so a change to any of them
+/// flips the key and re-renders the row.
+private struct DeckRowKey: Equatable {
+    let pr: PRSnapshot
+    let isFocused: Bool
+    let isSelected: Bool
+    let isUnread: Bool
+    let reviewSourceVisible: Bool
+    let myLogin: String
+    let writeActionsEnabled: Bool
+    let previewEnabled: Bool
+    let showPeek: Bool
+    let compact: Bool
+}
+
+/// Memoizing wrapper: re-evaluates `content()` only when `key` changes. Paired
+/// with `.equatable()` at the call site so SwiftUI uses `==` to skip stable rows.
+private struct EquatableRow<Content: View>: View, Equatable {
+    let key: DeckRowKey
+    @ViewBuilder var content: () -> Content
+    static func == (lhs: EquatableRow, rhs: EquatableRow) -> Bool { lhs.key == rhs.key }
+    var body: some View { content() }
 }
 
 // MARK: - FeedbackBadge
