@@ -233,9 +233,9 @@ struct SettingsView: View {
                 }
             }
             if settings.prOpenTarget == .linear {
-                TextField("Linear repos", text: linearRepoFilterBinding, prompt: Text("empty = all repos"))
+                TextField("Orgs or repos", text: linearRepoFilterBinding, prompt: Text("empty = all repos"))
                     .textFieldStyle(.roundedBorder)
-                Label("Comma-separated repos that open in Linear — an org (dash0hq) or an exact repo (dash0hq/dash0). Leave empty to use Linear for every repo. Repos not listed open in GitHub, so e.g. work repos go to Linear while personal ones stay on GitHub.", systemImage: "info.circle")
+                Label("Comma-separated orgs or repos that open in Linear — a whole org (acme) or an exact repo (acme/webapp). Leave empty to use Linear for every repo. Anything not listed opens in GitHub, so e.g. work repos go to Linear while personal ones stay on GitHub.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Label("Clicking a PR (click / ↵ / the Open verb) opens that PR's review view in the Linear desktop app — no API key or workspace needed; it's derived from the PR URL. If the desktop app isn't installed it opens in the browser instead. The peek card's Safari button always opens GitHub.", systemImage: "info.circle")
