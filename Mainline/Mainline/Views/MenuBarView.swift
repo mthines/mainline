@@ -202,6 +202,11 @@ struct MenuBarView: View {
         manager.prs.filter { $0.tabs.contains(.created) && countsTowardTabs($0) }.count
     }
 
+    /// Count for the Inbox tab label — active (non-muted) PRs only.
+    private var inboxCount: Int {
+        manager.inboxActivePRs.count
+    }
+
     // MARK: - Height budget (content-sized, capped, crash-proof)
     //
     // A MenuBarExtra(.window) popover has NO external height constraint: it sizes
@@ -408,6 +413,7 @@ struct MenuBarView: View {
         switch tab {
         case .forMe:   return forMeCount > 0   ? "For me (\(forMeCount))"     : tab.title
         case .created: return createdCount > 0 ? "Created (\(createdCount))" : tab.title
+        case .inbox:   return inboxCount > 0   ? "Inbox (\(inboxCount))"      : tab.title
         }
     }
 
@@ -535,7 +541,12 @@ struct MenuBarView: View {
     /// clamped — no NaN/∞/negative can reach the hosting view.
     @ViewBuilder
     private var scrollableBody: some View {
-        if !manager.hasToken || manager.prs.isEmpty {
+        let isEmpty = !manager.hasToken || (
+            settings.selectedTab == .inbox
+                ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty
+                : manager.prs.isEmpty
+        )
+        if isEmpty {
             emptyState
         } else {
             ScrollView {
@@ -564,6 +575,8 @@ struct MenuBarView: View {
             // "needs attention" concept — there is no separate top bucket.
             TriageDeckView(
                 prs: visiblePRs,
+                mutedPRs: settings.selectedTab == .inbox ? manager.inboxMutedPRs : [],
+                inboxMode: settings.selectedTab == .inbox,
                 manager: manager,
                 settings: settings
             )
@@ -635,6 +648,7 @@ struct MenuBarView: View {
         switch settings.selectedTab {
         case .forMe:   return "Nothing to review"
         case .created: return "No PRs created"
+        case .inbox:   return "Inbox clear"
         }
     }
 

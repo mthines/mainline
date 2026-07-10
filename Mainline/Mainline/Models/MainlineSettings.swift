@@ -410,6 +410,12 @@ final class MainlineSettings: ObservableObject {
         static let forMeReviewFilter    = "forMeReviewFilter"
         static let compactRows          = "compactRows"
         static let needsHumanExpanded   = "needsHumanExpanded"
+        // Inbox mute filters
+        static let mutePatterns         = "mutePatterns"
+        static let muteBotAuthors       = "muteBotAuthors"
+        static let reviewFocusAuthors   = "reviewFocusAuthors"
+        static let reviewFocusTeams     = "reviewFocusTeams"
+        static let muteLabels           = "muteLabels"
         // Vercel preview detection
         static let vercelPreviewEnabled = "vercelPreviewEnabled"
         static let vercelPreviewDomains = "vercelPreviewDomains"
@@ -607,6 +613,46 @@ final class MainlineSettings: ObservableObject {
     @Published var needsHumanExpanded: Bool {
         didSet { defaults.set(needsHumanExpanded, forKey: Keys.needsHumanExpanded) }
     }
+
+    // MARK: - Inbox mute filters
+
+    /// Glob patterns (case-insensitive, `*` wildcard) matched against PR title AND
+    /// head branch. PRs matching any pattern are demoted to the Muted group in the
+    /// Inbox view. Default `["chore(deps)*", "build(deps)*"]` to silence dependency
+    /// bumps. Edit via Settings → Inbox.
+    @Published var mutePatterns: [String] {
+        didSet { defaults.set(mutePatterns, forKey: Keys.mutePatterns) }
+    }
+
+    /// Whether to demote bot-authored PRs (dependabot, renovate, github-actions, and
+    /// logins ending in `[bot]`) to the Muted group. Default ON.
+    @Published var muteBotAuthors: Bool {
+        didSet { defaults.set(muteBotAuthors, forKey: Keys.muteBotAuthors) }
+    }
+
+    /// Allow-list of PR author logins for the "Needs your review" section.
+    /// When non-empty, only PRs authored by someone in this list (or a team in
+    /// `reviewFocusTeams`) stay in the active group; others are demoted. Empty =
+    /// no focus (show all). Edit via Settings → Inbox.
+    @Published var reviewFocusAuthors: [String] {
+        didSet { defaults.set(reviewFocusAuthors, forKey: Keys.reviewFocusAuthors) }
+    }
+
+    /// Allow-list of team slugs for the "Needs your review" section.
+    /// Works alongside `reviewFocusAuthors`: a PR is kept if its author OR a
+    /// requested team matches. Empty = no focus. Edit via Settings → Inbox.
+    @Published var reviewFocusTeams: [String] {
+        didSet { defaults.set(reviewFocusTeams, forKey: Keys.reviewFocusTeams) }
+    }
+
+    /// Label names that demote a PR to the Muted group. Case-insensitive match.
+    /// Empty = disabled (no label-based muting). Edit via Settings → Inbox.
+    @Published var muteLabels: [String] {
+        didSet { defaults.set(muteLabels, forKey: Keys.muteLabels) }
+    }
+
+    /// Default mute patterns seeded on first run.
+    static let defaultMutePatterns = ["chore(deps)*", "build(deps)*"]
 
     // MARK: - Vercel preview detection
 
@@ -930,10 +976,11 @@ final class MainlineSettings: ObservableObject {
         defaultSnoozeDuration = defaults.string(forKey: Keys.defaultSnoozeDuration)
             .flatMap { SnoozeDuration(rawValue: $0) } ?? .quickDefault
 
-        // Collapsed sections — default: Postponed + Done collapsed (low-priority
-        // buckets stay folded until the user expands them).
+        // Collapsed sections — default: Postponed + Done + Muted collapsed
+        // (low-priority buckets stay folded until the user expands them).
         collapsedSectionsRaw = defaults.stringArray(forKey: Keys.collapsedSectionsRaw)
-            ?? [ActionGroup.postponed.rawValue, ActionGroup.done.rawValue]
+            ?? [ActionGroup.postponed.rawValue, ActionGroup.done.rawValue,
+                ActionGroup.muted.rawValue]
 
         // Attention policy — defaults are baked into PREvent.defaults
         attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
@@ -969,6 +1016,16 @@ final class MainlineSettings: ObservableObject {
 
         // Needs-a-Human expanded — default collapsed (false); persisted on change
         needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
+
+        // Inbox mute filters
+        mutePatterns = defaults.stringArray(forKey: Keys.mutePatterns)
+            ?? Self.defaultMutePatterns
+        muteBotAuthors = defaults.object(forKey: Keys.muteBotAuthors) == nil
+            ? true
+            : defaults.bool(forKey: Keys.muteBotAuthors)
+        reviewFocusAuthors = defaults.stringArray(forKey: Keys.reviewFocusAuthors) ?? []
+        reviewFocusTeams   = defaults.stringArray(forKey: Keys.reviewFocusTeams) ?? []
+        muteLabels         = defaults.stringArray(forKey: Keys.muteLabels) ?? []
 
         // Vercel preview detection — default ON, with the dash0 + vercel.app suffixes
         vercelPreviewEnabled = defaults.object(forKey: Keys.vercelPreviewEnabled) == nil

@@ -100,6 +100,7 @@ private struct GraphQLNode: Decodable {
     let deletions: Int?
     let reviewRequests: GraphQLReviewRequests?
     let reviewThreads: GraphQLReviewThreads?
+    let labels: GraphQLLabels?
 }
 
 private struct GraphQLReviewThreads: Decodable {
@@ -143,8 +144,23 @@ struct PRFile: Decodable {
     var status: String? = nil
 }
 
+/// PR author actor — now carries `__typename` so we can detect Bot authors
+/// the same way review/comment authors are detected. The `CodingKeys` alias
+/// maps the GraphQL `__typename` wire name.
 private struct GraphQLActor: Decodable {
+    let typename: String?
     let login: String?
+
+    enum CodingKeys: String, CodingKey {
+        case typename = "__typename"
+        case login
+    }
+}
+
+/// Labels container decoded from `labels(first: 10) { nodes { name } }`.
+private struct GraphQLLabels: Decodable {
+    struct LabelNode: Decodable { let name: String? }
+    let nodes: [LabelNode]
 }
 
 private struct GraphQLRepository: Decodable {
@@ -330,6 +346,7 @@ final class GitHubClient {
         switch tab {
         case .created: return "author:@me"
         case .forMe:   return "review-requested:@me"
+        case .inbox:   return "author:@me"   // Inbox derives from both; use author as a fallback
         }
     }
 
@@ -396,6 +413,16 @@ final class GitHubClient {
             $0.isResolved == false
         }.count ?? 0
 
+        // Determine whether the PR author is a bot.
+        // `PRSnapshot.isBot` uses the same logic as comment/review author detection.
+        let authorTypename = node.author?.typename
+        let authorLogin    = node.author?.login ?? ""
+        let authorIsBot    = PRSnapshot.isBot(typename: authorTypename, login: authorLogin)
+            || InboxMuteEngine.isBotLogin(authorLogin)
+
+        // Collect label names (first 10, decoded from GraphQL).
+        let labels: [String] = node.labels?.nodes.compactMap { $0.name } ?? []
+
         return PRSnapshot(
             nodeId:             nodeId,
             number:             number,
@@ -414,7 +441,7 @@ final class GitHubClient {
             lastCommentIsBot:   lastCommentIsBot,
             lastReviewIsBot:    lastReviewIsBot,
             updatedAt:          node.updatedAt ?? "",
-            author:             node.author?.login ?? "",
+            author:             authorLogin,
             requestedReviewers: requestedReviewers,
             requestedTeams:     requestedTeams,
             tabs:               [tab],
@@ -425,7 +452,9 @@ final class GitHubClient {
             unresolvedThreadCount: unresolvedThreadCount,
             mergeCommitAllowed: node.repository?.mergeCommitAllowed ?? true,
             squashMergeAllowed: node.repository?.squashMergeAllowed ?? true,
-            rebaseMergeAllowed: node.repository?.rebaseMergeAllowed ?? true
+            rebaseMergeAllowed: node.repository?.rebaseMergeAllowed ?? true,
+            labels:             labels,
+            authorIsBot:        authorIsBot
         )
     }
 
@@ -462,8 +491,9 @@ final class GitHubClient {
             headRefName
             additions
             deletions
-            author { login }
+            author { __typename login }
             repository { nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
+            labels(first: 10) { nodes { name } }
             comments(last: 1) { totalCount nodes { author { __typename login } } }
             reviews(last: 1) { totalCount nodes { author { __typename login } } }
             reviewRequests(first: 10) {

@@ -39,6 +39,7 @@ enum ReviewDecision: String, Codable, Equatable {
 enum ReviewTab: String, Codable, Equatable, CaseIterable, Identifiable {
     case forMe    // review-requested / assigned to me
     case created  // authored by me
+    case inbox    // derived union of forMe + created with mute filtering
 
     var id: String { rawValue }
 
@@ -46,8 +47,19 @@ enum ReviewTab: String, Codable, Equatable, CaseIterable, Identifiable {
         switch self {
         case .forMe:   return "For me"
         case .created: return "Created"
+        case .inbox:   return "Inbox"
         }
     }
+}
+
+// MARK: - InboxRole
+
+/// The role a PR plays in the Inbox view: either the user needs to review it
+/// (they are a requested reviewer and not the author) or it is their own PR.
+/// Derived from `PRSnapshot.author` vs the authenticated user's login.
+enum InboxRole: String {
+    case needsYourReview  // author != myLogin
+    case yourPRs          // author == myLogin
 }
 
 /// The six mutually-exclusive buckets a PR is grouped under, in display order.
@@ -121,6 +133,11 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
     /// default. `.merged` / `.closed` above are legacy buckets retained for the
     /// `PRState`-based ordering helpers; the browse deck folds both into `.done`.
     case done
+    /// Inbox-only muted group: PRs demoted by any of the four mute rules
+    /// (title/branch pattern, bot author, outside focus allow-list, label match).
+    /// Rendered LAST in the Inbox view, collapsed by default. Not used on the
+    /// For me / Created tabs.
+    case muted
 
     /// Section header label.
     var title: String {
@@ -133,6 +150,7 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
         case .closed:         return "Closed"
         case .postponed:      return "Postponed"
         case .done:           return "Done"
+        case .muted:          return "Muted / low-priority"
         }
     }
 
@@ -147,6 +165,7 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
         case .closed:         return 5
         case .postponed:      return 6
         case .done:           return 7
+        case .muted:          return 8
         }
     }
 }
@@ -235,6 +254,19 @@ struct PRSnapshot: Codable, Equatable {
     /// bumps `updatedAt`, which re-triggers the check. nil = never checked.
     var vercelPreviewCheckedAt: String?
 
+    // MARK: - Inbox mute fields (not diffed — excluded from PRDiffEngine comparisons)
+
+    /// Labels attached to this PR (first 10, from `labels(first:10)` GraphQL field).
+    /// Decoded with `decodeIfPresent` + default `[]` for backward compatibility with
+    /// old persisted snapshots. NOT compared in PRDiffEngine (label changes are never
+    /// a notifiable transition).
+    var labels: [String]
+
+    /// Whether this PR's author is a bot (typename == "Bot", login has `[bot]` suffix,
+    /// or login matches a known bot set). Decoded with `decodeIfPresent` + default
+    /// `false` for backward compat. NOT compared in PRDiffEngine.
+    var authorIsBot: Bool
+
     /// Total lines changed in this PR.
     var totalLines: Int { linesAdded + linesDeleted }
 
@@ -270,7 +302,9 @@ struct PRSnapshot: Codable, Equatable {
         squashMergeAllowed: Bool = true,
         rebaseMergeAllowed: Bool = true,
         vercelPreviewUrl: String? = nil,
-        vercelPreviewCheckedAt: String? = nil
+        vercelPreviewCheckedAt: String? = nil,
+        labels: [String] = [],
+        authorIsBot: Bool = false
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -304,6 +338,61 @@ struct PRSnapshot: Codable, Equatable {
         self.rebaseMergeAllowed = rebaseMergeAllowed
         self.vercelPreviewUrl = vercelPreviewUrl
         self.vercelPreviewCheckedAt = vercelPreviewCheckedAt
+        self.labels = labels
+        self.authorIsBot = authorIsBot
+    }
+
+    // MARK: - Codable (explicit to support decodeIfPresent defaults for new fields)
+
+    enum CodingKeys: String, CodingKey {
+        case nodeId, number, title, htmlUrl, repoFullName, isDraft, state
+        case merged, closed, reviewDecision, ciStatus, reviewState
+        case commentCount, reviewCount, lastCommentIsBot, lastReviewIsBot
+        case updatedAt, author, requestedReviewers, requestedTeams, tabs
+        case mergeable, headRefName, linesAdded, linesDeleted
+        case sensitivePathFlags, unresolvedThreadCount
+        case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
+        case vercelPreviewUrl, vercelPreviewCheckedAt
+        case labels, authorIsBot
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        nodeId                = try c.decode(String.self,              forKey: .nodeId)
+        number                = try c.decode(Int.self,                 forKey: .number)
+        title                 = try c.decode(String.self,              forKey: .title)
+        htmlUrl               = try c.decode(String.self,              forKey: .htmlUrl)
+        repoFullName          = try c.decode(String.self,              forKey: .repoFullName)
+        isDraft               = try c.decode(Bool.self,                forKey: .isDraft)
+        state                 = try c.decode(String.self,              forKey: .state)
+        merged                = try c.decode(Bool.self,                forKey: .merged)
+        closed                = try c.decode(Bool.self,                forKey: .closed)
+        reviewDecision        = try c.decodeIfPresent(ReviewDecision.self, forKey: .reviewDecision)
+        ciStatus              = try c.decode(CIStatus.self,            forKey: .ciStatus)
+        reviewState           = try c.decode(ReviewState.self,         forKey: .reviewState)
+        commentCount          = try c.decode(Int.self,                 forKey: .commentCount)
+        reviewCount           = try c.decodeIfPresent(Int.self,        forKey: .reviewCount) ?? 0
+        lastCommentIsBot      = try c.decodeIfPresent(Bool.self,       forKey: .lastCommentIsBot) ?? false
+        lastReviewIsBot       = try c.decodeIfPresent(Bool.self,       forKey: .lastReviewIsBot) ?? false
+        updatedAt             = try c.decode(String.self,              forKey: .updatedAt)
+        author                = try c.decode(String.self,              forKey: .author)
+        requestedReviewers    = try c.decode([String].self,            forKey: .requestedReviewers)
+        requestedTeams        = try c.decodeIfPresent([String].self,   forKey: .requestedTeams) ?? []
+        tabs                  = try c.decodeIfPresent(Set<ReviewTab>.self, forKey: .tabs) ?? []
+        mergeable             = try c.decodeIfPresent(Bool.self,       forKey: .mergeable)
+        headRefName           = try c.decodeIfPresent(String.self,     forKey: .headRefName) ?? ""
+        linesAdded            = try c.decodeIfPresent(Int.self,        forKey: .linesAdded) ?? 0
+        linesDeleted          = try c.decodeIfPresent(Int.self,        forKey: .linesDeleted) ?? 0
+        sensitivePathFlags    = try c.decodeIfPresent([String].self,   forKey: .sensitivePathFlags)
+        unresolvedThreadCount = try c.decodeIfPresent(Int.self,        forKey: .unresolvedThreadCount) ?? 0
+        mergeCommitAllowed    = try c.decodeIfPresent(Bool.self,       forKey: .mergeCommitAllowed) ?? true
+        squashMergeAllowed    = try c.decodeIfPresent(Bool.self,       forKey: .squashMergeAllowed) ?? true
+        rebaseMergeAllowed    = try c.decodeIfPresent(Bool.self,       forKey: .rebaseMergeAllowed) ?? true
+        vercelPreviewUrl      = try c.decodeIfPresent(String.self,     forKey: .vercelPreviewUrl)
+        vercelPreviewCheckedAt = try c.decodeIfPresent(String.self,    forKey: .vercelPreviewCheckedAt)
+        // New inbox mute fields — backward-compat: default when absent in old snapshots
+        labels                = try c.decodeIfPresent([String].self,   forKey: .labels) ?? []
+        authorIsBot           = try c.decodeIfPresent(Bool.self,       forKey: .authorIsBot) ?? false
     }
 
     // MARK: - Bot detection
@@ -432,5 +521,16 @@ struct PRSnapshot: Codable, Equatable {
             return .team
         }
         return .none
+    }
+
+    // MARK: - Inbox role
+
+    /// The role this PR plays in the Inbox view, from the point of view of `myLogin`.
+    /// A PR where the user is a requested reviewer but NOT the author belongs to
+    /// "Needs your review"; a PR the user authored belongs to "Your PRs".
+    /// Pure — no I/O, safe to call from any thread.
+    func inboxRole(myLogin: String) -> InboxRole {
+        guard !myLogin.isEmpty, author == myLogin else { return .needsYourReview }
+        return .yourPRs
     }
 }

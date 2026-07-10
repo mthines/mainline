@@ -191,6 +191,10 @@ struct LeadingColumn<Icon: View>: View {
 ///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
     let prs: [PRSnapshot]
+    /// Muted PRs for the Inbox tab. Empty on the For-me / Created tabs.
+    var mutedPRs: [PRSnapshot] = []
+    /// Whether the Inbox view is active (two role sections + Muted group).
+    var inboxMode: Bool = false
     @ObservedObject var manager: PRManager
     @ObservedObject var settings: MainlineSettings
 
@@ -208,15 +212,25 @@ struct TriageDeckView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Show "Queue clear" only when there is genuinely nothing to display —
-            // no active PRs AND no Postponed/Done sections. Guarding on `prs` (the
-            // active list) alone hid the Postponed and Done sections whenever the
-            // active list was empty, so postponing everything in a scope left no way
-            // to see or resume those PRs. `sections` already folds in Postponed/Done.
-            if sections.isEmpty {
-                emptyState
+            if inboxMode {
+                // Inbox view: role sections ("Needs your review" / "Your PRs") +
+                // a collapsed "Muted / low-priority" group at the bottom.
+                if inboxSections.isEmpty && mutedPRs.isEmpty {
+                    emptyState
+                } else {
+                    inboxList
+                }
             } else {
-                prList
+                // Show "Queue clear" only when there is genuinely nothing to display —
+                // no active PRs AND no Postponed/Done sections. Guarding on `prs` (the
+                // active list) alone hid the Postponed and Done sections whenever the
+                // active list was empty, so postponing everything in a scope left no way
+                // to see or resume those PRs. `sections` already folds in Postponed/Done.
+                if sections.isEmpty {
+                    emptyState
+                } else {
+                    prList
+                }
             }
         }
         // Neither the peek overlay nor the undo toast is rendered here — both are
@@ -269,6 +283,14 @@ struct TriageDeckView: View {
     /// drafts in the index while the display rendered the draft-heavy "Needs
     /// attention" group first, so pressing J/K jumped focus into the group above.)
     private var orderedPRs: [PRSnapshot] {
+        if inboxMode {
+            // Inbox: keyboard index space is role-sections + (expanded) muted rows.
+            var list = inboxOrderedPRs
+            if settings.collapsedSections.contains(.muted) {
+                list += mutedPRs.sorted(by: PRSnapshot.triageOrder)
+            }
+            return list
+        }
         var list = actionabilitySections.flatMap { $0.prs }
         // Include Postponed rows in the keyboard/hover focus space ONLY while that
         // section is expanded (it is collapsed by default). Expanded ⇔ the section
@@ -314,6 +336,127 @@ struct TriageDeckView: View {
             result.append((.done, done))
         }
         return result
+    }
+
+    // MARK: - Inbox sections
+
+    /// The role-section + actionability structure for the Inbox view.
+    /// Two outer role sections in canonical order (Needs-your-review first),
+    /// each populated with `prs` matching that role and sorted by actionability.
+    private var inboxSections: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] {
+        let myLogin = settings.githubUsername
+        let needsReview = prs.filter { $0.inboxRole(myLogin: myLogin) == .needsYourReview }
+            .sorted(by: PRSnapshot.triageOrder)
+        let yourPRs = prs.filter { $0.inboxRole(myLogin: myLogin) == .yourPRs }
+            .sorted(by: PRSnapshot.triageOrder)
+
+        var result: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] = []
+        for (role, rolePRs) in [(InboxRole.needsYourReview, needsReview), (.yourPRs, yourPRs)] {
+            guard !rolePRs.isEmpty else { continue }
+            let grouped = Dictionary(grouping: rolePRs, by: { $0.actionGroup(splitDrafts: settings.splitDrafts) })
+            let actionSections: [(group: ActionGroup, prs: [PRSnapshot])] = ActionGroup.allCases
+                .filter { $0 != .postponed && $0 != .done && $0 != .muted }
+                .sorted { $0.sortIndex < $1.sortIndex }
+                .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
+                    guard let sectionPRs = grouped[group], !sectionPRs.isEmpty else { return nil }
+                    return (group, sectionPRs)
+                }
+            if !actionSections.isEmpty {
+                result.append((role: role, actionSections: actionSections))
+            }
+        }
+        return result
+    }
+
+    /// All PRs in the Inbox view in display order (for keyboard index space).
+    private var inboxOrderedPRs: [PRSnapshot] {
+        inboxSections.flatMap { section in
+            section.actionSections.flatMap { $0.prs }
+        }
+    }
+
+    /// The Inbox list: role sections, then the shared Muted group.
+    private var inboxList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(inboxSections, id: \.role.rawValue) { section in
+                inboxRoleSectionHeader(for: section.role, prs: inboxRolePRs(for: section.role))
+                ForEach(section.actionSections, id: \.group) { actionSection in
+                    sectionView(group: actionSection.group, prs: actionSection.prs)
+                }
+            }
+            if !mutedPRs.isEmpty {
+                mutedGroupView
+            }
+        }
+    }
+
+    private func inboxRolePRs(for role: InboxRole) -> [PRSnapshot] {
+        let myLogin = settings.githubUsername
+        return prs.filter { $0.inboxRole(myLogin: myLogin) == role }
+    }
+
+    @ViewBuilder
+    private func inboxRoleSectionHeader(for role: InboxRole, prs rolePRs: [PRSnapshot]) -> some View {
+        let title = role == .needsYourReview ? "Needs your review" : "Your PRs"
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundStyle(.primary)
+            Text("\(rolePRs.count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(.quaternary, in: Capsule())
+            Spacer()
+        }
+        .padding(.horizontal, RowMetrics.horizontalPadding)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+    }
+
+    /// The shared "Muted / low-priority (N)" group rendered at the bottom of the
+    /// Inbox view. Collapsed by default (persisted via `.muted` in collapsedSections).
+    @ViewBuilder
+    private var mutedGroupView: some View {
+        let expansion = expansionBinding(for: .muted)
+        Button {
+            expansion.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "eye.slash")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(ActionGroup.muted.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text("\(mutedPRs.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
+                Image(systemName: expansion.wrappedValue ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, RowMetrics.horizontalPadding)
+            .padding(.top, metrics.sectionHeaderTopPadding)
+            .padding(.bottom, metrics.sectionHeaderBottomPadding)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(expansion.wrappedValue ? "Collapse muted PRs" : "Expand muted PRs")
+
+        if expansion.wrappedValue {
+            ForEach(mutedPRs.sorted(by: PRSnapshot.triageOrder), id: \.nodeId) { pr in
+                deckRow(pr: pr, index: flatIndex(of: pr))
+                Divider().padding(.leading, metrics.dividerInset())
+            }
+        }
     }
 
     /// Ordering for the Postponed section: soonest wake first, then title.
@@ -417,11 +560,11 @@ struct TriageDeckView: View {
     /// closed, but the choice still persists once toggled. Reuses the same
     /// `collapsedSections` store (no new key).
     private func expansionBinding(for group: ActionGroup) -> Binding<Bool> {
-        // Postponed and Done both INVERT the default: they are COLLAPSED by default,
-        // and the `collapsedSections` set instead records that the user explicitly
-        // EXPANDED them (so the choice persists once toggled). Every other group is
-        // expanded by default and the set records collapse.
-        if group == .postponed || group == .done {
+        // Postponed, Done, and Muted all INVERT the default: they are COLLAPSED by
+        // default, and the `collapsedSections` set instead records that the user
+        // explicitly EXPANDED them (so the choice persists once toggled). Every other
+        // group is expanded by default and the set records collapse.
+        if group == .postponed || group == .done || group == .muted {
             return Binding(
                 get: { settings.collapsedSections.contains(group) },
                 set: { expanded in

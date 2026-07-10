@@ -74,12 +74,87 @@ final class PRManager: ObservableObject {
 
     // MARK: - Triage Cockpit computed properties
 
+    // MARK: - Inbox derived populations
+
+    /// The mute configuration built from current settings. Rebuilt on each access
+    /// (cheap — it just reads @Published values); no caching needed.
+    var inboxMuteConfig: InboxMuteConfig {
+        InboxMuteConfig(
+            mutePatterns:       settings.mutePatterns,
+            muteBotAuthors:     settings.muteBotAuthors,
+            reviewFocusAuthors: settings.reviewFocusAuthors,
+            reviewFocusTeams:   settings.reviewFocusTeams,
+            muteLabels:         settings.muteLabels,
+            myLogin:            settings.githubUsername
+        )
+    }
+
+    /// Union of all PRs from the two polling tabs (.forMe + .created), filtered
+    /// through the standard scope + drafts guards (snooze excluded). This is the
+    /// Inbox population BEFORE mute rules are applied.
+    private var inboxUnionPRs: [PRSnapshot] {
+        let snoozed = snoozeStore.snoozedNodeIds
+        // A PR can appear in both tabs (union by nodeId, keeping the last-merged copy).
+        var seen = Set<String>()
+        return prs.filter {
+            ($0.tabs.contains(.forMe) || $0.tabs.contains(.created))
+                && !snoozed.contains($0.nodeId)
+        }.filter { pr in
+            guard seen.insert(pr.nodeId).inserted else { return false }
+            return true
+        }
+    }
+
+    /// Non-muted PRs for the Inbox (active), grouped ready for role-section rendering.
+    /// Muted PRs are excluded here and surface in `inboxMutedPRs` instead.
+    var inboxActivePRs: [PRSnapshot] {
+        let config = inboxMuteConfig
+        return inboxUnionPRs.filter { pr in
+            let role = pr.inboxRole(myLogin: config.myLogin)
+            return InboxMuteEngine.muteVerdict(
+                title:          pr.title,
+                headRef:        pr.headRefName,
+                authorLogin:    pr.author,
+                authorIsBot:    pr.authorIsBot,
+                requestedTeams: pr.requestedTeams,
+                labels:         pr.labels,
+                role:           role,
+                config:         config
+            ) == nil
+        }
+    }
+
+    /// Muted PRs for the Inbox (demoted by any active rule), rendered in the
+    /// shared collapsed "Muted / low-priority" group.
+    var inboxMutedPRs: [PRSnapshot] {
+        let config = inboxMuteConfig
+        return inboxUnionPRs.filter { pr in
+            let role = pr.inboxRole(myLogin: config.myLogin)
+            return InboxMuteEngine.muteVerdict(
+                title:          pr.title,
+                headRef:        pr.headRefName,
+                authorLogin:    pr.author,
+                authorIsBot:    pr.authorIsBot,
+                requestedTeams: pr.requestedTeams,
+                labels:         pr.labels,
+                role:           role,
+                config:         config
+            ) != nil
+        }
+    }
+
+    // MARK: - Current view (drives badge + visible list)
+
     /// The SINGLE population that drives the visible browse list AND the
     /// menu-bar badge, so the two can never disagree. Applies, in order:
     ///   1. the selected tab (`tabs.contains(settings.selectedTab)`),
     ///   2. the selected scope (`scopeStore.selectedScope`, nil = All),
     ///   3. the draft filter (excludes `.draft` when `!settings.showDrafts`),
     ///   4. the For-me Direct/Team sub-filter (only on the For-me tab).
+    ///
+    /// On the Inbox tab, returns `inboxActivePRs` (non-muted union), so the badge
+    /// counts the non-muted set (AC-10 / R12). Muted PRs are excluded upstream.
+    ///
     /// `MenuBarView.visiblePRs` delegates to this exact computation.
     ///
     /// This is the "follow current view" set. Every badge metric reads from it
@@ -91,7 +166,13 @@ final class PRManager: ObservableObject {
     /// badge / needs-attention count. The "Postponed" list section renders them
     /// separately via `postponedPRs`, which deliberately ignores this exclusion.
     var currentViewPRs: [PRSnapshot] {
-        tabScopeFilteredPRs.filter { !snoozeStore.snoozedNodeIds.contains($0.nodeId) }
+        // Inbox tab routes to the mute-filtered active set (snooze already excluded
+        // in inboxUnionPRs → inboxActivePRs). For the other tabs, keep the existing
+        // snooze-excluded tab/scope/drafts/for-me pipeline.
+        if settings.selectedTab == .inbox {
+            return inboxActivePRs
+        }
+        return tabScopeFilteredPRs.filter { !snoozeStore.snoozedNodeIds.contains($0.nodeId) }
     }
 
     /// The current tab + scope + drafts + For-me sub-filter population, BEFORE the
@@ -105,7 +186,15 @@ final class PRManager: ObservableObject {
     /// applied only when `applyScope` is true; the scope-chip base
     /// (`scopeSelectorBasePRs`) omits it so each chip can show its own count.
     /// Snooze is NOT applied here.
+    ///
+    /// The Inbox tab is handled in `currentViewPRs` (which routes to
+    /// `inboxActivePRs`). This private helper is only called for `.forMe` /
+    /// `.created`, but we guard on it to be safe.
     private func tabFiltered(applyScope: Bool) -> [PRSnapshot] {
+        // Inbox tab uses a separate pipeline — callers should not reach here on .inbox,
+        // but guard defensively to avoid an accidental empty result.
+        guard settings.selectedTab != .inbox else { return [] }
+
         // 1. Tab.
         var result = prs.filter { $0.tabs.contains(settings.selectedTab) }
 

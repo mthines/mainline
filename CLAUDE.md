@@ -38,24 +38,26 @@ Mainline/Mainline/                     ← Source root
 │   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding)
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor)
-│   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files
+│   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files; author now decoded with __typename for bot detection; labels(first:10) added
 │   ├── PRStateStore.swift       ← @MainActor [nodeId: PRSnapshot] dict
 │   ├── PRDiffEngine.swift       ← Pure diff(previous:next:myLogin:)
 │   ├── PRPoller.swift           ← Task-based poll loop + pollOnce()
 │   ├── NotificationService.swift← UNNotificationRequest per transition
-│   ├── PRManager.swift          ← @MainActor orchestrator + write actions
+│   ├── PRManager.swift          ← @MainActor orchestrator + write actions; inbox-derived populations (inboxActivePRs, inboxMutedPRs, inboxMuteConfig); currentViewPRs routes to inboxActivePRs on .inbox tab
 │   ├── SensitivePathMatcher.swift ← Pure path/branch-name heuristic classifier
 │   ├── TriageClassifier.swift   ← Pure needsHuman predicate engine
+│   ├── InboxMuteEngine.swift    ← Pure glob matcher + four mute-rule predicates (pattern/botAuthor/label/outsideFocus); InboxMuteConfig value struct; runSelfChecks() #if DEBUG
 │   ├── ScopeStore.swift         ← @MainActor derives org/repo scopes from PR list; drives badge
 │   ├── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
 │   ├── GlobalHotKey.swift       ← Carbon global hotkey + MenuBarPopoverOpener
 │   └── TelemetryService.swift   ← Opt-in OTel singleton (no-op when disabled)
 └── Views/
-    ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView
-    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.keyboard` SettingsCategory routing to KeyboardShortcutsView
+    ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab
+    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView
+    ├── InboxSettingsView.swift   ← Inbox noise-filter settings: mute patterns, muteBotAuthors toggle, reviewFocusAuthors/Teams, muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
-    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/E/M/R/S/N/X/V/D/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView; deck keys are user-configurable via settings.shortcutBindings
+    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/E/M/R/S/N/X/V/D/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView; deck keys are user-configurable via settings.shortcutBindings; Inbox mode: role sections (needsYourReview / yourPRs) + collapsed Muted group
     ├── PRPeekView.swift          ← Space peek: instant glance card + async files list
     ├── UndoToastView.swift       ← Batched undo toast stack
     ├── TelemetryOptInBanner.swift← Dismissable Privacy-pane opt-in banner (consent-versioned)
@@ -99,6 +101,10 @@ All 12 in-popover deck/peek action keys are **user-configurable** via Settings �
 ### Global shortcut
 System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `GlobalHotKey`. Stored as `globalShortcutKeyCode` + `globalShortcutModifiers` (Cocoa `NSEvent.ModifierFlags` raw value; converted to a Carbon mask by `GlobalHotKey.carbonModifiers(from:)`). `AppDelegate.setUpGlobalHotKey()` subscribes to the three `MainlineSettings` published props so the recorder, toggle, and reset button all live re-register. Default: **⇧⌃ + ISO section key** (`kVK_ISO_Section` = 0x0A; the "$" key on a Danish layout) — see `defaultShortcutKeyCode`/`defaultShortcutModifiers`. `keyGlyph(for:)` renders the key label, falling back to `UCKeyTranslate` against the active keyboard layout for non-ANSI physical keys.
 
+### Inbox / review focus
+
+The **Inbox tab** (`ReviewTab.inbox`) is a client-side derived union of the forMe + created queries. `PRManager` deduplicates by `nodeId`, then passes each snapshot through `InboxMuteEngine.muteVerdict(...)` — nil = active (shown in role sections), non-nil = muted (collapsed Muted group at the bottom). Four mute rules apply in priority order: (1) glob patterns on title+branch via `InboxMuteConfig.mutePatterns`, (2) bot-author detection (`muteBotAuthors`), (3) label matching (`muteLabels`), (4) focus allow-list (`reviewFocusAuthors` + `reviewFocusTeams`). Rule 4 is skipped for `.yourPRs` role — your own PRs are never muted by focus. GraphQL now fetches `author { __typename login }` (for bot detection via `__typename == "Bot"`) and `labels(first: 10) { nodes { name } }`. New `PRSnapshot` fields (`labels`, `authorIsBot`) decode with `decodeIfPresent` so old persisted snapshots are backward-compatible; neither field triggers a diff-engine transition (excluded by omission from `PRDiffEngine`).
+
 ### Vercel preview detection
 Each PR can carry a `vercelPreviewUrl` extracted from its `vercel[bot]` issue comment (REST `GitHubClient.fetchVercelPreviewURL`, pure `extractPreviewURL(from:domains:)`). The row shows a `PreviewBadge` when present, and `E` (deck or peek, default binding — user-configurable) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition). Match domains (priority order) and the on/off toggle are `MainlineSettings.vercelPreviewDomains` / `vercelPreviewEnabled`.
 
@@ -137,6 +143,11 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `vercelPreviewDomains` | [String] | `["dash0-preview.com","vercel.app"]` |
 | `telemetryEnabled` | Bool | false |
 | `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` — 12 `ShortcutBinding { key, modifiers }` entries; all bare except undo=⌘Z (`modifiers = NSEvent.ModifierFlags.command.rawValue`). Decoded with custom `Codable` that handles both the new object shape and the v1.25.0 legacy bare-string shape; undo bare-string → `.command` migration preserves ⌘Z for existing users. |
+| `mutePatterns` | [String] | `["chore(deps)*", "build(deps)*"]` |
+| `muteBotAuthors` | Bool | true |
+| `reviewFocusAuthors` | [String] | `[]` |
+| `reviewFocusTeams` | [String] | `[]` |
+| `muteLabels` | [String] | `[]` |
 
 ## Bundle ID
 
