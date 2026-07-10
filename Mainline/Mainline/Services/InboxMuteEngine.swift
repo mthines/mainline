@@ -166,8 +166,12 @@ enum InboxMuteEngine {
         // --- Glob matcher ---
         assert(matches(text: "chore(deps): bump x", glob: "chore(deps)*"),
                "glob: chore(deps)* should match chore(deps): bump x")
-        assert(matches(text: "chore(deps-dev): update", glob: "chore(deps)*"),
-               "glob: chore(deps)* should match chore(deps-dev):")
+        // `)` is a literal, so `chore(deps)*` must NOT match the `-dev` variant;
+        // to catch every chore(deps…) form the pattern is `chore(deps*`.
+        assert(!matches(text: "chore(deps-dev): update", glob: "chore(deps)*"),
+               "glob: literal ')' means chore(deps)* must NOT match chore(deps-dev):")
+        assert(matches(text: "chore(deps-dev): update", glob: "chore(deps*"),
+               "glob: chore(deps* should match chore(deps-dev):")
         assert(matches(text: "build(deps): something", glob: "build(deps)*"),
                "glob: build(deps)* should match build(deps):")
         assert(!matches(text: "feature: deps", glob: "chore(deps)*"),
