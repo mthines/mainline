@@ -22,6 +22,7 @@
 		PC000000000000000000000D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000000D /* SettingsView.swift */; };
 		PC000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000000E /* Assets.xcassets */; };
 		PC0000000000000000000010 /* SensitivePathMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000013 /* SensitivePathMatcher.swift */; };
+		PC0000000000000000000090 /* LinearClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000091 /* LinearClient.swift */; };
 		PC0000000000000000000011 /* TriageClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000014 /* TriageClassifier.swift */; };
 		PC0000000000000000000013 /* SnoozeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000016 /* SnoozeStore.swift */; };
 		PC0000000000000000000014 /* MenuBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000017 /* MenuBarIconView.swift */; };
@@ -64,6 +65,7 @@
 		PF0000000000000000000010 /* Mainline.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Mainline.entitlements; sourceTree = "<group>"; };
 		PF0000000000000000000011 /* Mainline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mainline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		PF0000000000000000000013 /* SensitivePathMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitivePathMatcher.swift; sourceTree = "<group>"; };
+		PF0000000000000000000091 /* LinearClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinearClient.swift; sourceTree = "<group>"; };
 		PF0000000000000000000014 /* TriageClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriageClassifier.swift; sourceTree = "<group>"; };
 		PF0000000000000000000016 /* SnoozeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnoozeStore.swift; sourceTree = "<group>"; };
 		PF0000000000000000000017 /* MenuBarIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarIconView.swift; sourceTree = "<group>"; };
@@ -141,6 +143,7 @@
 				PF000000000000000000000A /* NotificationService.swift */,
 				PF000000000000000000000B /* PRManager.swift */,
 				PF0000000000000000000013 /* SensitivePathMatcher.swift */,
+				PF0000000000000000000091 /* LinearClient.swift */,
 				PF0000000000000000000014 /* TriageClassifier.swift */,
 				PF0000000000000000000016 /* SnoozeStore.swift */,
 				PF000000000000000000001F /* ScopeStore.swift */,
@@ -271,6 +274,7 @@
 				PC000000000000000000000C /* MenuBarView.swift in Sources */,
 				PC000000000000000000000D /* SettingsView.swift in Sources */,
 				PC0000000000000000000010 /* SensitivePathMatcher.swift in Sources */,
+				PC0000000000000000000090 /* LinearClient.swift in Sources */,
 				PC0000000000000000000011 /* TriageClassifier.swift in Sources */,
 				PC0000000000000000000013 /* SnoozeStore.swift in Sources */,
 				PC0000000000000000000014 /* MenuBarIconView.swift in Sources */,

@@ -8,12 +8,37 @@ import Security
 enum KeychainHelper {
     private static let service = "com.mainline.github-pr-notifier"
     private static let account = "github-pat"
+    /// Account for the optional Linear personal API key — used to resolve the
+    /// Linear issue linked to a PR when the branch carries no derivable id.
+    private static let linearAccount = "linear-api-key"
+
+    // MARK: - GitHub token (public API — existing call sites unchanged)
+
+    /// Saves or updates the GitHub token in the Keychain.
+    static func saveToken(_ token: String) throws { try save(token, account: account) }
+
+    /// Loads the GitHub token asynchronously. Returns nil if none is stored.
+    static func loadToken() async -> String? { await load(account: account) }
+
+    /// Removes the stored GitHub token.
+    static func deleteToken() throws { try delete(account: account) }
+
+    // MARK: - Linear API key
+
+    /// Saves or updates the Linear personal API key in the Keychain.
+    static func saveLinearKey(_ key: String) throws { try save(key, account: linearAccount) }
+
+    /// Loads the Linear API key asynchronously. Returns nil if none is stored.
+    static func loadLinearKey() async -> String? { await load(account: linearAccount) }
+
+    /// Removes the stored Linear API key.
+    static func deleteLinearKey() throws { try delete(account: linearAccount) }
 
     // MARK: - Save
 
-    /// Saves or updates the token in the Keychain.
-    static func saveToken(_ token: String) throws {
-        guard let data = token.data(using: .utf8) else {
+    /// Saves or updates a secret for the given account.
+    private static func save(_ value: String, account: String) throws {
+        guard let data = value.data(using: .utf8) else {
             throw KeychainError.encodingFailed
         }
 
@@ -42,9 +67,8 @@ enum KeychainHelper {
 
     // MARK: - Load (async — never blocks MainActor)
 
-    /// Loads the token asynchronously from the Keychain.
-    /// Returns nil if no token is stored.
-    static func loadToken() async -> String? {
+    /// Loads a secret asynchronously from the Keychain. Returns nil if none stored.
+    private static func load(account: String) async -> String? {
         await withCheckedContinuation { continuation in
             Task.detached(priority: .userInitiated) {
                 let query: [CFString: Any] = [
@@ -71,8 +95,8 @@ enum KeychainHelper {
 
     // MARK: - Delete
 
-    /// Removes the stored token from the Keychain.
-    static func deleteToken() throws {
+    /// Removes the stored secret for the given account.
+    private static func delete(account: String) throws {
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: service,

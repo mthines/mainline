@@ -1163,20 +1163,3 @@ final class MainlineSettings: ObservableObject {
         }
     }
 }
-
-// MARK: - PR open target resolution
-
-extension PRSnapshot {
-    /// The URL to open when the user "opens" this PR, honoring `prOpenTarget`.
-    /// When Linear is selected but no Linear issue can be derived (no workspace
-    /// slug configured, or the branch carries no issue id), transparently falls
-    /// back to the GitHub PR page — so the open action always does *something*.
-    func openURL(settings: MainlineSettings) -> URL? {
-        if settings.prOpenTarget == .linear,
-           let linear = PROpenTarget.linearIssueURL(branch: headRefName,
-                                                     workspaceSlug: settings.linearWorkspaceSlug) {
-            return linear
-        }
-        return URL(string: htmlUrl)
-    }
-}

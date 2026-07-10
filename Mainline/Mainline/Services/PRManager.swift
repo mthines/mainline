@@ -699,6 +699,42 @@ final class PRManager: ObservableObject {
         await triggerSingleRefresh()
     }
 
+    // MARK: - Opening PRs
+
+    /// Opens a PR honoring `settings.prOpenTarget`. GitHub is the default and the
+    /// universal fallback; Linear is resolved in two steps:
+    ///   1. Offline — a Linear-format branch (`eng-1234-…`) yields the issue link
+    ///      directly, no network.
+    ///   2. API — otherwise, when a Linear API key is stored, ask Linear which issue
+    ///      the PR is attached to (covers AI/custom branches that embed no id).
+    /// Anything unresolved falls back to the GitHub PR page, so open never no-ops.
+    /// Async because the API lookup is a network call; run from a `Task` at the
+    /// call site. Records the `open_in_browser` interaction once, centrally.
+    func openPR(_ pr: PRSnapshot) async {
+        TelemetryService.shared.recordTriageInteraction("open_in_browser")
+        guard let url = await resolveOpenURL(for: pr) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Resolves the URL to open for a PR per `prOpenTarget`. See `openPR(_:)`.
+    private func resolveOpenURL(for pr: PRSnapshot) async -> URL? {
+        let githubURL = URL(string: pr.htmlUrl)
+        guard settings.prOpenTarget == .linear else { return githubURL }
+
+        // 1. Offline: Linear-format branch carries the identifier.
+        if let linear = PROpenTarget.linearIssueURL(branch: pr.headRefName,
+                                                     workspaceSlug: settings.linearWorkspaceSlug) {
+            return linear
+        }
+        // 2. API: ask Linear which issue this PR is attached to.
+        if let key = await KeychainHelper.loadLinearKey(),
+           let linear = await LinearClient.issueURL(forPRURL: pr.htmlUrl, apiKey: key) {
+            return linear
+        }
+        // 3. Fallback: the GitHub PR page.
+        return githubURL
+    }
+
     /// Returns the resolved merge method string for telemetry — uses the same logic
     /// as `GitHubClient.resolveMergeMethod` but returns a lowercase string.
     /// Never includes PR titles, repo names, or author logins.
