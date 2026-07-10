@@ -82,6 +82,10 @@ Your token is stored in the macOS Keychain — never in a plain file or in app p
 - **New review or comment** — notifies when a review or comment is added (human comments only, by default — bot noise is filtered).
 - **Per-event attention levels** — set each event type to a loud or quiet notification independently.
 
+### Cut through the noise
+
+- **Inbox tab** — a unified view of every PR you opened or are asked to review, split into "Needs your review" and "Your PRs". Four configurable mute rules keep automated noise out: glob patterns matched against PR title and branch, bot-author detection (dependabot, renovate, …), label filtering, and a review-focus allow-list. Muted PRs collapse into a "Muted / low-priority" group at the bottom rather than disappearing entirely.
+
 ### Triage fast
 
 - **Menu bar panel** — click the icon to see your PRs grouped by actionability (Needs a Human, Ready to merge, Waiting, …), each with CI status.

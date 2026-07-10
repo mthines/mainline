@@ -62,6 +62,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case dismiss
     case multiSelectToggle
     case toggleDrafts
+    case toggleMute
     case undo
 
     var id: String { rawValue }
@@ -79,6 +80,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .dismiss:          return "Dismiss"
         case .multiSelectToggle: return "Toggle Multi-Select"
         case .toggleDrafts:     return "Toggle Drafts"
+        case .toggleMute:       return "Mute / Move Up (Inbox)"
         case .undo:             return "Undo (⌘+key)"
         }
     }
@@ -96,6 +98,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .dismiss:          return "x"
         case .multiSelectToggle: return "v"
         case .toggleDrafts:     return "d"
+        case .toggleMute:       return "q"   // "quiet" — left-hand key (see left-hand default policy)
         case .undo:             return "z"
         }
     }
@@ -113,6 +116,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .dismiss:          return "xmark"
         case .multiSelectToggle: return "checkmark.circle"
         case .toggleDrafts:     return "pencil.circle"
+        case .toggleMute:       return "arrow.down.circle"
         case .undo:             return "arrow.uturn.backward"
         }
     }
@@ -181,6 +185,7 @@ struct InAppShortcutBindings: Equatable {
     var dismiss:         ShortcutBinding
     var multiSelectToggle: ShortcutBinding
     var toggleDrafts:    ShortcutBinding
+    var toggleMute:      ShortcutBinding
     var undo:            ShortcutBinding
 
     /// Factory defaults — all bindings bare except undo = ⌘Z.
@@ -198,6 +203,7 @@ struct InAppShortcutBindings: Equatable {
             dismiss:         ShortcutBinding(key: "x"),
             multiSelectToggle: ShortcutBinding(key: "v"),
             toggleDrafts:    ShortcutBinding(key: "d"),
+            toggleMute:      ShortcutBinding(key: "q"),
             undo:            ShortcutBinding(key: "z", modifiers: cmdRaw)
         )
     }()
@@ -216,6 +222,7 @@ struct InAppShortcutBindings: Equatable {
         case .dismiss:           return dismiss
         case .multiSelectToggle: return multiSelectToggle
         case .toggleDrafts:      return toggleDrafts
+        case .toggleMute:        return toggleMute
         case .undo:              return undo
         }
     }
@@ -234,6 +241,7 @@ struct InAppShortcutBindings: Equatable {
         case .dismiss:           dismiss         = binding
         case .multiSelectToggle: multiSelectToggle = binding
         case .toggleDrafts:      toggleDrafts    = binding
+        case .toggleMute:        toggleMute      = binding
         case .undo:              undo            = binding
         }
     }
@@ -279,7 +287,8 @@ extension InAppShortcutBindings: Codable {
     /// so existing stored data continues to decode).
     enum CodingKeys: String, CodingKey {
         case navigateDown, navigateUp, peek, merge, refresh, openPreview,
-             snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts, undo
+             snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
+             toggleMute, undo
     }
 
     /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
@@ -318,6 +327,7 @@ extension InAppShortcutBindings: Codable {
         dismiss         = try decodeBinding(.dismiss,         default: d.dismiss)
         multiSelectToggle = try decodeBinding(.multiSelectToggle, default: d.multiSelectToggle)
         toggleDrafts    = try decodeBinding(.toggleDrafts,    default: d.toggleDrafts)
+        toggleMute      = try decodeBinding(.toggleMute,      default: d.toggleMute)
 
         // Undo migration: bare-string or absent → apply .command modifier.
         if let newShape = try? container.decodeIfPresent(ShortcutBinding.self, forKey: .undo) {
@@ -345,6 +355,7 @@ extension InAppShortcutBindings: Codable {
         try container.encode(dismiss,          forKey: .dismiss)
         try container.encode(multiSelectToggle, forKey: .multiSelectToggle)
         try container.encode(toggleDrafts,     forKey: .toggleDrafts)
+        try container.encode(toggleMute,       forKey: .toggleMute)
         try container.encode(undo,             forKey: .undo)
     }
 }
@@ -451,6 +462,13 @@ final class MainlineSettings: ObservableObject {
         static let forMeReviewFilter    = "forMeReviewFilter"
         static let compactRows          = "compactRows"
         static let needsHumanExpanded   = "needsHumanExpanded"
+        // Inbox mute filters
+        static let mutePatterns         = "mutePatterns"
+        static let muteBotAuthors       = "muteBotAuthors"
+        static let reviewFocusAuthors   = "reviewFocusAuthors"
+        static let reviewFocusTeams     = "reviewFocusTeams"
+        static let muteLabels           = "muteLabels"
+        static let inboxMuteOverrides   = "inboxMuteOverrides"
         // Vercel preview detection
         static let vercelPreviewEnabled = "vercelPreviewEnabled"
         static let vercelPreviewDomains = "vercelPreviewDomains"
@@ -660,6 +678,59 @@ final class MainlineSettings: ObservableObject {
     @Published var needsHumanExpanded: Bool {
         didSet { defaults.set(needsHumanExpanded, forKey: Keys.needsHumanExpanded) }
     }
+
+    // MARK: - Inbox mute filters
+
+    /// Glob patterns (case-insensitive, `*` wildcard) matched against PR title AND
+    /// head branch. PRs matching any pattern are demoted to the Muted group in the
+    /// Inbox view. Default `["chore(deps)*", "build(deps)*"]` to silence dependency
+    /// bumps. Edit via Settings → Inbox.
+    @Published var mutePatterns: [String] {
+        didSet { defaults.set(mutePatterns, forKey: Keys.mutePatterns) }
+    }
+
+    /// Whether to demote bot-authored PRs (dependabot, renovate, github-actions, and
+    /// logins ending in `[bot]`) to the Muted group. Default ON.
+    @Published var muteBotAuthors: Bool {
+        didSet { defaults.set(muteBotAuthors, forKey: Keys.muteBotAuthors) }
+    }
+
+    /// Allow-list of PR author logins for the "Needs your review" section.
+    /// When non-empty, only PRs authored by someone in this list (or a team in
+    /// `reviewFocusTeams`) stay in the active group; others are demoted. Empty =
+    /// no focus (show all). Edit via Settings → Inbox.
+    @Published var reviewFocusAuthors: [String] {
+        didSet { defaults.set(reviewFocusAuthors, forKey: Keys.reviewFocusAuthors) }
+    }
+
+    /// Allow-list of team slugs for the "Needs your review" section.
+    /// Works alongside `reviewFocusAuthors`: a PR is kept if its author OR a
+    /// requested team matches. Empty = no focus. Edit via Settings → Inbox.
+    @Published var reviewFocusTeams: [String] {
+        didSet { defaults.set(reviewFocusTeams, forKey: Keys.reviewFocusTeams) }
+    }
+
+    /// Label names that demote a PR to the Muted group. Case-insensitive match.
+    /// Empty = disabled (no label-based muting). Edit via Settings → Inbox.
+    @Published var muteLabels: [String] {
+        didSet { defaults.set(muteLabels, forKey: Keys.muteLabels) }
+    }
+
+    /// Per-PR manual mute overrides for the Inbox, keyed by nodeId. A `true` value
+    /// forces the PR into the Muted group; `false` pins it into the active list even
+    /// when a rule would mute it (so the `L` shortcut can move a rule-muted PR back
+    /// up). Absent = follow the mute rules. Persisted as JSON. Toggled by the
+    /// `toggleMute` shortcut; never auto-cleared (a manual choice is permanent).
+    @Published var inboxMuteOverrides: [String: Bool] {
+        didSet {
+            if let data = try? JSONEncoder().encode(inboxMuteOverrides) {
+                defaults.set(data, forKey: Keys.inboxMuteOverrides)
+            }
+        }
+    }
+
+    /// Default mute patterns seeded on first run.
+    static let defaultMutePatterns = ["chore(deps)*", "build(deps)*"]
 
     // MARK: - Vercel preview detection
 
@@ -983,10 +1054,11 @@ final class MainlineSettings: ObservableObject {
         defaultSnoozeDuration = defaults.string(forKey: Keys.defaultSnoozeDuration)
             .flatMap { SnoozeDuration(rawValue: $0) } ?? .quickDefault
 
-        // Collapsed sections — default: Postponed + Done collapsed (low-priority
-        // buckets stay folded until the user expands them).
+        // Collapsed sections — default: Postponed + Done + Muted collapsed
+        // (low-priority buckets stay folded until the user expands them).
         collapsedSectionsRaw = defaults.stringArray(forKey: Keys.collapsedSectionsRaw)
-            ?? [ActionGroup.postponed.rawValue, ActionGroup.done.rawValue]
+            ?? [ActionGroup.postponed.rawValue, ActionGroup.done.rawValue,
+                ActionGroup.muted.rawValue]
 
         // Attention policy — defaults are baked into PREvent.defaults
         attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
@@ -1022,6 +1094,22 @@ final class MainlineSettings: ObservableObject {
 
         // Needs-a-Human expanded — default collapsed (false); persisted on change
         needsHumanExpanded = defaults.bool(forKey: Keys.needsHumanExpanded)
+
+        // Inbox mute filters
+        mutePatterns = defaults.stringArray(forKey: Keys.mutePatterns)
+            ?? Self.defaultMutePatterns
+        muteBotAuthors = defaults.object(forKey: Keys.muteBotAuthors) == nil
+            ? true
+            : defaults.bool(forKey: Keys.muteBotAuthors)
+        reviewFocusAuthors = defaults.stringArray(forKey: Keys.reviewFocusAuthors) ?? []
+        reviewFocusTeams   = defaults.stringArray(forKey: Keys.reviewFocusTeams) ?? []
+        muteLabels         = defaults.stringArray(forKey: Keys.muteLabels) ?? []
+        if let data = defaults.data(forKey: Keys.inboxMuteOverrides),
+           let decoded = try? JSONDecoder().decode([String: Bool].self, from: data) {
+            inboxMuteOverrides = decoded
+        } else {
+            inboxMuteOverrides = [:]
+        }
 
         // PR open target — default GitHub; Linear also needs a workspace slug
         prOpenTarget = defaults.string(forKey: Keys.prOpenTarget)

@@ -9,6 +9,7 @@ import AppKit
 private enum SettingsCategory: String, CaseIterable, Identifiable {
     case github
     case notifications
+    case inbox
     case menuBar
     case appearance
     case keyboard
@@ -20,6 +21,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .github:        return "GitHub"
         case .notifications: return "Notifications"
+        case .inbox:         return "Inbox"
         case .menuBar:       return "Menu Bar"
         case .appearance:    return "Appearance"
         case .keyboard:      return "Keyboard"
@@ -31,6 +33,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .github:        return "key.fill"
         case .notifications: return "bell.fill"
+        case .inbox:         return "tray.fill"
         case .menuBar:       return "menubar.rectangle"
         case .appearance:    return "slider.horizontal.3"
         case .keyboard:      return "keyboard"
@@ -111,6 +114,7 @@ struct SettingsView: View {
                 switch category {
                 case .github:        githubSection
                 case .notifications: notificationsSection
+                case .inbox:         inboxSection
                 case .menuBar:       menuBarSection
                 case .appearance:    appearanceSection
                 case .keyboard:      keyboardSection
@@ -240,6 +244,13 @@ struct SettingsView: View {
                     .filter { !$0.isEmpty }
             }
         )
+    }
+
+    // MARK: - Inbox
+
+    @ViewBuilder
+    private var inboxSection: some View {
+        InboxSettingsView(settings: settings)
     }
 
     // MARK: - Notifications

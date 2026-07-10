@@ -15,6 +15,7 @@ enum TriageAction: Identifiable {
     case viewDiff
     case openInBrowser
     case openPreview
+    case toggleMute
 
     var id: String { label }
 
@@ -29,6 +30,7 @@ enum TriageAction: Identifiable {
         case .viewDiff:           return "View Details"
         case .openInBrowser:      return "Open in Browser"
         case .openPreview:        return "Open Preview"
+        case .toggleMute:         return "Mute / Move Up"
         }
     }
 
@@ -43,6 +45,7 @@ enum TriageAction: Identifiable {
         case .viewDiff:        return "rectangle.stack"
         case .openInBrowser:   return "safari"
         case .openPreview:     return "globe"
+        case .toggleMute:      return "arrow.down.circle"
         }
     }
 
@@ -191,6 +194,10 @@ struct LeadingColumn<Icon: View>: View {
 ///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
     let prs: [PRSnapshot]
+    /// Muted PRs for the Inbox tab. Empty on the For-me / Created tabs.
+    var mutedPRs: [PRSnapshot] = []
+    /// Whether the Inbox view is active (two role sections + Muted group).
+    var inboxMode: Bool = false
     @ObservedObject var manager: PRManager
     @ObservedObject var settings: MainlineSettings
 
@@ -204,19 +211,36 @@ struct TriageDeckView: View {
     @State private var multiSelectMode: Bool = false
     @State private var selectedPRs: Set<String> = []   // nodeIds
 
+    // Scroll-thrash guard: hover selection is suppressed briefly after a scroll
+    // wheel event so that scrolling the list (which sweeps the stationary pointer
+    // across many rows, each firing `.onHover`) doesn't cause the selection — and
+    // its revealed action cluster — to jump around while you scroll.
+    @State private var lastScrollAt: Date = .distantPast
+    @State private var scrollMonitor: Any?
+
     // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            // Show "Queue clear" only when there is genuinely nothing to display —
-            // no active PRs AND no Postponed/Done sections. Guarding on `prs` (the
-            // active list) alone hid the Postponed and Done sections whenever the
-            // active list was empty, so postponing everything in a scope left no way
-            // to see or resume those PRs. `sections` already folds in Postponed/Done.
-            if sections.isEmpty {
-                emptyState
+            if inboxMode {
+                // Inbox view: role sections ("Needs your review" / "Your PRs") +
+                // a collapsed "Muted / low-priority" group at the bottom.
+                if inboxSections.isEmpty && mutedPRs.isEmpty {
+                    emptyState
+                } else {
+                    inboxList
+                }
             } else {
-                prList
+                // Show "Queue clear" only when there is genuinely nothing to display —
+                // no active PRs AND no Postponed/Done sections. Guarding on `prs` (the
+                // active list) alone hid the Postponed and Done sections whenever the
+                // active list was empty, so postponing everything in a scope left no way
+                // to see or resume those PRs. `sections` already folds in Postponed/Done.
+                if sections.isEmpty {
+                    emptyState
+                } else {
+                    prList
+                }
             }
         }
         // Neither the peek overlay nor the undo toast is rendered here — both are
@@ -234,6 +258,34 @@ struct TriageDeckView: View {
                 onDismiss: { manager.peekPR = nil }
             )
         )
+        .onAppear { installScrollMonitor() }
+        .onDisappear { removeScrollMonitor() }
+    }
+
+    // MARK: - Scroll monitor (hover-thrash guard)
+
+    /// Installs a local scroll-wheel monitor that timestamps the last scroll, so
+    /// `.onHover` can ignore selection changes that fire merely because content
+    /// scrolled under a stationary pointer. Local monitor → only this app's events.
+    private func installScrollMonitor() {
+        guard scrollMonitor == nil else { return }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            lastScrollAt = Date()
+            return event
+        }
+    }
+
+    private func removeScrollMonitor() {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
+        }
+    }
+
+    /// True within a short window after the last scroll — used to gate hover
+    /// selection so scrolling doesn't drag the highlight around.
+    private var isScrolling: Bool {
+        Date().timeIntervalSince(lastScrollAt) < 0.18
     }
 
     // MARK: - PR list
@@ -269,6 +321,14 @@ struct TriageDeckView: View {
     /// drafts in the index while the display rendered the draft-heavy "Needs
     /// attention" group first, so pressing J/K jumped focus into the group above.)
     private var orderedPRs: [PRSnapshot] {
+        if inboxMode {
+            // Inbox: keyboard index space is role-sections + (expanded) muted rows.
+            var list = inboxOrderedPRs
+            if settings.collapsedSections.contains(.muted) {
+                list += mutedPRs.sorted(by: PRSnapshot.triageOrder)
+            }
+            return list
+        }
         var list = actionabilitySections.flatMap { $0.prs }
         // Include Postponed rows in the keyboard/hover focus space ONLY while that
         // section is expanded (it is collapsed by default). Expanded ⇔ the section
@@ -314,6 +374,124 @@ struct TriageDeckView: View {
             result.append((.done, done))
         }
         return result
+    }
+
+    // MARK: - Inbox sections
+
+    /// The role-section + actionability structure for the Inbox view.
+    /// Two outer role sections in canonical order (Needs-your-review first),
+    /// each populated with `prs` matching that role and sorted by actionability.
+    private var inboxSections: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] {
+        let myLogin = settings.githubUsername
+        let needsReview = prs.filter { $0.inboxRole(myLogin: myLogin) == .needsYourReview }
+            .sorted(by: PRSnapshot.triageOrder)
+        let yourPRs = prs.filter { $0.inboxRole(myLogin: myLogin) == .yourPRs }
+            .sorted(by: PRSnapshot.triageOrder)
+
+        var result: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] = []
+        for (role, rolePRs) in [(InboxRole.yourPRs, yourPRs), (.needsYourReview, needsReview)] {
+            guard !rolePRs.isEmpty else { continue }
+            let grouped = Dictionary(grouping: rolePRs, by: { $0.actionGroup(splitDrafts: settings.splitDrafts) })
+            let actionSections: [(group: ActionGroup, prs: [PRSnapshot])] = ActionGroup.allCases
+                .filter { $0 != .postponed && $0 != .done && $0 != .muted }
+                .sorted { $0.sortIndex < $1.sortIndex }
+                .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
+                    guard let sectionPRs = grouped[group], !sectionPRs.isEmpty else { return nil }
+                    return (group, sectionPRs)
+                }
+            if !actionSections.isEmpty {
+                result.append((role: role, actionSections: actionSections))
+            }
+        }
+        return result
+    }
+
+    /// All PRs in the Inbox view in display order (for keyboard index space).
+    private var inboxOrderedPRs: [PRSnapshot] {
+        inboxSections.flatMap { section in
+            section.actionSections.flatMap { $0.prs }
+        }
+    }
+
+    /// The Inbox list: role sections, then the shared Muted group.
+    private var inboxList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(inboxSections, id: \.role.rawValue) { section in
+                inboxRoleSectionHeader(for: section.role, prs: inboxRolePRs(for: section.role))
+                ForEach(section.actionSections, id: \.group) { actionSection in
+                    sectionView(group: actionSection.group, prs: actionSection.prs)
+                }
+            }
+            if !mutedPRs.isEmpty {
+                mutedGroupView
+            }
+        }
+    }
+
+    private func inboxRolePRs(for role: InboxRole) -> [PRSnapshot] {
+        let myLogin = settings.githubUsername
+        return prs.filter { $0.inboxRole(myLogin: myLogin) == role }
+    }
+
+    @ViewBuilder
+    private func inboxRoleSectionHeader(for role: InboxRole, prs rolePRs: [PRSnapshot]) -> some View {
+        let title = role == .needsYourReview ? "Needs your review" : "Your PRs"
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundStyle(.primary)
+            Text("\(rolePRs.count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(.quaternary, in: Capsule())
+            Spacer()
+        }
+        .padding(.horizontal, RowMetrics.horizontalPadding)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+    }
+
+    /// The shared "Muted / low-priority (N)" group rendered at the bottom of the
+    /// Inbox view. Collapsed by default (persisted via `.muted` in collapsedSections).
+    @ViewBuilder
+    private var mutedGroupView: some View {
+        let expansion = expansionBinding(for: .muted)
+        Button {
+            expansion.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "eye.slash")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(ActionGroup.muted.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text("\(mutedPRs.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
+                Image(systemName: expansion.wrappedValue ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, RowMetrics.horizontalPadding)
+            .padding(.top, metrics.sectionHeaderTopPadding)
+            .padding(.bottom, metrics.sectionHeaderBottomPadding)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(expansion.wrappedValue ? "Collapse muted PRs" : "Expand muted PRs")
+
+        if expansion.wrappedValue {
+            sectionRows(group: .muted, prs: mutedPRs.sorted(by: PRSnapshot.triageOrder))
+        }
     }
 
     /// Ordering for the Postponed section: soonest wake first, then title.
@@ -390,22 +568,68 @@ struct TriageDeckView: View {
         .help(expansion.wrappedValue ? "Collapse \(group.title)" : "Expand \(group.title)")
 
         if expansion.wrappedValue {
-            ForEach(sectionPRs, id: \.nodeId) { pr in
-                if group == .postponed {
-                    postponedRow(pr: pr, index: flatIndex(of: pr))
-                } else if group == .done {
-                    doneRow(pr: pr)
-                } else {
-                    deckRow(pr: pr, index: flatIndex(of: pr))
-                }
-                Divider().padding(.leading, metrics.dividerInset())
-            }
+            sectionRows(group: group, prs: sectionPRs)
+        }
+    }
+
+    /// Renders a section's rows using a nodeId→index map computed ONCE (not per
+    /// row via `flatIndex`). Deck rows are memoized via `memoizedDeckRow`.
+    private func sectionRows(group: ActionGroup, prs sectionPRs: [PRSnapshot]) -> some View {
+        let indexMap = orderedIndexByNodeId
+        return ForEach(sectionPRs, id: \.nodeId) { pr in
+            rowFor(group: group, pr: pr, index: indexMap[pr.nodeId] ?? 0)
+            Divider().padding(.leading, metrics.dividerInset())
+        }
+    }
+
+    @ViewBuilder
+    private func rowFor(group: ActionGroup, pr: PRSnapshot, index: Int) -> some View {
+        if group == .postponed {
+            postponedRow(pr: pr, index: index)
+        } else if group == .done {
+            doneRow(pr: pr)
+        } else {
+            memoizedDeckRow(pr: pr, index: index)
         }
     }
 
     /// Index of a PR within the flat `orderedPRs` array (keyboard index space).
     private func flatIndex(of pr: PRSnapshot) -> Int {
         orderedPRs.firstIndex(where: { $0.nodeId == pr.nodeId }) ?? 0
+    }
+
+    /// Precomputed nodeId → keyboard-index map. Callers cache this in a local ONCE
+    /// per section render instead of calling `flatIndex(of:)` per row, which
+    /// recomputed the entire `orderedPRs` list for every row — O(n²) per render and
+    /// a major scroll/highlight cost with a large PR list.
+    private var orderedIndexByNodeId: [String: Int] {
+        var map: [String: Int] = [:]
+        let ordered = orderedPRs
+        map.reserveCapacity(ordered.count)
+        for (i, pr) in ordered.enumerated() { map[pr.nodeId] = i }
+        return map
+    }
+
+    /// Wraps `deckRow` in an `.equatable()` memoization shell keyed on the value
+    /// inputs that affect a row's appearance. SwiftUI then skips re-rendering rows
+    /// whose key is unchanged, so moving the highlight (J/K or hover) re-renders
+    /// only the two affected rows instead of the entire non-lazy VStack.
+    private func memoizedDeckRow(pr: PRSnapshot, index: Int) -> some View {
+        EquatableRow(key: DeckRowKey(
+            pr: pr,
+            isFocused: index == selectedIndex,
+            isSelected: selectedPRs.contains(pr.nodeId),
+            isUnread: manager.unreadPRIds.contains(pr.nodeId),
+            reviewSourceVisible: settings.selectedTab == .forMe,
+            myLogin: settings.githubUsername,
+            writeActionsEnabled: settings.writeActionsEnabled,
+            previewEnabled: settings.vercelPreviewEnabled,
+            showPeek: showPeek,
+            compact: settings.compactRows
+        )) {
+            deckRow(pr: pr, index: index)
+        }
+        .equatable()
     }
 
     /// Collapse state persisted to MainlineSettings, keyed by `ActionGroup`.
@@ -417,11 +641,11 @@ struct TriageDeckView: View {
     /// closed, but the choice still persists once toggled. Reuses the same
     /// `collapsedSections` store (no new key).
     private func expansionBinding(for group: ActionGroup) -> Binding<Bool> {
-        // Postponed and Done both INVERT the default: they are COLLAPSED by default,
-        // and the `collapsedSections` set instead records that the user explicitly
-        // EXPANDED them (so the choice persists once toggled). Every other group is
-        // expanded by default and the set records collapse.
-        if group == .postponed || group == .done {
+        // Postponed, Done, and Muted all INVERT the default: they are COLLAPSED by
+        // default, and the `collapsedSections` set instead records that the user
+        // explicitly EXPANDED them (so the choice persists once toggled). Every other
+        // group is expanded by default and the set records collapse.
+        if group == .postponed || group == .done || group == .muted {
             return Binding(
                 get: { settings.collapsedSections.contains(group) },
                 set: { expanded in
@@ -478,9 +702,13 @@ struct TriageDeckView: View {
                         .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
-                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
+                        Text(verbatim: pr.author.isEmpty
+                             ? "\(pr.repoFullName) #\(pr.number)"
+                             : "\(pr.repoFullName) #\(pr.number) · \(pr.author)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         if isDraft {
                             DraftBadge()
                         }
@@ -556,7 +784,7 @@ struct TriageDeckView: View {
             // No animation here on purpose: the highlight + revealed actions switch
             // instantly, which removes the cross-row hover "blink".
             .onHover { hovering in
-                guard hovering, !showPeek else { return }
+                guard hovering, !showPeek, !isScrolling else { return }
                 selectedIndex = index
             }
             .padding(.horizontal, RowMetrics.horizontalPadding)
@@ -611,6 +839,13 @@ struct TriageDeckView: View {
         }
         Button { handleTriageAction(.dismiss, on: pr) } label: {
             Label("Dismiss", systemImage: "xmark")
+        }
+        if inboxMode {
+            let muted = manager.isInboxMuted(pr)
+            Button { handleTriageAction(.toggleMute, on: pr) } label: {
+                Label(muted ? "Move Up (Un-mute)" : "Mute / Low-priority",
+                      systemImage: muted ? "arrow.up.circle" : "arrow.down.circle")
+            }
         }
 
         Divider()
@@ -695,9 +930,13 @@ struct TriageDeckView: View {
                         .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
-                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
+                        Text(verbatim: pr.author.isEmpty
+                             ? "\(pr.repoFullName) #\(pr.number)"
+                             : "\(pr.repoFullName) #\(pr.number) · \(pr.author)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         if let wake {
                             Text(humanizedWake(from: wake))
                                 .font(.caption2)
@@ -719,7 +958,7 @@ struct TriageDeckView: View {
             // Hover selects the row — shared with keyboard focus — so hover-then-S
             // resumes the pointed row, matching the deck rows. Frozen while peeking.
             .onHover { hovering in
-                guard hovering, !showPeek else { return }
+                guard hovering, !showPeek, !isScrolling else { return }
                 selectedIndex = index
             }
             .padding(.horizontal, RowMetrics.horizontalPadding)
@@ -760,9 +999,13 @@ struct TriageDeckView: View {
                         .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
-                        Text(verbatim: "\(pr.repoFullName) #\(pr.number)")
+                        Text(verbatim: pr.author.isEmpty
+                             ? "\(pr.repoFullName) #\(pr.number)"
+                             : "\(pr.repoFullName) #\(pr.number) · \(pr.author)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         DoneBadge(pr: pr)
                         if settings.selectedTab == .forMe {
                             ReviewSourceBadge(pr: pr, myLogin: settings.githubUsername)
@@ -1033,6 +1276,12 @@ struct TriageDeckView: View {
             return nil
         }
 
+        // Toggle Inbox mute / move-up on the focused PR.
+        if shortcutMatches(.toggleMute, event: event) {
+            if let pr = focusedPR { handleTriageAction(.toggleMute, on: pr) }
+            return nil
+        }
+
         return event
     }
 
@@ -1115,6 +1364,13 @@ struct TriageDeckView: View {
             }
         case .openPreview:
             openPreview(pr)
+        case .toggleMute:
+            let prevOverride = manager.inboxMuteOverride(for: pr)
+            let nowMuted = manager.toggleInboxMute(pr)
+            TelemetryService.shared.recordTriageInteraction(nowMuted ? "inbox_mute" : "inbox_unmute")
+            pushUndo(label: nowMuted ? "Muted: \(pr.title)" : "Moved up: \(pr.title)", pr: pr) {
+                manager.setInboxMuteOverride(prevOverride, for: pr)
+            }
         }
     }
 
@@ -1339,6 +1595,35 @@ struct DoneBadge: View {
     }
 }
 
+// MARK: - Deck row memoization
+
+/// Value bundle of everything that changes a deck row's rendered appearance.
+/// Used as the Equatable key for `EquatableRow` so unchanged rows skip
+/// re-rendering when the highlight moves. Settings-derived values are captured
+/// as plain values (not read live inside the row) so a change to any of them
+/// flips the key and re-renders the row.
+private struct DeckRowKey: Equatable {
+    let pr: PRSnapshot
+    let isFocused: Bool
+    let isSelected: Bool
+    let isUnread: Bool
+    let reviewSourceVisible: Bool
+    let myLogin: String
+    let writeActionsEnabled: Bool
+    let previewEnabled: Bool
+    let showPeek: Bool
+    let compact: Bool
+}
+
+/// Memoizing wrapper: re-evaluates `content()` only when `key` changes. Paired
+/// with `.equatable()` at the call site so SwiftUI uses `==` to skip stable rows.
+private struct EquatableRow<Content: View>: View, Equatable {
+    let key: DeckRowKey
+    @ViewBuilder var content: () -> Content
+    static func == (lhs: EquatableRow, rhs: EquatableRow) -> Bool { lhs.key == rhs.key }
+    var body: some View { content() }
+}
+
 // MARK: - FeedbackBadge
 
 /// Compact per-row badge flagging review feedback on a PR. Rendered on the
@@ -1370,17 +1655,16 @@ struct FeedbackBadge: View {
                 .foregroundStyle(Color(nsColor: .systemRed))
                 .accessibilityLabel("Changes requested")
         } else if pr.unresolvedThreadCount > 0 {
+            // De-emphasized: just the icon + count (no "unresolved" word, no amber
+            // pill) so open threads read as a quiet comment indicator.
             HStack(spacing: 2) {
                 Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
                     .font(.caption2)
-                Text("\(pr.unresolvedThreadCount) unresolved")
+                Text("\(pr.unresolvedThreadCount)")
                     .font(.caption2)
             }
             .lineLimit(1)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(Color(nsColor: .systemOrange).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
-            .foregroundStyle(Color(nsColor: .systemOrange))
+            .foregroundStyle(.secondary)
             .accessibilityLabel("\(pr.unresolvedThreadCount) unresolved conversation\(pr.unresolvedThreadCount == 1 ? "" : "s")")
         } else if pr.reviewState == .changesRequested || pr.commentCount > 0 {
             HStack(spacing: 2) {

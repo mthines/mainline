@@ -74,6 +74,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
 
+        // Verify InboxMuteEngine invariants at launch in DEBUG builds.
+        // This is a no-op in Release. Assertion failures here indicate a logic
+        // regression in the pure mute engine.
+        #if DEBUG
+        InboxMuteEngine.runSelfChecks()
+        #endif
+
         // Listen for open-settings requests from MenuBarView
         NotificationCenter.default.addObserver(
             self,

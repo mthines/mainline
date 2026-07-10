@@ -202,6 +202,11 @@ struct MenuBarView: View {
         manager.prs.filter { $0.tabs.contains(.created) && countsTowardTabs($0) }.count
     }
 
+    /// Count for the Inbox tab label — active (non-muted) PRs only.
+    private var inboxCount: Int {
+        manager.inboxActivePRs.count
+    }
+
     // MARK: - Height budget (content-sized, capped, crash-proof)
     //
     // A MenuBarExtra(.window) popover has NO external height constraint: it sizes
@@ -408,6 +413,7 @@ struct MenuBarView: View {
         switch tab {
         case .forMe:   return forMeCount > 0   ? "For me (\(forMeCount))"     : tab.title
         case .created: return createdCount > 0 ? "Created (\(createdCount))" : tab.title
+        case .inbox:   return inboxCount > 0   ? "Inbox (\(inboxCount))"      : tab.title
         }
     }
 
@@ -535,7 +541,12 @@ struct MenuBarView: View {
     /// clamped — no NaN/∞/negative can reach the hosting view.
     @ViewBuilder
     private var scrollableBody: some View {
-        if !manager.hasToken || manager.prs.isEmpty {
+        let isEmpty = !manager.hasToken || (
+            settings.selectedTab == .inbox
+                ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty
+                : manager.prs.isEmpty
+        )
+        if isEmpty {
             emptyState
         } else {
             ScrollView {
@@ -564,6 +575,8 @@ struct MenuBarView: View {
             // "needs attention" concept — there is no separate top bucket.
             TriageDeckView(
                 prs: visiblePRs,
+                mutedPRs: settings.selectedTab == .inbox ? manager.inboxMutedPRs : [],
+                inboxMode: settings.selectedTab == .inbox,
                 manager: manager,
                 settings: settings
             )
@@ -635,6 +648,7 @@ struct MenuBarView: View {
         switch settings.selectedTab {
         case .forMe:   return "Nothing to review"
         case .created: return "No PRs created"
+        case .inbox:   return "Inbox clear"
         }
     }
 
@@ -644,12 +658,32 @@ struct MenuBarView: View {
     /// row context menu — replaces the ⌘K command palette as the "what can I do
     /// here?" affordance.
     private var keyboardLegend: some View {
-        HStack(spacing: 0) {
-            Text("J/K move · Space peek · ↵ open · P preview · M merge · S later · R refresh · ⌘Z undo · right-click ▸ all")
+        // Built from the LIVE bindings so the glyphs always match Settings →
+        // Keyboard (never stale), and wrapped over up to two lines so every verb
+        // stays readable instead of truncating to one clipped line.
+        let b = settings.shortcutBindings
+        func g(_ s: InAppShortcut) -> String { MainlineSettings.glyph(for: b.binding(for: s)) }
+        var parts: [String] = [
+            "\(g(.navigateDown))/\(g(.navigateUp)) move",
+            "\(g(.peek)) peek",
+            "↵ open",
+            "\(g(.openPreview)) preview",
+            "\(g(.merge)) merge",
+            "\(g(.snooze)) later",
+        ]
+        if settings.selectedTab == .inbox {
+            parts.append("\(g(.toggleMute)) mute")
+        }
+        parts.append("\(g(.undo)) undo")
+        parts.append("right-click ▸ all")
+
+        return HStack(spacing: 0) {
+            Text(parts.joined(separator: "   ·   "))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)

@@ -40,6 +40,9 @@
 		OT00000000000000000000B1 /* TelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = OT00000000000000000000A1 /* TelemetryService.swift */; };
 		OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = OT00000000000000000000A2 /* TelemetryOptInBanner.swift */; };
 		OT00000000000000000000B3 /* TelemetryDetailsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */; };
+		/* Inbox noise-filter source compilation */
+		IB000000000000000000000B1 /* InboxMuteEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = IB000000000000000000000A1 /* InboxMuteEngine.swift */; };
+		IB000000000000000000000B2 /* InboxSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = IB000000000000000000000A2 /* InboxSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -75,6 +78,9 @@
 		OT00000000000000000000A1 /* TelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryService.swift; sourceTree = "<group>"; };
 		OT00000000000000000000A2 /* TelemetryOptInBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryOptInBanner.swift; sourceTree = "<group>"; };
 		OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryDetailsSheet.swift; sourceTree = "<group>"; };
+		/* Inbox noise-filter source file references */
+		IB000000000000000000000A1 /* InboxMuteEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxMuteEngine.swift; sourceTree = "<group>"; };
+		IB000000000000000000000A2 /* InboxSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -140,6 +146,7 @@
 				PF000000000000000000001F /* ScopeStore.swift */,
 				PF0000000000000000000099 /* GlobalHotKey.swift */,
 				OT00000000000000000000A1 /* TelemetryService.swift */,
+				IB000000000000000000000A1 /* InboxMuteEngine.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -156,6 +163,7 @@
 				PF0000000000000000000020 /* KeyboardShortcutsView.swift */,
 				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
 				OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */,
+				IB000000000000000000000A2 /* InboxSettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -273,6 +281,8 @@
 				PC000000000000000000001C /* ScopeStore.swift in Sources */,
 				PC000000000000000000001D /* KeyboardShortcutsView.swift in Sources */,
 				PC0000000000000000000099 /* GlobalHotKey.swift in Sources */,
+				IB000000000000000000000B1 /* InboxMuteEngine.swift in Sources */,
+				IB000000000000000000000B2 /* InboxSettingsView.swift in Sources */,
 				OT00000000000000000000B1 /* TelemetryService.swift in Sources */,
 				OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */,
 				OT00000000000000000000B3 /* TelemetryDetailsSheet.swift in Sources */,
