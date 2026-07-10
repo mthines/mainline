@@ -179,5 +179,4 @@ exact: 1.17.1
 products: OpenTelemetryApi, OpenTelemetrySdk, OpenTelemetryProtocolExporterHTTP
 ```
 
-Wired into `Mainline.xcodeproj/project.pbxproj` using `OT000…`-prefixed IDs
-(see `docs/telemetry.md` Appendix in `plan.md` for the full ID table).
+Wired into `Mainline.xcodeproj/project.pbxproj` using `OT000…`-prefixed IDs.

@@ -1,11 +1,9 @@
-# Release Pipeline
+# Release pipeline
 
-This document covers the Mainline release automation: trigger model, required secrets,
-one-time tap setup, and optional signing/notarization.
+This document covers the Mainline release automation: the trigger model, required secrets,
+one-time tap setup, and optional signing and notarization.
 
----
-
-## Trigger Model
+## Trigger model
 
 | Event | Result |
 |-------|--------|
@@ -24,9 +22,7 @@ a release. This prevents the version-bump commit from starting another release c
 Draft pull requests are detected and skipped (`should_release=false`). Mark the PR as
 "ready for review" to trigger a beta build.
 
----
-
-## One-Time Setup: Homebrew Tap
+## One-time setup: Homebrew tap
 
 Before the first release, create the `mthines/homebrew-mainline` tap repository and
 populate it locally:
@@ -50,9 +46,7 @@ brew tap mthines/mainline
 brew install --cask mainline
 ```
 
----
-
-## Required GitHub Secrets
+## Required GitHub secrets
 
 Add these in **Settings → Secrets and variables → Actions → Secrets** of the
 `mthines/mainline` repository.
@@ -62,7 +56,7 @@ Add these in **Settings → Secrets and variables → Actions → Secrets** of t
 | `DASH0_AUTH_TOKEN` | Dash0 auth token embedded into the Release build for telemetry. The release build still succeeds without it (a warning is logged), but no telemetry will be sent. |
 | `HOMEBREW_TAP_TOKEN` | Personal Access Token with `repo` scope on the `mthines/homebrew-mainline` repository. Without this, the tap update step is skipped (release still publishes to GitHub). |
 
-### Optional Secret: GH_PAT
+### Optional secret: GH_PAT
 
 If `main` has branch protection rules that block the `GITHUB_TOKEN` bot from pushing
 (e.g. required reviews), add:
@@ -71,9 +65,7 @@ If `main` has branch protection rules that block the `GITHUB_TOKEN` bot from pus
 |--------|-------------|
 | `GH_PAT` | Personal Access Token with `repo` scope on `mthines/mainline`. Used by the `version` job to push the `chore(release):` commit and the `release-macos` job to sync the cask back to `main`. Without it the workflow falls back to `GITHUB_TOKEN`; if that token is blocked by branch protection the version job will fail. |
 
----
-
-## Repository Variable (not a secret)
+## Repository variable (not a secret)
 
 Add this in **Settings → Secrets and variables → Actions → Variables**:
 
@@ -81,9 +73,7 @@ Add this in **Settings → Secrets and variables → Actions → Variables**:
 |----------|-------------|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP endpoint URL for telemetry (e.g. `https://ingress.us-east-1.dash0.com`). Not sensitive — passed to `xcodebuild` via `vars.OTEL_EXPORTER_OTLP_ENDPOINT`. |
 
----
-
-## Optional: Developer ID Signing and Notarization
+## Optional: Developer ID signing and notarization
 
 Without signing secrets the release pipeline builds an **unsigned** app. Unsigned apps
 are quarantined by Gatekeeper on download; the Homebrew cask removes the quarantine
@@ -100,14 +90,14 @@ To ship a signed and notarized app, add the following secrets:
 | `NOTARY_KEY_ID` | Key ID shown in App Store Connect (10-character string). |
 | `NOTARY_ISSUER_ID` | Issuer ID shown in App Store Connect → Keys (UUID format). |
 
-### Obtaining the Developer ID Certificate
+### Obtaining the Developer ID certificate
 
 1. Open Xcode → Settings → Accounts → Manage Certificates.
 2. Click **+** and choose **Developer ID Application**.
 3. Export from Keychain Access → My Certificates → right-click → Export.
 4. Encode: `base64 -i DeveloperIDApplication.p12 | pbcopy`.
 
-### Obtaining the Notary API Key
+### Obtaining the notary API key
 
 1. App Store Connect → Users and Access → Keys tab.
 2. Generate a new key with **Developer** role (or **Admin** if that is unavailable).
@@ -121,9 +111,7 @@ When all five signing secrets are present, `release-ci.sh` will:
 4. Staple the notarization ticket so Gatekeeper accepts the app offline.
 5. Re-zip the stapled bundle so the published archive's SHA256 matches the notarized binary.
 
----
-
-## Local Release
+## Local release
 
 To cut a release from your local machine (for testing the pipeline without CI):
 
@@ -138,9 +126,7 @@ The script reads `~/.config/mainline/.env` for `DASH0_AUTH_TOKEN` and
 pushes to GitHub. It requires `gh` CLI and a tap checked out locally (run
 `pnpm setup-tap` first).
 
----
-
-## Cask Maintenance
+## Cask maintenance
 
 The in-repo cask at `Casks/mainline.rb` is the **source of truth** for the stable cask
 shape (description, depends_on, uninstall, zap). On every stable release, `release-ci.sh`
