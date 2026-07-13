@@ -574,6 +574,13 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(writeActionsEnabled, forKey: Keys.writeActionsEnabled) }
     }
 
+    /// The *effective* write-actions gate used by the triage deck. Equals the stored
+    /// `writeActionsEnabled` in production, but is forced ON in demo / screen-recording
+    /// mode so Approve / Merge / Request-changes can be demonstrated on camera without
+    /// flipping (and persisting) the real safety setting. The Settings toggle stays
+    /// bound to `writeActionsEnabled`, so the stored value is never mutated by demo mode.
+    var writeActionsActive: Bool { writeActionsEnabled || DemoMode.isEnabled }
+
     /// The user's preferred merge method for in-app merges. Default `.auto`.
     @Published var mergeMethodPreference: MergeMethodPreference {
         didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }

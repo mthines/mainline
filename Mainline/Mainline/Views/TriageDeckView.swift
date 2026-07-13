@@ -629,7 +629,7 @@ struct TriageDeckView: View {
             isUnread: manager.unreadPRIds.contains(pr.nodeId),
             reviewSourceVisible: settings.selectedTab == .forMe,
             myLogin: settings.githubUsername,
-            writeActionsEnabled: settings.writeActionsEnabled,
+            writeActionsEnabled: settings.writeActionsActive,
             previewEnabled: settings.vercelPreviewEnabled,
             showPeek: showPeek,
             compact: settings.compactRows
@@ -762,7 +762,7 @@ struct TriageDeckView: View {
                 // routes through the SAME confirm + performAction path as the M verb.
                 if pr.readyToMerge {
                     MergeButton(
-                        writeActionsEnabled: settings.writeActionsEnabled,
+                        writeActionsEnabled: settings.writeActionsActive,
                         onMerge: { dispatchVerb(.merge(pr)) }
                     )
                     .opacity(isHovered ? 0 : 1)
@@ -844,7 +844,7 @@ struct TriageDeckView: View {
     /// `handleTriageAction` path as the single-key verbs.
     @ViewBuilder
     private func rowContextMenu(for pr: PRSnapshot) -> some View {
-        let writeOff = !settings.writeActionsEnabled
+        let writeOff = !settings.writeActionsActive
         Button { handleTriageAction(.approve, on: pr) } label: {
             Label("Approve PR", systemImage: "checkmark.circle")
         }
@@ -924,7 +924,7 @@ struct TriageDeckView: View {
             // share the hover background and Later never covers Merge.
             if pr.readyToMerge {
                 MergeButton(
-                    writeActionsEnabled: settings.writeActionsEnabled,
+                    writeActionsEnabled: settings.writeActionsActive,
                     onMerge: { dispatchVerb(.merge(pr)) }
                 )
             }
@@ -1340,7 +1340,7 @@ struct TriageDeckView: View {
     // MARK: - Verb dispatch
 
     private func dispatchVerb(_ action: WriteAction) {
-        guard settings.writeActionsEnabled else {
+        guard settings.writeActionsActive else {
             // Show disabled-state alert
             let alert = NSAlert()
             alert.messageText = "Write Actions Disabled"
