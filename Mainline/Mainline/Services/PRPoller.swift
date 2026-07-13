@@ -4,7 +4,7 @@ import Foundation
 /// All state writes go through PRStateStore — PRPoller never mutates snapshots directly.
 @MainActor
 final class PRPoller {
-    private let client:       GitHubClient
+    private let client:       GitHubAPI
     private let store:        PRStateStore
     private let notifications: NotificationService
     private let settings:     MainlineSettings
@@ -22,7 +22,7 @@ final class PRPoller {
     var onDonePRs: (([PRSnapshot]) -> Void)?
 
     init(
-        client:        GitHubClient,
+        client:        GitHubAPI,
         store:         PRStateStore,
         notifications: NotificationService,
         settings:      MainlineSettings = .shared

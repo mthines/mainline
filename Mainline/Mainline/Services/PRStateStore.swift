@@ -33,7 +33,12 @@ final class PRStateStore: ObservableObject {
         ).first!
         let dir = appSupport.appendingPathComponent("com.mainline.github-pr-notifier", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("pr-snapshots.json")
+        // Demo / screen-recording mode keeps its snapshot cache in a separate file
+        // so it never pollutes — or is polluted by — the real polling history. The
+        // separate file is also empty on first demo launch, so first-run suppression
+        // keeps the initial demo poll quiet (no notification storm).
+        let name = DemoMode.isEnabled ? "pr-snapshots-demo.json" : "pr-snapshots.json"
+        return dir.appendingPathComponent(name)
     }
 
     // MARK: - Load

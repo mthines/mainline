@@ -28,7 +28,7 @@ private struct PeekContentHeightKey: PreferenceKey {
 /// "Open on GitHub" covers reading the actual diff comfortably.
 struct PRPeekView: View {
     let pr: PRSnapshot
-    let client: GitHubClient
+    let client: GitHubAPI
     @Binding var isPresented: Bool
     /// Settings used to resolve live binding glyphs for the action hints.
     @ObservedObject var settings: MainlineSettings
@@ -295,10 +295,16 @@ struct PRPeekView: View {
         files = []
         isLoadingFiles = true
         filesError = nil
-        guard let token = await KeychainHelper.loadToken(), !token.isEmpty else {
-            isLoadingFiles = false
-            filesError = "No token — open Settings"
-            return
+        let token: String
+        if DemoMode.isEnabled {
+            token = "demo-token"
+        } else {
+            guard let real = await KeychainHelper.loadToken(), !real.isEmpty else {
+                isLoadingFiles = false
+                filesError = "No token — open Settings"
+                return
+            }
+            token = real
         }
         do {
             files = try await client.fetchFiles(

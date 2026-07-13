@@ -64,7 +64,7 @@ final class PRManager: ObservableObject {
 
     let store:          PRStateStore
     let notifications:  NotificationService
-    let client:         GitHubClient
+    let client:         GitHubAPI
     private let poller: PRPoller
     let settings:       MainlineSettings
     let snoozeStore:    SnoozeStore
@@ -486,11 +486,19 @@ final class PRManager: ObservableObject {
         self.settings      = settings
         self.store         = PRStateStore()
         self.notifications = NotificationService()
-        self.client        = GitHubClient(settings: settings)
+        // In demo / screen-recording mode, swap the live GitHub client for the
+        // in-memory mock. ONE instance is shared with the poller so a write action
+        // (approve / merge) routed through `client` is reflected on the next poll
+        // that the poller runs through the same mock. The real client is stateless,
+        // so sharing is equally correct for production.
+        let api: GitHubAPI = DemoMode.isEnabled
+            ? MockGitHubClient(myLogin: DemoMode.login(for: settings))
+            : GitHubClient(settings: settings)
+        self.client        = api
         self.snoozeStore   = SnoozeStore(settings: settings)
         self.scopeStore    = ScopeStore()
         self.poller        = PRPoller(
-            client:        GitHubClient(settings: settings),
+            client:        api,
             store:         store,
             notifications: notifications,
             settings:      settings
@@ -551,6 +559,20 @@ final class PRManager: ObservableObject {
         // engine compares against last-known state instead of an empty set (which
         // would fire a "New PR" banner for every open PR on launch).
         await store.load()
+
+        // Demo / screen-recording mode: no token, no network. Ensure a login is set
+        // so the Inbox role split ("Your PRs" vs "Needs your review") and the
+        // attention logic resolve correctly, mark the app as configured, and start
+        // the poller with a placeholder token the mock ignores.
+        if DemoMode.isEnabled {
+            if settings.githubUsername.isEmpty {
+                settings.githubUsername = DemoMode.demoLogin
+            }
+            hasToken = true
+            tokenInvalid = false
+            poller.start(token: "demo-token")
+            return
+        }
 
         let token = await KeychainHelper.loadToken()
         if let token, !token.isEmpty {
@@ -614,7 +636,15 @@ final class PRManager: ObservableObject {
             break
         }
 
-        guard let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
+        // Demo mode uses a placeholder token the mock ignores; production loads the
+        // real PAT from the Keychain.
+        let token: String
+        if DemoMode.isEnabled {
+            token = "demo-token"
+        } else {
+            guard let real = await KeychainHelper.loadToken(), !real.isEmpty else { return }
+            token = real
+        }
 
         switch action {
         case .approve(let pr):

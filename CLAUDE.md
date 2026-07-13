@@ -50,7 +50,9 @@ Mainline/Mainline/                     ← Source root
 │   ├── ScopeStore.swift         ← @MainActor derives org/repo scopes from PR list; drives badge
 │   ├── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
 │   ├── GlobalHotKey.swift       ← Carbon global hotkey + MenuBarPopoverOpener
-│   └── TelemetryService.swift   ← Opt-in OTel singleton (no-op when disabled)
+│   ├── TelemetryService.swift   ← Opt-in OTel singleton (no-op when disabled)
+│   ├── DemoMode.swift           ← Feature flag (env `MAINLINE_DEMO` / defaults `demoModeEnabled`) + canned demo dataset factory
+│   └── MockGitHubClient.swift   ← `GitHubAPI` protocol (real + mock share it) + in-memory fake for demo/recording mode
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab
     ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView
@@ -110,6 +112,9 @@ Each PR can carry a `vercelPreviewUrl` extracted from its `vercel[bot]` issue co
 
 ### PR open target (GitHub / Linear)
 The primary "open" action (click / ↵ / `openInBrowser` verb) routes through `PRManager.openPR(_:)` (sync). GitHub by default. Linear is used only when the PR's repo passes `PROpenTarget.repoUsesLinear(repoFullName:filter:)` against `settings.linearRepoFilter` (a `[String]` allowlist of orgs `owner` or exact repos `owner/repo`; **empty = all repos**) — so work repos can open in Linear while personal repos stay on GitHub. When Linear applies it opens the PR's **review view** derived from the PR URL alone (no API key, no workspace slug): `PROpenTarget.linearDesktopURL(fromPRURL:)` builds `linear://linear.app/review/<owner>/<repo>/pull/<n>` — the `linear://` custom scheme is the only form that hands off to the Linear **desktop app** (the `/review/*` path is NOT in Linear's universal-link AASA, so `https` forms only ever open the browser). If the desktop app isn't installed (`NSWorkspace.open` returns false) it falls back to `PROpenTarget.linearWebURL(fromPRURL:)` = `https://linear.review/<path>` (Linear redirects it to the review page), then to the GitHub PR page. `openPR` records the `open_in_browser` interaction once, centrally. The peek card's Safari button (`PRPeekView`) always opens GitHub via `htmlUrl`.
+
+### Demo / screen-recording mode
+A **temporary, opt-in** switch (`DemoMode`) that swaps the live network layer for a canned in-memory dataset so recordings show every visual state without a real account. Enabled by env var `MAINLINE_DEMO=1` **or** UserDefaults `demoModeEnabled` (`defaults write com.mainline.github-pr-notifier demoModeEnabled -bool YES`). Mechanism: `GitHubClient` and `MockGitHubClient` both conform to the **`GitHubAPI`** protocol; `PRManager.init` picks the mock when `DemoMode.isEnabled` and shares the SAME instance with `PRPoller` (so write actions mutate state the next poll reads). `PRManager.start()` / `performAction` / `PRPeekView.loadFiles` bypass the Keychain token in demo mode; `PRStateStore` persists to a separate `pr-snapshots-demo.json` (isolated + quiet first run). The mock (`MockGitHubClient`, an `actor`) serves `DemoMode.dataset(myLogin:)` — a spread covering Ready-to-merge / Needs-attention (failing CI, changes requested, unresolved threads) / Waiting / Draft / Muted bot PRs / Vercel previews / large PR / Done (merged + closed), across `dash0hq` + `mthines` repos and both tabs — and mutates it on Approve (→ approved), Request changes (→ changes requested), and Merge (→ moves to Done). Everything else (polling, diff engine, notifications, keyboard triage, collapse/hide/snooze/mute) runs unchanged.
 
 ## Keychain Details
 
