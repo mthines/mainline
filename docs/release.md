@@ -8,19 +8,28 @@ one-time tap setup, and optional signing and notarization.
 | Event | Result |
 |-------|--------|
 | `push` to `main` (feat/fix/etc commit) | Stable release: bumps `Info.plist`, creates `chore(release):` commit, creates annotated tag `vX.Y.Z`, publishes GitHub release, updates Homebrew tap |
-| Non-draft pull request (opened, sync, ready) | Beta release: creates annotated tag `vX.Y.Z-beta.{PR#}.{n}`, publishes pre-release on GitHub, comments install instructions on the PR |
+| Pull request (opened, sync, reopened) | Debug **smoke build only** — no release. Validates the PR compiles. |
+| `/beta` comment on an open PR (by owner/member/collaborator) | Beta release: creates annotated tag `vX.Y.Z-beta.{PR#}.{n}`, publishes pre-release on GitHub, comments install instructions on the PR. Publishes once per comment — comment `/beta` again for a fresh beta. |
 | `workflow_dispatch` from `main` | Stable release (same as push) |
-| `workflow_dispatch` from a branch with an open PR | Beta release (same as PR trigger) |
+| `workflow_dispatch` from a branch with an open PR | Beta release (same as `/beta`) |
+
+Betas are **on-demand** rather than per-push: building, signing, and notarizing a macOS
+app can only run on GitHub's (metered) macOS runners, so a beta is published only when you
+explicitly ask for one with a `/beta` comment. The workflow reacts 👀 to the comment when a
+build starts. Orchestration jobs (`detect-changes`, `version`) run on free Linux runners;
+only the compile and build+sign+notarize jobs use macOS.
 
 ### Loop-skip guard
 
 Commits whose message matches `^chore(release):` or `^feat(cask):` do **not** re-trigger
 a release. This prevents the version-bump commit from starting another release cycle.
 
-### Draft PRs
+### Betas are opt-in per PR
 
-Draft pull requests are detected and skipped (`should_release=false`). Mark the PR as
-"ready for review" to trigger a beta build.
+Pull requests (draft or not) only run the Debug smoke build. To publish a beta from a PR,
+comment `/beta` on it — this creates the beta tag and publishes the pre-release. Each `/beta`
+comment produces one beta; comment again after pushing new commits to cut another. Only
+repository owners, members, and collaborators can trigger a beta this way.
 
 ## One-time setup: Homebrew tap
 

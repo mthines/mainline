@@ -32,7 +32,7 @@ A menu bar icon appears — click it to open the panel.
 <details>
 <summary>Install a beta build</summary>
 
-Beta builds are published for every non-draft pull request.
+Beta builds are published on demand: comment `/beta` on a pull request to cut a beta from it.
 
 ```bash
 brew tap mthines/mainline
@@ -150,7 +150,7 @@ xcodebuild -scheme Mainline -configuration Debug -destination "platform=macOS" b
 The built app lands in `~/Library/Developer/Xcode/DerivedData/Mainline-*/Build/Products/Debug/Mainline.app`.
 Building requires **Xcode 15+**.
 
-Releases run automatically through GitHub Actions: a push to `main` publishes a stable build, and a non-draft pull request publishes a beta.
+Releases run through GitHub Actions: a push to `main` publishes a stable build automatically, and commenting `/beta` on a pull request publishes a beta on demand (PRs otherwise run a compile-only smoke check).
 For code signing, notarization, the release pipeline, and Homebrew tap internals, see [`docs/release.md`](docs/release.md).
 
 ## License

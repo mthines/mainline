@@ -22,8 +22,10 @@ pnpm setup-tap
 # or: bash scripts/setup-tap.sh
 ```
 
-CI releases run automatically: push to `main` → stable; non-draft PR → beta.
-See `docs/release.md` for secrets, trigger model, and signing setup.
+CI releases: push to `main` → stable (automatic); comment `/beta` on a PR → beta (on-demand).
+PRs otherwise run a Debug smoke build only. Betas are on-demand because the macOS build+sign+
+notarize can only run on metered macOS runners. See `docs/release.md` for secrets, trigger
+model, and signing setup.
 
 ## Architecture
 
