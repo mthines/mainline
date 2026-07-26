@@ -9,6 +9,7 @@ enum TriageAction: Identifiable {
     case approve
     case merge
     case requestChanges
+    case markReady
     case snooze(SnoozeDuration)
     case markSeen
     case dismiss
@@ -24,6 +25,7 @@ enum TriageAction: Identifiable {
         case .approve:            return "Approve PR"
         case .merge:              return "Merge PR"
         case .requestChanges:     return "Request Changes"
+        case .markReady:          return "Mark Ready for Review"
         case .snooze(let d):      return "Later — \(d.title)"
         case .markSeen:           return "Mark as Seen"
         case .dismiss:            return "Dismiss"
@@ -39,6 +41,7 @@ enum TriageAction: Identifiable {
         case .approve:         return "checkmark.circle"
         case .merge:           return "arrow.triangle.merge"
         case .requestChanges:  return "text.bubble"
+        case .markReady:       return "paperplane"
         case .snooze:          return "clock"
         case .markSeen:        return "eye"
         case .dismiss:         return "xmark"
@@ -52,7 +55,7 @@ enum TriageAction: Identifiable {
     /// Returns true if this action requires write-actions to be enabled.
     var requiresWriteActions: Bool {
         switch self {
-        case .approve, .merge, .requestChanges: return true
+        case .approve, .merge, .requestChanges, .markReady: return true
         default: return false
         }
     }
@@ -183,6 +186,7 @@ struct LeadingColumn<Icon: View>: View {
 ///   Space  — peek: glance card + files (PRPeekView) (default: space)
 ///   ↵      — open selected PR in browser (works while peek is open too)
 ///   M      — merge (write-gated) (default: m)
+///   F      — mark draft PR ready for review (write-gated, draft-only) (default: f)
 ///   R      — refresh (default: r)
 ///   E      — open preview (default: e; was p)
 ///   S      — postpone (uses the default duration set in Settings) (default: s)
@@ -190,6 +194,7 @@ struct LeadingColumn<Icon: View>: View {
 ///   X      — dismiss (default: x)
 ///   V      — toggle multi-select mode (default: v)
 ///   D      — toggle draft visibility (default: d)
+///   Q      — toggle Inbox mute (default: q)
 ///   ⌘Z     — undo last action (default: z with ⌘)
 ///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
@@ -863,6 +868,12 @@ struct TriageDeckView: View {
             Label("Request Changes", systemImage: "text.bubble")
         }
         .disabled(writeOff)
+        if pr.isDraft {
+            Button { handleTriageAction(.markReady, on: pr) } label: {
+                Label("Mark Ready for Review", systemImage: "paperplane")
+            }
+            .disabled(writeOff)
+        }
 
         Divider()
 
@@ -1259,6 +1270,12 @@ struct TriageDeckView: View {
             return nil
         }
 
+        // Mark Ready for Review — draft-only; silent no-op on non-draft PRs.
+        if shortcutMatches(.markReady, event: event) {
+            if let pr = focusedPR, pr.isDraft { handleTriageAction(.markReady, on: pr) }
+            return nil
+        }
+
         // Refresh the PR list. Works whether or not a row is focused.
         if shortcutMatches(.refresh, event: event) {
             Task { await manager.triggerSingleRefresh() }
@@ -1388,6 +1405,8 @@ struct TriageDeckView: View {
             dispatchVerb(.merge(pr))
         case .requestChanges:
             dispatchVerb(.requestChanges(pr))
+        case .markReady:
+            markReady(pr)
         case .snooze(let duration):
             postpone(pr, for: duration)
         case .markSeen:
@@ -1419,6 +1438,26 @@ struct TriageDeckView: View {
         guard let preview = pr.vercelPreviewUrl, let url = URL(string: preview) else { return }
         TelemetryService.shared.recordTriageInteraction("open_preview")
         NSWorkspace.shared.open(url)
+    }
+
+    /// Marks a draft PR as ready for review — fires immediately (no NSAlert confirm),
+    /// gated by `settings.writeActionsEnabled` and `pr.isDraft`.
+    /// Shows the write-actions disabled guidance alert when write actions are off.
+    /// Shows a plain confirmation toast (non-undoable — no inverse convert-to-draft).
+    private func markReady(_ pr: PRSnapshot) {
+        guard pr.isDraft else { return }
+        guard settings.writeActionsEnabled else {
+            let alert = NSAlert()
+            alert.messageText = "Write Actions Disabled"
+            alert.informativeText = "Enable \"Write Actions\" in Settings to use approve, merge, request-changes, and mark-ready."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+        Task { await manager.performAction(.markReady(pr)) }
+        // Plain confirmation toast — empty undo closure (no convert-back-to-draft).
+        pushUndo(label: "Marked ready: \(pr.title)", pr: pr) {}
     }
 
     // MARK: - Undo

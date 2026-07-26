@@ -681,6 +681,35 @@ final class GitHubClient {
         let errors: [GraphQLError]?
     }
 
+    // MARK: - Mark Ready for Review mutation
+
+    private static let markPullRequestReadyForReviewMutation = """
+    mutation($pullRequestId: ID!) {
+      markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+        pullRequest { isDraft }
+      }
+    }
+    """
+
+    struct MarkReadyMutationResponse: Decodable {
+        struct MarkReady: Decodable {
+            struct PR: Decodable { let isDraft: Bool }
+            let pullRequest: PR?
+        }
+        let data: MarkReady?
+    }
+
+    /// Marks a draft pull request as ready for review via GraphQL markPullRequestReadyForReview.
+    func markReadyForReview(nodeId: String, token: String) async throws {
+        let variables: [String: Any] = ["pullRequestId": nodeId]
+        _ = try await performMutation(
+            Self.markPullRequestReadyForReviewMutation,
+            variables: variables,
+            token: token,
+            responseType: MarkReadyMutationResponse.self
+        )
+    }
+
     // MARK: - Review mutations
 
     private static let addPullRequestReviewMutation = """
