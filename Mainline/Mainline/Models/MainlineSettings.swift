@@ -518,6 +518,7 @@ final class MainlineSettings: ObservableObject {
         static let telemetryLastLaunchedVersion     = "telemetryLastLaunchedVersion"
         // In-app keyboard shortcut bindings
         static let shortcutBindings                 = "shortcutBindings"
+        static let launchAtLogin = "launchAtLogin"
     }
 
     // MARK: - Global shortcut defaults
@@ -1011,6 +1012,18 @@ final class MainlineSettings: ObservableObject {
             if let data = try? JSONEncoder().encode(shortcutBindings) {
                 defaults.set(data, forKey: Keys.shortcutBindings)
             }
+
+    /// Whether the app should launch automatically when the user logs in.
+    /// Backed by `SMAppService`; UserDefaults tracks the user's intent so the
+    /// toggle reflects their last choice even if the system state drifts.
+    /// Default OFF.
+    @Published var launchAtLogin: Bool {
+        didSet {
+            defaults.set(launchAtLogin, forKey: Keys.launchAtLogin)
+            LaunchAtLoginService.apply(enabled: launchAtLogin)
+        }
+    }
+
         }
     }
 
@@ -1184,7 +1197,17 @@ final class MainlineSettings: ObservableObject {
             shortcutBindings = .defaults
         }
 
-        // Snooze map — decode from JSON data; default empty
+        // Launch at login — default OFF. Sync system state on first run.
+        launchAtLogin = defaults.object(forKey: Keys.launchAtLogin) == nil
+            ? false
+            : defaults.bool(forKey: Keys.launchAtLogin)
+        // Sync the real system state at launch so the toggle reflects reality.
+        // If the user unregistered the app via System Settings, follow that.
+        if launchAtLogin && !LaunchAtLoginService.isEnabled {
+            LaunchAtLoginService.apply(enabled: true)
+        }
+
+                // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
