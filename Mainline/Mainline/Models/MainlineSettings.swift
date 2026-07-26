@@ -1196,17 +1196,12 @@ final class MainlineSettings: ObservableObject {
             shortcutBindings = .defaults
         }
 
-        // Launch at login — default OFF. Sync system state on first run.
+        // Launch at login — default OFF.
         launchAtLogin = defaults.object(forKey: Keys.launchAtLogin) == nil
             ? false
             : defaults.bool(forKey: Keys.launchAtLogin)
-        // Sync the real system state at launch so the toggle reflects reality.
-        // If the user unregistered the app via System Settings, follow that.
-        if launchAtLogin && !LaunchAtLoginService.isEnabled {
-            LaunchAtLoginService.apply(enabled: true)
-        }
 
-                // Snooze map — decode from JSON data; default empty
+        // Snooze map — decode from JSON data; default empty
         if let data = defaults.data(forKey: Keys.snoozeMapData) {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
