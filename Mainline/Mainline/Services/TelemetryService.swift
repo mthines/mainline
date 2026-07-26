@@ -468,7 +468,7 @@ final class TelemetryService {
     /// - Parameter interaction: bounded value — "snooze" | "unsnooze" | "mark_seen" | "dismiss" |
     ///   "open_in_browser" | "diff_preview" | "open_preview" | "tab_switch" |
     ///   "scope_filter_change" | "toggle_drafts" | "inbox_mute" | "inbox_unmute" |
-    ///   "undo" | "refresh" | "multi_select_toggle"
+    ///   "undo" | "refresh" | "multi_select_toggle" | "mark_ready"
     func recordTriageInteraction(_ interaction: String) {
         guard MainlineSettings.shared.telemetryEnabled else { return }
         ensureSetup()
