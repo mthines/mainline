@@ -7,6 +7,7 @@ import AppKit
 /// SF Symbol; `title` is the human-readable label shown in the sidebar and as
 /// the detail-pane heading.
 private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case general
     case github
     case notifications
     case inbox
@@ -20,6 +21,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .general:       return "General"
         case .github:        return "GitHub"
         case .notifications: return "Notifications"
         case .inbox:         return "Inbox"
@@ -33,6 +35,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .general:       return "gearshape"
         case .github:        return "key.fill"
         case .notifications: return "bell.fill"
         case .inbox:         return "tray.fill"
@@ -51,7 +54,7 @@ struct SettingsView: View {
     @ObservedObject var manager: PRManager
     @ObservedObject private var settings: MainlineSettings
 
-    @State private var selection: SettingsCategory? = .github
+    @State private var selection: SettingsCategory? = .general
 
     @State private var patDraft: String = ""
     @State private var patSaved: Bool = false
@@ -133,6 +136,7 @@ struct SettingsView: View {
 
             Form {
                 switch category {
+                case .general:       generalSection
                 case .github:        githubSection
                 case .notifications: notificationsSection
                 case .inbox:         inboxSection
@@ -146,6 +150,20 @@ struct SettingsView: View {
             .formStyle(.grouped)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: - General
+
+    @ViewBuilder
+    private var generalSection: some View {
+        Section("System") {
+            Toggle("Launch Mainline at login", isOn: tracked(\.launchAtLogin, name: "launchAtLogin"))
+            Label("Start Mainline automatically when you log in, so your PR inbox is always ready.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - GitHub
