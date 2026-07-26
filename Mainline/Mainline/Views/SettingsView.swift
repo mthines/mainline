@@ -136,7 +136,7 @@ struct SettingsView: View {
 
             Form {
                 switch category {
-        case .general:       generalSection
+                case .general:       generalSection
                 case .github:        githubSection
                 case .notifications: notificationsSection
                 case .inbox:         inboxSection
