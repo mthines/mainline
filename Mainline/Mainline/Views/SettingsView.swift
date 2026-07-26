@@ -54,7 +54,7 @@ struct SettingsView: View {
     @ObservedObject var manager: PRManager
     @ObservedObject private var settings: MainlineSettings
 
-    @State private var selection: SettingsCategory? = .github
+    @State private var selection: SettingsCategory? = .general
 
     @State private var patDraft: String = ""
     @State private var patSaved: Bool = false
@@ -367,7 +367,13 @@ struct SettingsView: View {
     @ViewBuilder
     private var menuBarSection: some View {
         Section("Badge") {
-            Picker("Badge counts", selection: $settings.menuBarMetric) {
+            Picker("Badge counts", selection: Binding(
+                get: { settings.menuBarMetric },
+                set: { newValue in
+                    settings.menuBarMetric = newValue
+                    TelemetryService.shared.recordSettingChanged(name: "menuBarMetric", enabled: true)
+                }
+            )) {
                 ForEach(MenuBarMetric.allCases) { metric in
                     Text(metric.displayName).tag(metric)
                 }
@@ -456,7 +462,13 @@ struct SettingsView: View {
         }
 
         Section("Triage") {
-            Picker("Default postpone duration", selection: $settings.defaultSnoozeDuration) {
+            Picker("Default postpone duration", selection: Binding(
+                get: { settings.defaultSnoozeDuration },
+                set: { newValue in
+                    settings.defaultSnoozeDuration = newValue
+                    TelemetryService.shared.recordSettingChanged(name: "defaultSnoozeDuration", enabled: true)
+                }
+            )) {
                 ForEach(SnoozeDuration.allCases) { duration in
                     Text(duration.title).tag(duration)
                 }
