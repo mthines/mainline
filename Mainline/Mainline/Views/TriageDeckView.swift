@@ -186,6 +186,7 @@ struct LeadingColumn<Icon: View>: View {
 ///   Space  — peek: glance card + files (PRPeekView) (default: space)
 ///   ↵      — open selected PR in browser (works while peek is open too)
 ///   M      — merge (write-gated) (default: m)
+///   F      — mark draft PR ready for review (write-gated, draft-only) (default: f)
 ///   R      — refresh (default: r)
 ///   E      — open preview (default: e; was p)
 ///   S      — postpone (uses the default duration set in Settings) (default: s)
@@ -193,6 +194,7 @@ struct LeadingColumn<Icon: View>: View {
 ///   X      — dismiss (default: x)
 ///   V      — toggle multi-select mode (default: v)
 ///   D      — toggle draft visibility (default: d)
+///   Q      — toggle Inbox mute (default: q)
 ///   ⌘Z     — undo last action (default: z with ⌘)
 ///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
@@ -1447,7 +1449,7 @@ struct TriageDeckView: View {
         guard settings.writeActionsEnabled else {
             let alert = NSAlert()
             alert.messageText = "Write Actions Disabled"
-            alert.informativeText = "Enable \"Write Actions\" in Settings to use approve, merge, and request-changes."
+            alert.informativeText = "Enable \"Write Actions\" in Settings to use approve, merge, request-changes, and mark-ready."
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
             alert.runModal()
