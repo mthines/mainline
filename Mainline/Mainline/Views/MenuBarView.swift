@@ -429,7 +429,13 @@ struct MenuBarView: View {
     /// Compact segmented control shown only on the For-me tab. Filters the browse
     /// list by review-request source. Persisted in `settings.forMeReviewFilter`.
     private var forMeReviewFilterPicker: some View {
-        Picker("Review source", selection: $settings.forMeReviewFilter) {
+        Picker("Review source", selection: Binding(
+            get: { settings.forMeReviewFilter },
+            set: { newValue in
+                settings.forMeReviewFilter = newValue
+                TelemetryService.shared.recordTriageInteraction("for_me_filter_change")
+            }
+        )) {
             ForEach(ForMeReviewFilter.allCases) { filter in
                 Text(filter.displayName).tag(filter)
             }
@@ -467,6 +473,7 @@ struct MenuBarView: View {
     private var draftsChip: some View {
         Button {
             settings.showDrafts.toggle()
+            TelemetryService.shared.recordTriageInteraction("toggle_drafts")
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: settings.showDrafts ? "eye" : "eye.slash")
@@ -520,6 +527,7 @@ struct MenuBarView: View {
         } else {
             scopeStore.selectedScope = nil
         }
+        TelemetryService.shared.recordTriageInteraction("scope_filter_change")
     }
 
     private func cycleScopeBackward() {
@@ -531,6 +539,7 @@ struct MenuBarView: View {
         } else {
             scopeStore.selectedScope = nil
         }
+        TelemetryService.shared.recordTriageInteraction("scope_filter_change")
     }
 
     // MARK: - Scrollable body (SINGLE region: the actionability-grouped browse deck)
@@ -697,12 +706,13 @@ struct MenuBarView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Footer (AC-21: 44pt hit targets, Quit separated)
+        // MARK: - Footer (AC-21: 44pt hit targets, Quit separated)
 
     private var footer: some View {
         HStack(spacing: 0) {
             // AC-20: Refresh shows spinner + disabled during refresh
             Button {
+                TelemetryService.shared.recordTriageInteraction("refresh")
                 Task { await manager.triggerSingleRefresh() }
             } label: {
                 if manager.isRefreshing {
