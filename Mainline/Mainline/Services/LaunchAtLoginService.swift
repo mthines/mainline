@@ -15,21 +15,22 @@ enum LaunchAtLoginService {
 
     /// Registers or unregisters the app as a login item to match `enabled`.
     /// Safe to call multiple times; registers only when not already enrolled,
-    /// and unregisters only when currently enrolled. Logs failures to stderr.
+    /// and unregisters only when currently enrolled. Logs failures to the
+    /// system log via NSLog.
     static func apply(enabled: Bool) {
         if enabled {
             guard SMAppService.mainApp.status != .enabled else { return }
             do {
                 try SMAppService.mainApp.register()
             } catch {
-                fputs("[LaunchAtLogin] register failed: \(error)\n", stderr)
+                NSLog("[LaunchAtLogin] register failed: %@", error.localizedDescription)
             }
         } else {
             guard SMAppService.mainApp.status == .enabled else { return }
             do {
                 try SMAppService.mainApp.unregister()
             } catch {
-                fputs("[LaunchAtLogin] unregister failed: \(error)\n", stderr)
+                NSLog("[LaunchAtLogin] unregister failed: %@", error.localizedDescription)
             }
         }
     }
