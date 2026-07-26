@@ -624,6 +624,7 @@ struct TriageDeckView: View {
     private func memoizedDeckRow(pr: PRSnapshot, index: Int) -> some View {
         EquatableRow(key: DeckRowKey(
             pr: pr,
+            index: index,
             isFocused: index == selectedIndex,
             isSelected: selectedPRs.contains(pr.nodeId),
             isUnread: manager.unreadPRIds.contains(pr.nodeId),
@@ -1642,6 +1643,14 @@ struct DoneBadge: View {
 /// flips the key and re-renders the row.
 private struct DeckRowKey: Equatable {
     let pr: PRSnapshot
+    /// The row's position in the flattened `orderedPRs` index space. Part of the
+    /// key so a row whose position SHIFTS (poll reorder, section expand/collapse,
+    /// snooze/dismiss above it) re-renders and its `.onHover { selectedIndex = index }`
+    /// closure recaptures the fresh index. Omitting it let a memoized row keep a
+    /// stale captured index, so hovering it highlighted a DIFFERENT row. During pure
+    /// hover / J-K nav the composition is stable, so this never triggers extra
+    /// re-renders — only real reorders (which must re-render anyway) do.
+    let index: Int
     let isFocused: Bool
     let isSelected: Bool
     let isUnread: Bool
