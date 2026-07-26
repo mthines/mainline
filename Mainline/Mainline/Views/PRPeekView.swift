@@ -137,6 +137,7 @@ struct PRPeekView: View {
                 .accessibilityLabel("Open Vercel preview")
             }
             Button {
+                TelemetryService.shared.recordTriageInteraction("open_in_browser")
                 if let url = URL(string: pr.htmlUrl) { NSWorkspace.shared.open(url) }
             } label: {
                 Image(systemName: "safari").foregroundStyle(.secondary)

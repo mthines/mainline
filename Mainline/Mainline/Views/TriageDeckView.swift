@@ -1312,6 +1312,7 @@ struct TriageDeckView: View {
         // Mark seen.
         if shortcutMatches(.markSeen, event: event) {
             if let pr = focusedPR {
+                TelemetryService.shared.recordTriageInteraction("mark_seen")
                 Task { await manager.performAction(.markSeen(pr)) }
                 pushUndo(label: "Marked seen: \(pr.title)", pr: pr) {}
             }
@@ -1321,6 +1322,7 @@ struct TriageDeckView: View {
         // Dismiss.
         if shortcutMatches(.dismiss, event: event) {
             if let pr = focusedPR {
+                TelemetryService.shared.recordTriageInteraction("dismiss")
                 Task { await manager.performAction(.dismiss(pr)) }
                 pushUndo(label: "Dismissed \(pr.title)", pr: pr) {}
             }
@@ -1461,6 +1463,7 @@ struct TriageDeckView: View {
             alert.runModal()
             return
         }
+        TelemetryService.shared.recordTriageInteraction("mark_ready")
         Task { await manager.performAction(.markReady(pr)) }
         // Plain confirmation toast — empty undo closure (no convert-back-to-draft).
         pushUndo(label: "Marked ready: \(pr.title)", pr: pr) {}
@@ -1490,6 +1493,7 @@ struct TriageDeckView: View {
     /// its actionability group (excluded from `currentViewPRs`) and moves to the
     /// collapsed "Postponed" section. Pushes an undoable toast that resumes it.
     private func postpone(_ pr: PRSnapshot, for duration: SnoozeDuration) {
+        TelemetryService.shared.recordTriageInteraction("snooze")
         Task { await manager.performAction(.snooze(pr, until: Date().addingTimeInterval(duration.interval))) }
         pushUndo(label: "Postponed \(pr.title) · \(duration.title)", pr: pr) {
             Task { await manager.performAction(.unsnooze(pr)) }
@@ -1499,6 +1503,7 @@ struct TriageDeckView: View {
     /// Resumes (unsnoozes) a postponed PR — it returns to its normal group
     /// immediately.
     private func resume(_ pr: PRSnapshot) {
+        TelemetryService.shared.recordTriageInteraction("unsnooze")
         Task { await manager.performAction(.unsnooze(pr)) }
     }
 
