@@ -855,15 +855,15 @@ struct TriageDeckView: View {
             Label("Approve PR", systemImage: "checkmark.circle")
         }
         .disabled(writeOff)
-        // Merge is only offered when the PR can actually be merged (approved, clean,
-        // green CI, open) — the same `readyToMerge` gate as the inline Merge button.
-        // An unmergeable PR shows no Merge item rather than a dead confirm dialog.
-        if pr.readyToMerge {
-            Button { handleTriageAction(.merge, on: pr) } label: {
-                Label("Merge PR", systemImage: "arrow.triangle.merge")
-            }
-            .disabled(writeOff)
+        // Merge is always LISTED for discoverability, but only ENABLED when the PR
+        // can actually be merged (approved, clean, green CI, open) — the same
+        // `readyToMerge` gate as the inline Merge button — or when write actions are
+        // off. A disabled item can't be clicked, so the reason for an unmergeable PR
+        // is surfaced instead via the M-key toast (see `handleKeyDown`).
+        Button { handleTriageAction(.merge, on: pr) } label: {
+            Label("Merge PR", systemImage: "arrow.triangle.merge")
         }
+        .disabled(writeOff || !pr.readyToMerge)
         Button { handleTriageAction(.requestChanges, on: pr) } label: {
             Label("Request Changes", systemImage: "text.bubble")
         }
@@ -1261,12 +1261,18 @@ struct TriageDeckView: View {
         }
 
         // Write verb (gated by writeActionsEnabled). Approve and Request Changes
-        // remain available via the row context menu only. Merge only fires when the
-        // PR is actually mergeable (`readyToMerge` — same condition that shows the
-        // inline Merge button); on any other PR M is a silent no-op, so we never
-        // pop a confirm dialog for an action that can't be performed.
+        // remain available via the row context menu only. Merge only PERFORMS when
+        // the PR is actually mergeable (`readyToMerge` — same condition that shows
+        // the inline Merge button); on any other PR, instead of a silent no-op we
+        // surface a toast explaining why it can't be merged, so M never feels dead.
         if shortcutMatches(.merge, event: event) {
-            if let pr = focusedPR, pr.readyToMerge { dispatchVerb(.merge(pr)) }
+            if let pr = focusedPR {
+                if pr.readyToMerge {
+                    dispatchVerb(.merge(pr))
+                } else if let reason = pr.mergeBlockReason {
+                    manager.showInfoToast("Can't merge: \(reason)", symbol: "arrow.triangle.merge")
+                }
+            }
             return nil
         }
 

@@ -469,6 +469,22 @@ struct PRSnapshot: Codable, Equatable {
             && !closed
     }
 
+    /// Human-readable reason this PR is NOT ready to merge, or `nil` when
+    /// `readyToMerge` is true. Mirrors the `readyToMerge` gate and surfaces the
+    /// FIRST failing condition in priority order, so the deck can explain (via a
+    /// toast) why the Merge verb is unavailable instead of silently no-op'ing.
+    /// The `nil` case is exactly `readyToMerge == true`.
+    var mergeBlockReason: String? {
+        if merged { return "already merged" }
+        if closed { return "closed" }
+        if isDraft { return "still a draft" }
+        if mergeable == false { return "has merge conflicts" }
+        if mergeable == nil { return "GitHub is still checking mergeability" }
+        if ciStatus != .success { return "CI hasn't passed" }
+        if reviewDecision != .approved { return "not approved yet" }
+        return nil
+    }
+
     /// Whether an OPEN, non-draft PR still needs the user's attention:
     /// failing/erroring CI, changes formally requested, OR at least one unresolved
     /// review thread (a pending/open conversation). Deliberately does NOT consider

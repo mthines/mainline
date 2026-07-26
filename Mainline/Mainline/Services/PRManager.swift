@@ -61,6 +61,24 @@ final class PRManager: ObservableObject {
     /// pushes/undoes entries; `MenuBarView` renders them.
     @Published var undoEntries: [UndoEntry] = []
 
+    /// A single transient informational toast (e.g. "Can't merge: has conflicts").
+    /// Presented at the PANEL level in `MenuBarView`, like the undo stack. Set via
+    /// `showInfoToast`, which auto-clears it after a short delay.
+    @Published var infoToast: InfoToast?
+
+    /// Shows a transient info toast and auto-dismisses it after `seconds`. A newer
+    /// toast supersedes any in-flight one (the stale auto-dismiss is a no-op because
+    /// it only clears when the id still matches).
+    func showInfoToast(_ message: String, symbol: String = "exclamationmark.triangle", seconds: Double = 4) {
+        let toast = InfoToast(message: message, symbol: symbol)
+        infoToast = toast
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard let self, self.infoToast?.id == toast.id else { return }
+            self.infoToast = nil
+        }
+    }
+
     // MARK: - Services (internal for Settings access)
 
     let store:          PRStateStore

@@ -65,14 +65,21 @@ struct MenuBarView: View {
                 // legend/footer. (Previously it lived inside the scrolling deck and
                 // floated up to the content's bottom when the list was short.)
                 .overlay(alignment: .bottom) {
-                    if !manager.undoEntries.isEmpty {
-                        UndoToastView(entries: $manager.undoEntries)
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 4)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    VStack(spacing: 6) {
+                        if let toast = manager.infoToast {
+                            InfoToastView(toast: toast) { manager.infoToast = nil }
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                        if !manager.undoEntries.isEmpty {
+                            UndoToastView(entries: $manager.undoEntries)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
                 }
                 .animation(.easeInOut(duration: 0.2), value: manager.undoEntries.count)
+                .animation(.easeInOut(duration: 0.2), value: manager.infoToast)
 
             Divider()
 
