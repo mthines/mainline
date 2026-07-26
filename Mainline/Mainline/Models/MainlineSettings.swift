@@ -55,6 +55,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case navigateUp
     case peek
     case merge
+    case markReady
     case refresh
     case openPreview
     case snooze
@@ -73,6 +74,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .navigateUp:       return "Navigate Up"
         case .peek:             return "Peek (Space)"
         case .merge:            return "Merge PR"
+        case .markReady:        return "Mark Ready for Review"
         case .refresh:          return "Refresh"
         case .openPreview:      return "Open Preview"
         case .snooze:           return "Postpone"
@@ -91,6 +93,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .navigateUp:       return "k"
         case .peek:             return " "
         case .merge:            return "m"
+        case .markReady:        return "f"   // "final / ready" — left-hand key
         case .refresh:          return "r"
         case .openPreview:      return "e"   // NEW default (was "p")
         case .snooze:           return "s"
@@ -109,6 +112,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .navigateUp:       return "arrow.up"
         case .peek:             return "rectangle.stack"
         case .merge:            return "arrow.triangle.merge"
+        case .markReady:        return "paperplane"
         case .refresh:          return "arrow.clockwise"
         case .openPreview:      return "globe"
         case .snooze:           return "clock"
@@ -178,6 +182,7 @@ struct InAppShortcutBindings: Equatable {
     var navigateUp:      ShortcutBinding
     var peek:            ShortcutBinding
     var merge:           ShortcutBinding
+    var markReady:       ShortcutBinding
     var refresh:         ShortcutBinding
     var openPreview:     ShortcutBinding
     var snooze:          ShortcutBinding
@@ -196,6 +201,7 @@ struct InAppShortcutBindings: Equatable {
             navigateUp:      ShortcutBinding(key: "k"),
             peek:            ShortcutBinding(key: " "),
             merge:           ShortcutBinding(key: "m"),
+            markReady:       ShortcutBinding(key: "f"),
             refresh:         ShortcutBinding(key: "r"),
             openPreview:     ShortcutBinding(key: "e"),
             snooze:          ShortcutBinding(key: "s"),
@@ -215,6 +221,7 @@ struct InAppShortcutBindings: Equatable {
         case .navigateUp:        return navigateUp
         case .peek:              return peek
         case .merge:             return merge
+        case .markReady:         return markReady
         case .refresh:           return refresh
         case .openPreview:       return openPreview
         case .snooze:            return snooze
@@ -234,6 +241,7 @@ struct InAppShortcutBindings: Equatable {
         case .navigateUp:        navigateUp      = binding
         case .peek:              peek            = binding
         case .merge:             merge           = binding
+        case .markReady:         markReady       = binding
         case .refresh:           refresh         = binding
         case .openPreview:       openPreview     = binding
         case .snooze:            snooze          = binding
@@ -286,7 +294,7 @@ extension InAppShortcutBindings: Codable {
     /// CodingKeys match the persisted JSON field names (unchanged from v1.25.0
     /// so existing stored data continues to decode).
     enum CodingKeys: String, CodingKey {
-        case navigateDown, navigateUp, peek, merge, refresh, openPreview,
+        case navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview,
              snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
              toggleMute, undo
     }
@@ -320,6 +328,7 @@ extension InAppShortcutBindings: Codable {
         navigateUp      = try decodeBinding(.navigateUp,      default: d.navigateUp)
         peek            = try decodeBinding(.peek,            default: d.peek)
         merge           = try decodeBinding(.merge,           default: d.merge)
+        markReady       = try decodeBinding(.markReady,       default: d.markReady)
         refresh         = try decodeBinding(.refresh,         default: d.refresh)
         openPreview     = try decodeBinding(.openPreview,     default: d.openPreview)
         snooze          = try decodeBinding(.snooze,          default: d.snooze)
@@ -348,6 +357,7 @@ extension InAppShortcutBindings: Codable {
         try container.encode(navigateUp,       forKey: .navigateUp)
         try container.encode(peek,             forKey: .peek)
         try container.encode(merge,            forKey: .merge)
+        try container.encode(markReady,        forKey: .markReady)
         try container.encode(refresh,          forKey: .refresh)
         try container.encode(openPreview,      forKey: .openPreview)
         try container.encode(snooze,           forKey: .snooze)

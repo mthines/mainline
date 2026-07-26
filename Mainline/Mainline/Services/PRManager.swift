@@ -9,6 +9,7 @@ enum WriteAction {
     case approve(PRSnapshot)
     case merge(PRSnapshot)
     case requestChanges(PRSnapshot)
+    case markReady(PRSnapshot)
     case snooze(PRSnapshot, until: Date)
     case unsnooze(PRSnapshot)
     case markSeen(PRSnapshot)
@@ -685,6 +686,29 @@ final class PRManager: ObservableObject {
                     failureCategory: "api_error"
                 )
                 Self.presentActionFailure("Request changes failed", error: error)
+            }
+
+        case .markReady(let pr):
+            let actionStart = Date()
+            do {
+                try await client.markReadyForReview(nodeId: pr.nodeId, token: token)
+                TelemetryService.shared.recordWriteAction(
+                    "mark_ready",
+                    mergeMethod: nil,
+                    result: "success",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: nil
+                )
+            } catch {
+                statusMessage = "Mark ready failed: \(error.localizedDescription)"
+                TelemetryService.shared.recordWriteAction(
+                    "mark_ready",
+                    mergeMethod: nil,
+                    result: "failure",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: "api_error"
+                )
+                Self.presentActionFailure("Mark ready failed", error: error)
             }
 
         case .snooze, .unsnooze, .markSeen, .dismiss:
