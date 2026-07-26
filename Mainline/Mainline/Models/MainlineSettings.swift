@@ -1012,6 +1012,8 @@ final class MainlineSettings: ObservableObject {
             if let data = try? JSONEncoder().encode(shortcutBindings) {
                 defaults.set(data, forKey: Keys.shortcutBindings)
             }
+        }
+    }
 
     /// Whether the app should launch automatically when the user logs in.
     /// Backed by `SMAppService`; UserDefaults tracks the user's intent so the
@@ -1021,9 +1023,6 @@ final class MainlineSettings: ObservableObject {
         didSet {
             defaults.set(launchAtLogin, forKey: Keys.launchAtLogin)
             LaunchAtLoginService.apply(enabled: launchAtLogin)
-        }
-    }
-
         }
     }
 
