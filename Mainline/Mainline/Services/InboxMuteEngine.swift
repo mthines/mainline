@@ -19,11 +19,7 @@ enum MuteReason {
 struct InboxMuteConfig {
     var mutePatterns: [String]        // glob patterns for title/headRef (case-insensitive, * wildcard)
     var muteBotAuthors: Bool          // demote bot-authored PRs
-    /// Bot logins that are exempt from `muteBotAuthors` — these bots are treated as
-    /// active even when `muteBotAuthors` is ON. Case-insensitive. Uses the same login
-    /// format as GitHub (e.g. "my-release-bot[bot]", "dependabot[bot]"). Empty = no
-    /// exceptions; all detected bots are muted when `muteBotAuthors` is on.
-    var botAllowList: [String]        // logins of bots that bypass the bot-author mute rule
+    var botAllowList: [String]        // logins exempt from muteBotAuthors (case-insensitive; empty = no exceptions)
     var reviewFocusAuthors: [String]  // allow-list of author logins (empty = disabled)
     var reviewFocusTeams: [String]    // allow-list of team slugs (empty = disabled)
     var muteLabels: [String]          // labels to demote (empty = disabled)
@@ -64,14 +60,10 @@ enum InboxMuteEngine {
         }
 
         // Rule 2 — bot author (skipped for logins in botAllowList)
-        if config.muteBotAuthors {
-            let isBotByEngine = authorIsBot || isBotLogin(authorLogin)
-            if isBotByEngine {
-                let allowed = config.botAllowList.contains {
-                    $0.lowercased() == authorLogin.lowercased()
-                }
-                if !allowed { return .botAuthor }
-            }
+        if config.muteBotAuthors, authorIsBot || isBotLogin(authorLogin) {
+            let login = authorLogin.lowercased()
+            let allowed = config.botAllowList.contains { $0.lowercased() == login }
+            if !allowed { return .botAuthor }
         }
 
         // Rule 3 — label
