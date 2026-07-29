@@ -101,6 +101,7 @@ final class PRManager: ObservableObject {
         InboxMuteConfig(
             mutePatterns:       settings.mutePatterns,
             muteBotAuthors:     settings.muteBotAuthors,
+            botAllowList:       settings.botAllowList,
             reviewFocusAuthors: settings.reviewFocusAuthors,
             reviewFocusTeams:   settings.reviewFocusTeams,
             muteLabels:         settings.muteLabels,

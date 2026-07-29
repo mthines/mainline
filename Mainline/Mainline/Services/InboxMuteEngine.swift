@@ -19,6 +19,11 @@ enum MuteReason {
 struct InboxMuteConfig {
     var mutePatterns: [String]        // glob patterns for title/headRef (case-insensitive, * wildcard)
     var muteBotAuthors: Bool          // demote bot-authored PRs
+    /// Bot logins that are exempt from `muteBotAuthors` — these bots are treated as
+    /// active even when `muteBotAuthors` is ON. Case-insensitive. Uses the same login
+    /// format as GitHub (e.g. "my-release-bot[bot]", "dependabot[bot]"). Empty = no
+    /// exceptions; all detected bots are muted when `muteBotAuthors` is on.
+    var botAllowList: [String]        // logins of bots that bypass the bot-author mute rule
     var reviewFocusAuthors: [String]  // allow-list of author logins (empty = disabled)
     var reviewFocusTeams: [String]    // allow-list of team slugs (empty = disabled)
     var muteLabels: [String]          // labels to demote (empty = disabled)
@@ -58,10 +63,15 @@ enum InboxMuteEngine {
             if matches(text: headRef, glob: pattern) { return .pattern(pattern) }
         }
 
-        // Rule 2 — bot author
+        // Rule 2 — bot author (skipped for logins in botAllowList)
         if config.muteBotAuthors {
             let isBotByEngine = authorIsBot || isBotLogin(authorLogin)
-            if isBotByEngine { return .botAuthor }
+            if isBotByEngine {
+                let allowed = config.botAllowList.contains {
+                    $0.lowercased() == authorLogin.lowercased()
+                }
+                if !allowed { return .botAuthor }
+            }
         }
 
         // Rule 3 — label
@@ -186,6 +196,7 @@ enum InboxMuteEngine {
         let base = InboxMuteConfig(
             mutePatterns: [],
             muteBotAuthors: false,
+            botAllowList: [],
             reviewFocusAuthors: [],
             reviewFocusTeams: [],
             muteLabels: [],
@@ -221,6 +232,35 @@ enum InboxMuteEngine {
             config: cfg
         )
         if case .botAuthor = r2 { } else { assertionFailure("Rule 2 (botAuthor) did not fire") }
+
+        // --- Bot author allow-list: allowed bot must NOT be muted ---
+        cfg = base
+        cfg.muteBotAuthors = true
+        cfg.botAllowList = ["release-bot[bot]"]
+        let r2allow = muteVerdict(
+            title: "chore: release v2.0",
+            headRef: "release/v2.0",
+            authorLogin: "release-bot[bot]",
+            authorIsBot: true,
+            requestedTeams: [],
+            labels: [],
+            role: .needsYourReview,
+            config: cfg
+        )
+        assert(r2allow == nil, "Bot in botAllowList must NOT be muted even when muteBotAuthors is on")
+
+        // --- Bot author allow-list: unlisted bot must still be muted ---
+        let r2unlisted = muteVerdict(
+            title: "chore: bump deps",
+            headRef: "renovate/something",
+            authorLogin: "renovate[bot]",
+            authorIsBot: true,
+            requestedTeams: [],
+            labels: [],
+            role: .needsYourReview,
+            config: cfg
+        )
+        if case .botAuthor = r2unlisted { } else { assertionFailure("Unlisted bot must still be muted when muteBotAuthors is on") }
 
         // --- Label rule ---
         cfg = base

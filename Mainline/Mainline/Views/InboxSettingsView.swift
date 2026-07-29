@@ -44,6 +44,20 @@ struct InboxSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if settings.muteBotAuthors {
+                TextField(
+                    "Bot exceptions",
+                    text: botAllowListBinding,
+                    prompt: Text("release-bot[bot], my-automation[bot]")
+                )
+                .textFieldStyle(.roundedBorder)
+                Label("Comma-separated bot logins that are exempt from the mute rule above. PRs authored by these bots stay active even when \"Mute bot-authored PRs\" is on. Use the full GitHub login (e.g. \"release-bot[bot]\").",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
 
         Section("Review Focus") {
@@ -134,6 +148,19 @@ struct InboxSettingsView: View {
             get: { settings.muteLabels.joined(separator: ", ") },
             set: { newValue in
                 settings.muteLabels = newValue
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        )
+    }
+
+    /// Bridges `botAllowList: [String]` to a single comma-separated text field.
+    private var botAllowListBinding: Binding<String> {
+        Binding(
+            get: { settings.botAllowList.joined(separator: ", ") },
+            set: { newValue in
+                settings.botAllowList = newValue
                     .split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
