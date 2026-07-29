@@ -500,6 +500,7 @@ final class MainlineSettings: ObservableObject {
         // Inbox mute filters
         static let mutePatterns         = "mutePatterns"
         static let muteBotAuthors       = "muteBotAuthors"
+        static let botAllowList         = "botAllowList"
         static let reviewFocusAuthors   = "reviewFocusAuthors"
         static let reviewFocusTeams     = "reviewFocusTeams"
         static let muteLabels           = "muteLabels"
@@ -731,6 +732,14 @@ final class MainlineSettings: ObservableObject {
     /// logins ending in `[bot]`) to the Muted group. Default ON.
     @Published var muteBotAuthors: Bool {
         didSet { defaults.set(muteBotAuthors, forKey: Keys.muteBotAuthors) }
+    }
+
+    /// Bot logins that bypass the `muteBotAuthors` rule. Even when `muteBotAuthors`
+    /// is ON, PRs authored by a login in this list are kept active. Case-insensitive.
+    /// Use the full GitHub login (e.g. "my-release-bot[bot]", "renovate[bot]").
+    /// Default empty (no exceptions — all bots are muted when `muteBotAuthors` is on).
+    @Published var botAllowList: [String] {
+        didSet { defaults.set(botAllowList, forKey: Keys.botAllowList) }
     }
 
     /// Allow-list of PR author logins for the "Needs your review" section.
@@ -1150,6 +1159,7 @@ final class MainlineSettings: ObservableObject {
         muteBotAuthors = defaults.object(forKey: Keys.muteBotAuthors) == nil
             ? true
             : defaults.bool(forKey: Keys.muteBotAuthors)
+        botAllowList       = defaults.stringArray(forKey: Keys.botAllowList) ?? []
         reviewFocusAuthors = defaults.stringArray(forKey: Keys.reviewFocusAuthors) ?? []
         reviewFocusTeams   = defaults.stringArray(forKey: Keys.reviewFocusTeams) ?? []
         muteLabels         = defaults.stringArray(forKey: Keys.muteLabels) ?? []
