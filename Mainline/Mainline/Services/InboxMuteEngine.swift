@@ -126,8 +126,7 @@ enum InboxMuteEngine {
         if lower.hasSuffix("[bot]") { return true }
         // Known bot base names (without the [bot] suffix variant).
         let knownBots: Set<String> = [
-            "dependabot", "renovate", "github-actions",
-            "dependabot[bot]", "renovate[bot]", "github-actions[bot]"
+            "dependabot", "renovate", "github-actions"
         ]
         return knownBots.contains(lower)
     }
