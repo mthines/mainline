@@ -55,10 +55,11 @@ final class PRManager: ObservableObject {
     @Published var peekPR: PRSnapshot?
 
     /// The undo toast stack. Owned here (not in `TriageDeckView`) so the toast can
-    /// be presented at the PANEL level — pinned to the true bottom of the popover —
-    /// rather than inside the scrolling deck, where it floated up to the content's
-    /// bottom whenever the list was shorter than the panel. `TriageDeckView` still
-    /// pushes/undoes entries; `MenuBarView` renders them.
+    /// be presented at the PANEL level — laid out against the full popover, not the
+    /// deck — rather than inside the scrolling deck, where it floated up to the
+    /// content's bottom whenever the list was shorter than the panel.
+    /// `TriageDeckView` still pushes/undoes entries; `MenuBarView` renders them and
+    /// owns the anchor.
     @Published var undoEntries: [UndoEntry] = []
 
     /// A single transient informational toast (e.g. "Can't merge: has conflicts").

@@ -12,7 +12,7 @@ struct UndoEntry: Identifiable {
 
 // MARK: - UndoToastView
 
-/// Undo toast stack shown at the bottom of the triage deck.
+/// Undo toast stack shown at the top of the triage deck (below the header/filters).
 /// Displays recent actions as dismissible cards; ⌘Z undoes the last one.
 struct UndoToastView: View {
     @Binding var entries: [UndoEntry]

@@ -60,23 +60,24 @@ struct MenuBarView: View {
             // fixed nested ScrollViews (the crash source) AND the separate top
             // "Needs a Human" bucket (which duplicated the "Needs attention" group).
             scrollableBody
-                // Undo toast stack — overlaid at the bottom of the scroll region so
-                // it always pins to the true bottom of the panel body, above the
-                // legend/footer. (Previously it lived inside the scrolling deck and
-                // floated up to the content's bottom when the list was short.)
-                .overlay(alignment: .bottom) {
+                // Undo toast stack — overlaid at the TOP of the scroll region (just
+                // below the header/filters, well clear of the settings cog) so it
+                // never lands under the pointer when muting rows at the BOTTOM of the
+                // list, which is where triage most often happens. Slides in from the
+                // top to match its new anchor.
+                .overlay(alignment: .top) {
                     VStack(spacing: 6) {
                         if let toast = manager.infoToast {
                             InfoToastView(toast: toast) { manager.infoToast = nil }
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(.move(edge: .top).combined(with: .opacity))
                         }
                         if !manager.undoEntries.isEmpty {
                             UndoToastView(entries: $manager.undoEntries)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
                     .padding(.horizontal, 8)
-                    .padding(.bottom, 4)
+                    .padding(.top, 4)
                 }
                 .animation(.easeInOut(duration: 0.2), value: manager.undoEntries.count)
                 .animation(.easeInOut(duration: 0.2), value: manager.infoToast)
