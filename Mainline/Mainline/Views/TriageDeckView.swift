@@ -250,8 +250,9 @@ struct TriageDeckView: View {
         }
         // Neither the peek overlay nor the undo toast is rendered here — both are
         // presented at the PANEL level in `MenuBarView` (reading `manager.peekPR` /
-        // `manager.undoEntries`) so they pin to the true bottom of the popover
-        // instead of the bottom of this deck's (content-sized) bounds.
+        // `manager.undoEntries`) so they lay out against the full popover instead
+        // of this deck's (content-sized) bounds. `MenuBarView` owns the exact
+        // anchor for each — see the `.overlay` declarations there.
         //
         // Keyboard triage capture. A first-responder NSView that overrides keyDown
         // directly — reliable inside the MenuBarExtra popover regardless of how it
