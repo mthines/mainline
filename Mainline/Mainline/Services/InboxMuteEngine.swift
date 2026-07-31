@@ -61,8 +61,13 @@ enum InboxMuteEngine {
 
         // Rule 2 — bot author (skipped for logins in botAllowList)
         if config.muteBotAuthors, authorIsBot || isBotLogin(authorLogin) {
-            let login = authorLogin.lowercased()
-            let allowed = config.botAllowList.contains { $0.lowercased() == login }
+            // Normalize the `[bot]` suffix on BOTH sides before comparing: GitHub's
+            // GraphQL API returns bot author logins WITHOUT the suffix (e.g.
+            // `dash0-dev`), while the display form and the Settings UI use the
+            // suffixed form (e.g. `dash0-dev[bot]`). Comparing raw would make an
+            // exception entered as `dash0-dev[bot]` never match the bare login.
+            let login = normalizeBotLogin(authorLogin)
+            let allowed = config.botAllowList.contains { normalizeBotLogin($0) == login }
             if !allowed { return .botAuthor }
         }
 
@@ -125,6 +130,19 @@ enum InboxMuteEngine {
             "dependabot[bot]", "renovate[bot]", "github-actions[bot]"
         ]
         return knownBots.contains(lower)
+    }
+
+    /// Normalizes a login for allow-list comparison: lowercased with any trailing
+    /// `[bot]` suffix removed. GitHub's GraphQL API returns bot author logins
+    /// WITHOUT the suffix (`dependabot`), whereas the display form and the Settings
+    /// UI use the suffixed form (`dependabot[bot]`). Normalizing both sides lets an
+    /// exception entered in EITHER form match the actual author login.
+    static func normalizeBotLogin(_ login: String) -> String {
+        let lower = login.lowercased()
+        if lower.hasSuffix("[bot]") {
+            return String(lower.dropLast("[bot]".count))
+        }
+        return lower
     }
 
     // MARK: - Private glob implementation
@@ -253,6 +271,38 @@ enum InboxMuteEngine {
             config: cfg
         )
         if case .botAuthor = r2unlisted { } else { assertionFailure("Unlisted bot must still be muted when muteBotAuthors is on") }
+
+        // --- Bot author allow-list: `[bot]`-suffix normalization ---
+        // GraphQL returns the bare login (`dash0-dev`) while the Settings UI
+        // instructs users to enter the suffixed form (`dash0-dev[bot]`). The
+        // exemption must still match across that mismatch (both directions).
+        cfg = base
+        cfg.muteBotAuthors = true
+        cfg.botAllowList = ["dash0-dev[bot]"]   // user typed the suffixed form
+        let r2suffix = muteVerdict(
+            title: "feat: something",
+            headRef: "feature/x",
+            authorLogin: "dash0-dev",           // GraphQL bare login (no [bot])
+            authorIsBot: true,
+            requestedTeams: [],
+            labels: [],
+            role: .needsYourReview,
+            config: cfg
+        )
+        assert(r2suffix == nil, "Suffixed allow-list entry must exempt the bare GraphQL bot login")
+
+        cfg.botAllowList = ["dash0-dev"]        // user typed the bare form
+        let r2bare = muteVerdict(
+            title: "feat: something",
+            headRef: "feature/x",
+            authorLogin: "dash0-dev[bot]",      // suffixed login form
+            authorIsBot: true,
+            requestedTeams: [],
+            labels: [],
+            role: .needsYourReview,
+            config: cfg
+        )
+        assert(r2bare == nil, "Bare allow-list entry must exempt the suffixed bot login")
 
         // --- Label rule ---
         cfg = base
