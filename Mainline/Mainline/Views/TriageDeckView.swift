@@ -748,6 +748,7 @@ struct TriageDeckView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        LinesBadge(pr: pr)
                         if isDraft {
                             DraftBadge()
                         }
@@ -1773,6 +1774,33 @@ struct FeedbackBadge: View {
                     ? "\(pr.commentCount) comment\(pr.commentCount == 1 ? "" : "s")"
                     : "Has review feedback"
             )
+        }
+    }
+}
+
+// MARK: - LinesBadge
+
+/// Compact `+adds −dels` diff-size indicator on the repo/#number metadata line.
+/// Green additions and red deletions in monospaced digits let you eyeball which
+/// PRs are quick reviews at a glance. Hidden when both counts are zero — that's
+/// the "not yet fetched" state (or a genuinely empty diff), and a `+0 −0` badge
+/// would be noise either way.
+struct LinesBadge: View {
+    let pr: PRSnapshot
+
+    var body: some View {
+        if pr.linesAdded > 0 || pr.linesDeleted > 0 {
+            HStack(spacing: 3) {
+                Text("+\(pr.linesAdded)")
+                    .foregroundStyle(Color(nsColor: .systemGreen))
+                Text("−\(pr.linesDeleted)")
+                    .foregroundStyle(Color(nsColor: .systemRed))
+            }
+            .font(.caption2.monospacedDigit())
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(pr.linesAdded) added, \(pr.linesDeleted) deleted")
         }
     }
 }
