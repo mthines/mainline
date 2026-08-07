@@ -389,27 +389,6 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-
-        Section("Global Shortcut") {
-            Toggle("Open Mainline with a global shortcut", isOn: tracked(\.globalShortcutEnabled, name: "globalShortcutEnabled"))
-
-            HStack {
-                Text("Shortcut")
-                Spacer()
-                ShortcutRecorder(settings: settings)
-                    .disabled(!settings.globalShortcutEnabled)
-                Button("Reset to default (\(MainlineSettings.defaultGlobalShortcutDisplayString))") {
-                    settings.resetGlobalShortcutToDefault()
-                }
-                .disabled(!settings.globalShortcutEnabled)
-            }
-
-            Label("Press this key combination from any app to open the Mainline popover. Requires at least one modifier key.",
-                  systemImage: "info.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 
     // MARK: - Appearance
@@ -507,6 +486,27 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var keyboardSection: some View {
+        Section("Global Shortcut") {
+            Toggle("Open Mainline with a global shortcut", isOn: tracked(\.globalShortcutEnabled, name: "globalShortcutEnabled"))
+
+            HStack {
+                Text("Shortcut")
+                Spacer()
+                ShortcutRecorder(settings: settings)
+                    .disabled(!settings.globalShortcutEnabled)
+                Button("Reset to default (\(MainlineSettings.defaultGlobalShortcutDisplayString))") {
+                    settings.resetGlobalShortcutToDefault()
+                }
+                .disabled(!settings.globalShortcutEnabled)
+            }
+
+            Label("Press this key combination from any app to open the Mainline popover. Requires at least one modifier key.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
         KeyboardShortcutsView(settings: settings)
     }
 
