@@ -64,6 +64,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case multiSelectToggle
     case toggleDrafts
     case toggleMute
+    case copyBranch
     case undo
 
     var id: String { rawValue }
@@ -83,6 +84,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "Toggle Multi-Select"
         case .toggleDrafts:     return "Toggle Drafts"
         case .toggleMute:       return "Mute / Move Up (Inbox)"
+        case .copyBranch:       return "Copy Branch Name"
         case .undo:             return "Undo (⌘+key)"
         }
     }
@@ -102,6 +104,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "v"
         case .toggleDrafts:     return "d"
         case .toggleMute:       return "q"   // "quiet" — left-hand key (see left-hand default policy)
+        case .copyBranch:       return "c"   // "copy" — left-hand key (see left-hand default policy)
         case .undo:             return "z"
         }
     }
@@ -121,6 +124,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "checkmark.circle"
         case .toggleDrafts:     return "pencil.circle"
         case .toggleMute:       return "arrow.down.circle"
+        case .copyBranch:       return "doc.on.doc"
         case .undo:             return "arrow.uturn.backward"
         }
     }
@@ -191,6 +195,7 @@ struct InAppShortcutBindings: Equatable {
     var multiSelectToggle: ShortcutBinding
     var toggleDrafts:    ShortcutBinding
     var toggleMute:      ShortcutBinding
+    var copyBranch:      ShortcutBinding
     var undo:            ShortcutBinding
 
     /// Factory defaults — all bindings bare except undo = ⌘Z.
@@ -210,6 +215,7 @@ struct InAppShortcutBindings: Equatable {
             multiSelectToggle: ShortcutBinding(key: "v"),
             toggleDrafts:    ShortcutBinding(key: "d"),
             toggleMute:      ShortcutBinding(key: "q"),
+            copyBranch:      ShortcutBinding(key: "c"),
             undo:            ShortcutBinding(key: "z", modifiers: cmdRaw)
         )
     }()
@@ -230,6 +236,7 @@ struct InAppShortcutBindings: Equatable {
         case .multiSelectToggle: return multiSelectToggle
         case .toggleDrafts:      return toggleDrafts
         case .toggleMute:        return toggleMute
+        case .copyBranch:        return copyBranch
         case .undo:              return undo
         }
     }
@@ -250,6 +257,7 @@ struct InAppShortcutBindings: Equatable {
         case .multiSelectToggle: multiSelectToggle = binding
         case .toggleDrafts:      toggleDrafts    = binding
         case .toggleMute:        toggleMute      = binding
+        case .copyBranch:        copyBranch      = binding
         case .undo:              undo            = binding
         }
     }
@@ -296,7 +304,7 @@ extension InAppShortcutBindings: Codable {
     enum CodingKeys: String, CodingKey {
         case navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview,
              snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
-             toggleMute, undo
+             toggleMute, copyBranch, undo
     }
 
     /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
@@ -337,6 +345,7 @@ extension InAppShortcutBindings: Codable {
         multiSelectToggle = try decodeBinding(.multiSelectToggle, default: d.multiSelectToggle)
         toggleDrafts    = try decodeBinding(.toggleDrafts,    default: d.toggleDrafts)
         toggleMute      = try decodeBinding(.toggleMute,      default: d.toggleMute)
+        copyBranch      = try decodeBinding(.copyBranch,      default: d.copyBranch)
 
         // Undo migration: bare-string or absent → apply .command modifier.
         if let newShape = try? container.decodeIfPresent(ShortcutBinding.self, forKey: .undo) {
@@ -366,6 +375,7 @@ extension InAppShortcutBindings: Codable {
         try container.encode(multiSelectToggle, forKey: .multiSelectToggle)
         try container.encode(toggleDrafts,     forKey: .toggleDrafts)
         try container.encode(toggleMute,       forKey: .toggleMute)
+        try container.encode(copyBranch,       forKey: .copyBranch)
         try container.encode(undo,             forKey: .undo)
     }
 }
