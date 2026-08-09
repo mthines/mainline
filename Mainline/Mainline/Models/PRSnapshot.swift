@@ -541,11 +541,13 @@ struct PRSnapshot: Codable, Equatable {
 
     // MARK: - Repo owner
 
-    /// The repo owner — the `owner` of `owner/repo`. Empty if `repoFullName` is
-    /// malformed. Single source of truth for org derivation (scope chips, per-org
-    /// review focus) so call sites don't each re-split `repoFullName`.
+    /// The repo owner — the `owner` of `owner/repo`. Empty when `repoFullName`
+    /// carries no `/` (a malformed name has no owner segment). Single source of
+    /// truth for org derivation (scope chips, per-org review focus) so call sites
+    /// don't each re-split `repoFullName`.
     var org: String {
-        repoFullName.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
+        guard let slash = repoFullName.firstIndex(of: "/") else { return "" }
+        return String(repoFullName[..<slash])
     }
 
     // MARK: - Inbox role

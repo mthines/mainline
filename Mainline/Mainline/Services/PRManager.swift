@@ -338,10 +338,8 @@ final class PRManager: ObservableObject {
     /// counts follow the selected tab, drafts, For-me, and snooze filters.
     var scopeCounts: [PRScope: Int] {
         var counts: [PRScope: Int] = [:]
-        for pr in scopeSelectorBasePRs {
-            guard let owner = pr.repoFullName.split(separator: "/", maxSplits: 1)
-                .first.map(String.init) else { continue }
-            counts[.org(owner), default: 0] += 1
+        for pr in scopeSelectorBasePRs where !pr.org.isEmpty {
+            counts[.org(pr.org), default: 0] += 1
         }
         return counts
     }
