@@ -13,6 +13,17 @@ import SwiftUI
 struct InboxSettingsView: View {
     @ObservedObject var settings: MainlineSettings
 
+    /// Repo owners seen across the current PRs, so the orgs you review show up as
+    /// Focus sections without having to type them. Union'd with configured + added
+    /// orgs in `focusOrgs`.
+    var knownOrgs: [String] = []
+
+    /// Text for the "add an org" field (orgs you don't currently have PRs from).
+    @State private var newOrg = ""
+    /// Orgs added this session via the add field but not yet in `knownOrgs` or the
+    /// saved config — kept so their (initially empty) section stays rendered.
+    @State private var sessionOrgs: [String] = []
+
     var body: some View {
         Section("Pattern Muting") {
             TextField(
@@ -61,29 +72,43 @@ struct InboxSettingsView: View {
         }
 
         Section("Review Focus") {
-            TextField(
-                "Focus authors",
-                text: reviewFocusAuthorsBinding,
-                prompt: Text("alice, bob")
-            )
-            .textFieldStyle(.roundedBorder)
-            Label("Comma-separated GitHub logins. When non-empty, only PRs authored by someone on this list (or a team in Focus Teams) stay active in \"Needs your review\". Empty = show all.",
+            Label("Focus is set per org. In each org below, list the authors and teams whose PRs should stay in \"Needs your review\" — everything else in that org is demoted to Muted. An org with no entries shows all of its PRs, and a rule in one org never affects another.",
                   systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            TextField(
-                "Focus teams",
-                text: reviewFocusTeamsBinding,
-                prompt: Text("platform, frontend")
-            )
-            .textFieldStyle(.roundedBorder)
-            Label("Comma-separated team slugs. Works alongside Focus Authors — a PR is kept if its author OR a requested team matches. Empty = show all.",
-                  systemImage: "info.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                TextField("Add an org (e.g. dash0hq)", text: $newOrg)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(addOrg)
+                Button("Add", action: addOrg)
+                    .disabled(trimmedNewOrg.isEmpty)
+            }
+        }
+
+        ForEach(focusOrgs, id: \.self) { org in
+            Section(org) {
+                TextField(
+                    "Focus authors",
+                    text: focusAuthorsBinding(for: org),
+                    prompt: Text("alice, bob")
+                )
+                .textFieldStyle(.roundedBorder)
+
+                TextField(
+                    "Focus teams",
+                    text: focusTeamsBinding(for: org),
+                    prompt: Text("ai, platform")
+                )
+                .textFieldStyle(.roundedBorder)
+
+                Label("Comma-separated logins / team slugs. A PR is kept if its author OR a requested team matches. Empty = all \(org) PRs stay active.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
 
         Section("Label Muting") {
@@ -116,30 +141,77 @@ struct InboxSettingsView: View {
         )
     }
 
-    /// Bridges `reviewFocusAuthors: [String]` to a single comma-separated text field.
-    private var reviewFocusAuthorsBinding: Binding<String> {
+    // MARK: - Per-org review focus
+
+    /// Trimmed contents of the "add an org" field.
+    private var trimmedNewOrg: String {
+        newOrg.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Orgs to render a Focus section for: those with current PRs, those already
+    /// configured, and those added this session. De-duplicated case-insensitively
+    /// (GitHub org logins are case-insensitive, and the engine + storage key on the
+    /// lowercased form) with `knownOrgs`' canonical casing preferred for display.
+    private var focusOrgs: [String] {
+        var byLower: [String: String] = [:]
+        for org in knownOrgs { byLower[org.lowercased()] = org }
+        for org in settings.reviewFocusByOrg.keys where byLower[org.lowercased()] == nil {
+            byLower[org.lowercased()] = org
+        }
+        for org in sessionOrgs where byLower[org.lowercased()] == nil {
+            byLower[org.lowercased()] = org
+        }
+        return byLower.values.sorted()
+    }
+
+    /// Canonical storage key for an org's focus config — lowercased so two case
+    /// variants can never persist as separate entries and the engine's
+    /// case-insensitive lookup stays deterministic.
+    private func focusKey(_ org: String) -> String { org.lowercased() }
+
+    /// Adds a manually-typed org (one you don't currently have PRs from) so its
+    /// Focus section appears. Case-insensitive de-dupe against the existing list.
+    private func addOrg() {
+        let org = trimmedNewOrg
+        guard !org.isEmpty,
+              !focusOrgs.contains(where: { $0.caseInsensitiveCompare(org) == .orderedSame })
+        else { newOrg = ""; return }
+        sessionOrgs.append(org)
+        newOrg = ""
+    }
+
+    /// Bridges one org's `authors` list to a comma-separated text field.
+    private func focusAuthorsBinding(for org: String) -> Binding<String> {
         Binding(
-            get: { settings.reviewFocusAuthors.joined(separator: ", ") },
-            set: { newValue in
-                settings.reviewFocusAuthors = newValue
-                    .split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-            }
+            get: { settings.reviewFocusByOrg[focusKey(org)]?.authors.joined(separator: ", ") ?? "" },
+            set: { newValue in updateFocus(org: org) { $0.authors = parseCSV(newValue) } }
         )
     }
 
-    /// Bridges `reviewFocusTeams: [String]` to a single comma-separated text field.
-    private var reviewFocusTeamsBinding: Binding<String> {
+    /// Bridges one org's `teams` list to a comma-separated text field.
+    private func focusTeamsBinding(for org: String) -> Binding<String> {
         Binding(
-            get: { settings.reviewFocusTeams.joined(separator: ", ") },
-            set: { newValue in
-                settings.reviewFocusTeams = newValue
-                    .split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-            }
+            get: { settings.reviewFocusByOrg[focusKey(org)]?.teams.joined(separator: ", ") ?? "" },
+            set: { newValue in updateFocus(org: org) { $0.teams = parseCSV(newValue) } }
         )
+    }
+
+    /// Mutates one org's focus config (keyed on the canonical lowercased form) and
+    /// prunes it back to nil when it becomes empty, so the saved map never
+    /// accumulates empty (no-op) entries.
+    private func updateFocus(org: String, _ mutate: (inout OrgFocusConfig) -> Void) {
+        let key = focusKey(org)
+        var cfg = settings.reviewFocusByOrg[key] ?? .empty
+        mutate(&cfg)
+        settings.reviewFocusByOrg[key] = cfg.isEmpty ? nil : cfg
+    }
+
+    /// Splits a comma-separated field into trimmed, non-empty tokens.
+    private func parseCSV(_ value: String) -> [String] {
+        value
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     /// Bridges `muteLabels: [String]` to a single comma-separated text field.

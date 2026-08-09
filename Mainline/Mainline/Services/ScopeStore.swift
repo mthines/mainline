@@ -64,11 +64,8 @@ final class ScopeStore: ObservableObject {
     /// displayed chips/counts are tab-aware and computed on `PRManager`.
     func rebuild(from prs: [PRSnapshot]) {
         var counts: [PRScope: Int] = [:]
-        for pr in prs {
-            let parts = pr.repoFullName.split(separator: "/", maxSplits: 1)
-            guard let owner = parts.first.map(String.init) else { continue }
-            let orgScope = PRScope.org(owner)
-            counts[orgScope, default: 0] += 1
+        for pr in prs where !pr.org.isEmpty {
+            counts[PRScope.org(pr.org), default: 0] += 1
         }
 
         // Sort by count descending, then name ascending

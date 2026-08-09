@@ -100,14 +100,24 @@ final class PRManager: ObservableObject {
     /// (cheap — it just reads @Published values); no caching needed.
     var inboxMuteConfig: InboxMuteConfig {
         InboxMuteConfig(
-            mutePatterns:       settings.mutePatterns,
-            muteBotAuthors:     settings.muteBotAuthors,
-            botAllowList:       settings.botAllowList,
-            reviewFocusAuthors: settings.reviewFocusAuthors,
-            reviewFocusTeams:   settings.reviewFocusTeams,
-            muteLabels:         settings.muteLabels,
-            myLogin:            settings.githubUsername
+            mutePatterns:   settings.mutePatterns,
+            muteBotAuthors: settings.muteBotAuthors,
+            botAllowList:   settings.botAllowList,
+            focusByOrg:     settings.reviewFocusByOrg,
+            muteLabels:     settings.muteLabels,
+            myLogin:        settings.githubUsername
         )
+    }
+
+    /// Distinct repo owners across all tracked PRs (both tabs), sorted. Drives the
+    /// per-org sections in the Inbox → Review Focus settings so the orgs you review
+    /// appear without having to type them.
+    var knownOrgs: [String] {
+        var set = Set<String>()
+        for pr in prs where !pr.org.isEmpty {
+            set.insert(pr.org)
+        }
+        return set.sorted()
     }
 
     /// Union of all PRs from the two polling tabs (.forMe + .created), filtered
@@ -167,6 +177,7 @@ final class PRManager: ObservableObject {
             authorIsBot:    pr.authorIsBot,
             requestedTeams: pr.requestedTeams,
             labels:         pr.labels,
+            org:            pr.org,
             role:           role,
             config:         config
         ) != nil
@@ -327,10 +338,8 @@ final class PRManager: ObservableObject {
     /// counts follow the selected tab, drafts, For-me, and snooze filters.
     var scopeCounts: [PRScope: Int] {
         var counts: [PRScope: Int] = [:]
-        for pr in scopeSelectorBasePRs {
-            guard let owner = pr.repoFullName.split(separator: "/", maxSplits: 1)
-                .first.map(String.init) else { continue }
-            counts[.org(owner), default: 0] += 1
+        for pr in scopeSelectorBasePRs where !pr.org.isEmpty {
+            counts[.org(pr.org), default: 0] += 1
         }
         return counts
     }

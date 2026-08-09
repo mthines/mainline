@@ -539,6 +539,17 @@ struct PRSnapshot: Codable, Equatable {
         return .none
     }
 
+    // MARK: - Repo owner
+
+    /// The repo owner — the `owner` of `owner/repo`. Empty when `repoFullName`
+    /// carries no `/` (a malformed name has no owner segment). Single source of
+    /// truth for org derivation (scope chips, per-org review focus) so call sites
+    /// don't each re-split `repoFullName`.
+    var org: String {
+        guard let slash = repoFullName.firstIndex(of: "/") else { return "" }
+        return String(repoFullName[..<slash])
+    }
+
     // MARK: - Inbox role
 
     /// The role this PR plays in the Inbox view, from the point of view of `myLogin`.
