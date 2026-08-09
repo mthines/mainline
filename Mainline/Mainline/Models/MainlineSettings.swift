@@ -511,6 +511,8 @@ final class MainlineSettings: ObservableObject {
         static let mutePatterns         = "mutePatterns"
         static let muteBotAuthors       = "muteBotAuthors"
         static let botAllowList         = "botAllowList"
+        static let reviewFocusByOrg     = "reviewFocusByOrg"
+        // Legacy (pre-per-org) global focus keys — read once for migration, then unused.
         static let reviewFocusAuthors   = "reviewFocusAuthors"
         static let reviewFocusTeams     = "reviewFocusTeams"
         static let muteLabels           = "muteLabels"
@@ -752,19 +754,18 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(botAllowList, forKey: Keys.botAllowList) }
     }
 
-    /// Allow-list of PR author logins for the "Needs your review" section.
-    /// When non-empty, only PRs authored by someone in this list (or a team in
-    /// `reviewFocusTeams`) stay in the active group; others are demoted. Empty =
-    /// no focus (show all). Edit via Settings → Inbox.
-    @Published var reviewFocusAuthors: [String] {
-        didSet { defaults.set(reviewFocusAuthors, forKey: Keys.reviewFocusAuthors) }
-    }
-
-    /// Allow-list of team slugs for the "Needs your review" section.
-    /// Works alongside `reviewFocusAuthors`: a PR is kept if its author OR a
-    /// requested team matches. Empty = no focus. Edit via Settings → Inbox.
-    @Published var reviewFocusTeams: [String] {
-        didSet { defaults.set(reviewFocusTeams, forKey: Keys.reviewFocusTeams) }
+    /// Per-org review-focus allow-lists for the "Needs your review" section, keyed
+    /// by repo owner (e.g. `dash0hq`). For a given org, when its config is non-empty
+    /// only PRs authored by one of its `authors` OR requested via one of its `teams`
+    /// stay active; the rest are demoted. An org with no entry (or an empty one) has
+    /// NO focus rule, so all of its PRs stay active — a focus rule scoped to one org
+    /// never mutes PRs in another. Persisted as JSON. Edit via Settings → Inbox.
+    @Published var reviewFocusByOrg: [String: OrgFocusConfig] {
+        didSet {
+            if let data = try? JSONEncoder().encode(reviewFocusByOrg) {
+                defaults.set(data, forKey: Keys.reviewFocusByOrg)
+            }
+        }
     }
 
     /// Label names that demote a PR to the Muted group. Case-insensitive match.
@@ -1170,8 +1171,18 @@ final class MainlineSettings: ObservableObject {
             ? true
             : defaults.bool(forKey: Keys.muteBotAuthors)
         botAllowList       = defaults.stringArray(forKey: Keys.botAllowList) ?? []
-        reviewFocusAuthors = defaults.stringArray(forKey: Keys.reviewFocusAuthors) ?? []
-        reviewFocusTeams   = defaults.stringArray(forKey: Keys.reviewFocusTeams) ?? []
+        // Per-org review focus. Note: the legacy global `reviewFocusAuthors` /
+        // `reviewFocusTeams` lists are intentionally NOT migrated into an all-orgs
+        // rule — that global apply-everywhere behavior was the bug this replaced
+        // (an org-local team slug muting PRs in unrelated orgs). The legacy keys are
+        // left on disk (non-destructive) but no longer read by the engine; focus
+        // starts empty and is re-declared per org in Settings → Inbox.
+        if let data = defaults.data(forKey: Keys.reviewFocusByOrg),
+           let decoded = try? JSONDecoder().decode([String: OrgFocusConfig].self, from: data) {
+            reviewFocusByOrg = decoded
+        } else {
+            reviewFocusByOrg = [:]
+        }
         muteLabels         = defaults.stringArray(forKey: Keys.muteLabels) ?? []
         if let data = defaults.data(forKey: Keys.inboxMuteOverrides),
            let decoded = try? JSONDecoder().decode([String: Bool].self, from: data) {

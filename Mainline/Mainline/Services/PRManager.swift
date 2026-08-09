@@ -100,14 +100,26 @@ final class PRManager: ObservableObject {
     /// (cheap — it just reads @Published values); no caching needed.
     var inboxMuteConfig: InboxMuteConfig {
         InboxMuteConfig(
-            mutePatterns:       settings.mutePatterns,
-            muteBotAuthors:     settings.muteBotAuthors,
-            botAllowList:       settings.botAllowList,
-            reviewFocusAuthors: settings.reviewFocusAuthors,
-            reviewFocusTeams:   settings.reviewFocusTeams,
-            muteLabels:         settings.muteLabels,
-            myLogin:            settings.githubUsername
+            mutePatterns:   settings.mutePatterns,
+            muteBotAuthors: settings.muteBotAuthors,
+            botAllowList:   settings.botAllowList,
+            focusByOrg:     settings.reviewFocusByOrg,
+            muteLabels:     settings.muteLabels,
+            myLogin:        settings.githubUsername
         )
+    }
+
+    /// Distinct repo owners across all tracked PRs (both tabs), sorted. Drives the
+    /// per-org sections in the Inbox → Review Focus settings so the orgs you review
+    /// appear without having to type them.
+    var knownOrgs: [String] {
+        var set = Set<String>()
+        for pr in prs {
+            if let owner = pr.repoFullName.split(separator: "/", maxSplits: 1).first {
+                set.insert(String(owner))
+            }
+        }
+        return set.sorted()
     }
 
     /// Union of all PRs from the two polling tabs (.forMe + .created), filtered
@@ -160,6 +172,7 @@ final class PRManager: ObservableObject {
     /// Pure rule-based mute verdict (ignores manual overrides).
     private func ruleMuted(_ pr: PRSnapshot, config: InboxMuteConfig) -> Bool {
         let role = pr.inboxRole(myLogin: config.myLogin)
+        let org = pr.repoFullName.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
         return InboxMuteEngine.muteVerdict(
             title:          pr.title,
             headRef:        pr.headRefName,
@@ -167,6 +180,7 @@ final class PRManager: ObservableObject {
             authorIsBot:    pr.authorIsBot,
             requestedTeams: pr.requestedTeams,
             labels:         pr.labels,
+            org:            org,
             role:           role,
             config:         config
         ) != nil

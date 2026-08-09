@@ -9,7 +9,25 @@ enum MuteReason {
     case pattern(String)   // matched a mutePatterns glob (the matching pattern)
     case botAuthor         // author is a bot and muteBotAuthors is on
     case label(String)     // carries a label in muteLabels (the matching label)
-    case outsideFocus      // not in reviewFocusAuthors/Teams (Needs-your-review only)
+    case outsideFocus      // outside this org's focus allow-list (Needs-your-review only)
+}
+
+// MARK: - OrgFocusConfig
+
+/// Per-org review-focus allow-lists. A team slug (and, by extension, the notion
+/// of "who matters to review here") is org-local — `ai` in `dash0hq` is unrelated
+/// to any `ai` elsewhere — so focus is keyed by org rather than applied globally.
+///
+/// Semantics: an org whose config is absent OR `isEmpty` has NO focus rule, so
+/// every one of its PRs stays active. Focus only ever demotes within an org that
+/// has a non-empty rule — nothing entered for one org can mute PRs in another.
+struct OrgFocusConfig: Codable, Equatable {
+    var authors: [String]   // allow-list of author logins (case-insensitive)
+    var teams: [String]     // allow-list of team slugs (case-insensitive)
+
+    var isEmpty: Bool { authors.isEmpty && teams.isEmpty }
+
+    static let empty = OrgFocusConfig(authors: [], teams: [])
 }
 
 // MARK: - InboxMuteConfig
@@ -17,13 +35,12 @@ enum MuteReason {
 /// Plain-value config built by the impure shell (PRManager) from MainlineSettings.
 /// Passed to the pure engine so the engine has zero dependency on MainlineSettings.
 struct InboxMuteConfig {
-    var mutePatterns: [String]        // glob patterns for title/headRef (case-insensitive, * wildcard)
-    var muteBotAuthors: Bool          // demote bot-authored PRs
-    var botAllowList: [String]        // logins exempt from muteBotAuthors (case-insensitive; empty = no exceptions)
-    var reviewFocusAuthors: [String]  // allow-list of author logins (empty = disabled)
-    var reviewFocusTeams: [String]    // allow-list of team slugs (empty = disabled)
-    var muteLabels: [String]          // labels to demote (empty = disabled)
-    var myLogin: String               // authenticated user's login (for role derivation)
+    var mutePatterns: [String]               // glob patterns for title/headRef (case-insensitive, * wildcard)
+    var muteBotAuthors: Bool                 // demote bot-authored PRs
+    var botAllowList: [String]               // logins exempt from muteBotAuthors (case-insensitive; empty = no exceptions)
+    var focusByOrg: [String: OrgFocusConfig] // per-org review-focus allow-lists (org missing/empty = show all of that org)
+    var muteLabels: [String]                 // labels to demote (empty = disabled)
+    var myLogin: String                      // authenticated user's login (for role derivation)
 }
 
 // MARK: - InboxMuteEngine
@@ -42,7 +59,7 @@ enum InboxMuteEngine {
     ///   1. Title/branch pattern glob
     ///   2. Bot author (when muteBotAuthors is on)
     ///   3. Label match
-    ///   4. Outside focus allow-list (Needs-your-review role only)
+    ///   4. Outside this org's focus allow-list (Needs-your-review role only)
     static func muteVerdict(
         title: String,
         headRef: String,
@@ -50,6 +67,7 @@ enum InboxMuteEngine {
         authorIsBot: Bool,
         requestedTeams: [String],
         labels: [String],
+        org: String,
         role: InboxRole,
         config: InboxMuteConfig
     ) -> MuteReason? {
@@ -80,25 +98,31 @@ enum InboxMuteEngine {
             }
         }
 
-        // Rule 4 — outside focus (Needs-your-review only; never applies to Your PRs)
-        if role == .needsYourReview {
-            let focusEnabled = !config.reviewFocusAuthors.isEmpty || !config.reviewFocusTeams.isEmpty
-            if focusEnabled {
-                let authorInFocus = config.reviewFocusAuthors.contains(
-                    where: { $0.lowercased() == authorLogin.lowercased() }
-                )
-                let teamInFocus = requestedTeams.contains { team in
-                    config.reviewFocusTeams.contains(
-                        where: { $0.lowercased() == team.lowercased() }
-                    )
-                }
-                if !authorInFocus && !teamInFocus {
-                    return .outsideFocus
-                }
+        // Rule 4 — outside focus (Needs-your-review only; never applies to Your PRs).
+        // Focus is per-org: only the PR's OWN org's rule applies. An org with no
+        // entry (or an empty one) never focus-mutes — so a focus rule scoped to one
+        // org can't demote PRs in another. This is what keeps a `dash0hq` team focus
+        // from muting your personal `mthines/*` PRs.
+        if role == .needsYourReview, let focus = focusConfig(for: org, in: config), !focus.isEmpty {
+            let authorInFocus = focus.authors.contains(
+                where: { $0.lowercased() == authorLogin.lowercased() }
+            )
+            let teamInFocus = requestedTeams.contains { team in
+                focus.teams.contains(where: { $0.lowercased() == team.lowercased() })
+            }
+            if !authorInFocus && !teamInFocus {
+                return .outsideFocus
             }
         }
 
         return nil
+    }
+
+    /// Case-insensitive lookup of an org's focus config (GitHub org logins are
+    /// case-insensitive, so `DASH0HQ` and `dash0hq` are the same org).
+    static func focusConfig(for org: String, in config: InboxMuteConfig) -> OrgFocusConfig? {
+        let key = org.lowercased()
+        return config.focusByOrg.first { $0.key.lowercased() == key }?.value
     }
 
     // MARK: - Glob matcher (case-insensitive, * wildcard only)
@@ -206,8 +230,7 @@ enum InboxMuteEngine {
             mutePatterns: [],
             muteBotAuthors: false,
             botAllowList: [],
-            reviewFocusAuthors: [],
-            reviewFocusTeams: [],
+            focusByOrg: [:],
             muteLabels: [],
             myLogin: "alice"
         )
@@ -222,6 +245,7 @@ enum InboxMuteEngine {
             authorIsBot: false,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
@@ -237,6 +261,7 @@ enum InboxMuteEngine {
             authorIsBot: true,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
@@ -253,6 +278,7 @@ enum InboxMuteEngine {
             authorIsBot: true,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
@@ -266,6 +292,7 @@ enum InboxMuteEngine {
             authorIsBot: true,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
@@ -285,6 +312,7 @@ enum InboxMuteEngine {
             authorIsBot: true,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
@@ -298,6 +326,7 @@ enum InboxMuteEngine {
             authorIsBot: true,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
@@ -313,14 +342,15 @@ enum InboxMuteEngine {
             authorIsBot: false,
             requestedTeams: [],
             labels: ["dependencies", "bug"],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
         if case .label = r3 { } else { assertionFailure("Rule 3 (label) did not fire") }
 
-        // --- Focus rule: outside focus → demote ---
+        // --- Focus rule: outside focus → demote (within the PR's own org) ---
         cfg = base
-        cfg.reviewFocusAuthors = ["carol"]
+        cfg.focusByOrg = ["acme": OrgFocusConfig(authors: ["carol"], teams: [])]
         let r4 = muteVerdict(
             title: "some PR",
             headRef: "branch",
@@ -328,6 +358,7 @@ enum InboxMuteEngine {
             authorIsBot: false,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
@@ -341,6 +372,7 @@ enum InboxMuteEngine {
             authorIsBot: false,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .yourPRs,
             config: cfg
         )
@@ -354,10 +386,57 @@ enum InboxMuteEngine {
             authorIsBot: false,
             requestedTeams: [],
             labels: [],
+            org: "acme",
             role: .needsYourReview,
             config: cfg
         )
         assert(r4c == nil, "Focus rule must NOT fire for author in focus list")
+
+        // --- Focus rule is PER-ORG: a rule on one org must NOT mute another org ---
+        // Regression guard for the bug where a `dash0hq` team focus silently muted
+        // personal `mthines/*` PRs. `cfg` still has focus only for "acme".
+        let r4d = muteVerdict(
+            title: "some PR",
+            headRef: "branch",
+            authorLogin: "dave",        // not in acme's focus list…
+            authorIsBot: false,
+            requestedTeams: [],
+            labels: [],
+            org: "mthines",             // …but this PR is in a DIFFERENT org with no rule
+            role: .needsYourReview,
+            config: cfg
+        )
+        assert(r4d == nil, "Focus rule scoped to one org must NOT mute PRs in an org with no rule")
+
+        // --- Focus org lookup is case-insensitive ---
+        let r4e = muteVerdict(
+            title: "some PR",
+            headRef: "branch",
+            authorLogin: "dave",
+            authorIsBot: false,
+            requestedTeams: [],
+            labels: [],
+            org: "ACME",                // same org as the "acme" rule, different case
+            role: .needsYourReview,
+            config: cfg
+        )
+        if case .outsideFocus = r4e { } else { assertionFailure("Focus org lookup must be case-insensitive") }
+
+        // --- Focus team match keeps a PR active (within its org) ---
+        cfg = base
+        cfg.focusByOrg = ["acme": OrgFocusConfig(authors: [], teams: ["ai"])]
+        let r4f = muteVerdict(
+            title: "some PR",
+            headRef: "branch",
+            authorLogin: "dash0-dev",
+            authorIsBot: true,
+            requestedTeams: ["ai"],     // requested via the focus team
+            labels: [],
+            org: "acme",
+            role: .needsYourReview,
+            config: cfg
+        )
+        assert(r4f == nil, "PR requested via a focus team must stay active")
     }
     #endif
 }

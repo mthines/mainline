@@ -48,7 +48,7 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRManager.swift          ← @MainActor orchestrator + write actions; inbox-derived populations (inboxActivePRs, inboxMutedPRs, inboxMuteConfig); currentViewPRs routes to inboxActivePRs on .inbox tab
 │   ├── SensitivePathMatcher.swift ← Pure path/branch-name heuristic classifier
 │   ├── TriageClassifier.swift   ← Pure needsHuman predicate engine
-│   ├── InboxMuteEngine.swift    ← Pure glob matcher + four mute-rule predicates (pattern/botAuthor/label/outsideFocus); InboxMuteConfig value struct; runSelfChecks() #if DEBUG
+│   ├── InboxMuteEngine.swift    ← Pure glob matcher + four mute-rule predicates (pattern/botAuthor/label/outsideFocus); InboxMuteConfig + per-org OrgFocusConfig value structs; muteVerdict takes the PR's `org`; runSelfChecks() #if DEBUG
 │   ├── ScopeStore.swift         ← @MainActor derives org/repo scopes from PR list; drives badge
 │   ├── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
 │   ├── GlobalHotKey.swift       ← Carbon global hotkey + MenuBarPopoverOpener
@@ -57,7 +57,7 @@ Mainline/Mainline/                     ← Source root
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab
     ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView
-    ├── InboxSettingsView.swift   ← Inbox noise-filter settings: mute patterns, muteBotAuthors toggle, reviewFocusAuthors/Teams, muteLabels
+    ├── InboxSettingsView.swift   ← Inbox noise-filter settings: mute patterns, muteBotAuthors toggle, per-org Review Focus sections (authors+teams keyed by org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
     ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/E/M/F/R/S/N/X/V/D/Q/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView; deck keys are user-configurable via settings.shortcutBindings; Inbox mode: role sections (yourPRs / needsYourReview) + collapsed Muted group; Q toggles per-PR manual mute (settings.inboxMuteOverrides); F marks draft PR ready for review (draft-only, write-gated, plain toast)
@@ -106,7 +106,7 @@ System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `Glo
 
 ### Inbox / review focus
 
-The **Inbox tab** (`ReviewTab.inbox`) is a client-side derived union of the forMe + created queries. `PRManager` deduplicates by `nodeId`, then passes each snapshot through `InboxMuteEngine.muteVerdict(...)` — nil = active (shown in role sections), non-nil = muted (collapsed Muted group at the bottom). Four mute rules apply in priority order: (1) glob patterns on title+branch via `InboxMuteConfig.mutePatterns`, (2) bot-author detection (`muteBotAuthors`) with per-bot exemptions via `botAllowList`, (3) label matching (`muteLabels`), (4) focus allow-list (`reviewFocusAuthors` + `reviewFocusTeams`). Rule 4 is skipped for `.yourPRs` role — your own PRs are never muted by focus. GraphQL now fetches `author { __typename login }` (for bot detection via `__typename == "Bot"`) and `labels(first: 10) { nodes { name } }`. New `PRSnapshot` fields (`labels`, `authorIsBot`) decode with `decodeIfPresent` so old persisted snapshots are backward-compatible; neither field triggers a diff-engine transition (excluded by omission from `PRDiffEngine`).
+The **Inbox tab** (`ReviewTab.inbox`) is a client-side derived union of the forMe + created queries. `PRManager` deduplicates by `nodeId`, then passes each snapshot through `InboxMuteEngine.muteVerdict(...)` — nil = active (shown in role sections), non-nil = muted (collapsed Muted group at the bottom). Four mute rules apply in priority order: (1) glob patterns on title+branch via `InboxMuteConfig.mutePatterns`, (2) bot-author detection (`muteBotAuthors`) with per-bot exemptions via `botAllowList`, (3) label matching (`muteLabels`), (4) **per-org** focus allow-list (`InboxMuteConfig.focusByOrg`, built from `settings.reviewFocusByOrg: [String: OrgFocusConfig]`). Rule 4 looks up ONLY the PR's own org (case-insensitive) via `InboxMuteEngine.focusConfig(for:in:)`: an org with no entry — or an empty one — has no focus rule, so all its PRs stay active, and a focus rule scoped to one org never mutes PRs in another (this replaced an earlier global-focus model where an org-local team slug like `ai` silently muted unrelated orgs' PRs). Rule 4 is also skipped for `.yourPRs` role — your own PRs are never muted by focus. The pre-per-org global keys (`reviewFocusAuthors`/`reviewFocusTeams`) are left on disk but NOT migrated into an all-orgs rule (that global apply-everywhere behavior was the bug); focus starts empty and is re-declared per org. GraphQL now fetches `author { __typename login }` (for bot detection via `__typename == "Bot"`) and `labels(first: 10) { nodes { name } }`. New `PRSnapshot` fields (`labels`, `authorIsBot`) decode with `decodeIfPresent` so old persisted snapshots are backward-compatible; neither field triggers a diff-engine transition (excluded by omission from `PRDiffEngine`).
 
 ### Vercel preview detection
 Each PR can carry a `vercelPreviewUrl` extracted from its `vercel[bot]` issue comment (REST `GitHubClient.fetchVercelPreviewURL`, pure `extractPreviewURL(from:domains:)`). The row shows a `PreviewBadge` when present, and `E` (deck or peek, default binding — user-configurable) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition). Match domains (priority order) and the on/off toggle are `MainlineSettings.vercelPreviewDomains` / `vercelPreviewEnabled`.
@@ -153,8 +153,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `mutePatterns` | [String] | `["chore(deps)*", "build(deps)*"]` |
 | `muteBotAuthors` | Bool | true |
 | `botAllowList` | [String] | `[]` |
-| `reviewFocusAuthors` | [String] | `[]` |
-| `reviewFocusTeams` | [String] | `[]` |
+| `reviewFocusByOrg` | Data (JSON `[String: OrgFocusConfig]`) | `{}` |
 | `muteLabels` | [String] | `[]` |
 
 ## Bundle ID

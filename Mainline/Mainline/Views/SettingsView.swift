@@ -307,7 +307,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var inboxSection: some View {
-        InboxSettingsView(settings: settings)
+        InboxSettingsView(settings: settings, knownOrgs: manager.knownOrgs)
     }
 
     // MARK: - Help
