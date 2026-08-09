@@ -17,6 +17,7 @@ enum TriageAction: Identifiable {
     case openInBrowser
     case openPreview
     case toggleMute
+    case copyBranch
 
     var id: String { label }
 
@@ -33,6 +34,7 @@ enum TriageAction: Identifiable {
         case .openInBrowser:      return "Open in Browser"
         case .openPreview:        return "Open Preview"
         case .toggleMute:         return "Mute / Move Up"
+        case .copyBranch:         return "Copy Branch Name"
         }
     }
 
@@ -49,6 +51,7 @@ enum TriageAction: Identifiable {
         case .openInBrowser:   return "safari"
         case .openPreview:     return "globe"
         case .toggleMute:      return "arrow.down.circle"
+        case .copyBranch:      return "doc.on.doc"
         }
     }
 
@@ -195,6 +198,7 @@ struct LeadingColumn<Icon: View>: View {
 ///   V      — toggle multi-select mode (default: v)
 ///   D      — toggle draft visibility (default: d)
 ///   Q      — toggle Inbox mute (default: q)
+///   C      — copy the focused PR's branch name to the clipboard (default: c)
 ///   ⌘Z     — undo last action (default: z with ⌘)
 ///   right-click — full action menu (see `rowContextMenu`)
 struct TriageDeckView: View {
@@ -908,6 +912,11 @@ struct TriageDeckView: View {
         Button { handleTriageAction(.openInBrowser, on: pr) } label: {
             Label(openActionLabel, systemImage: openActionSymbol)
         }
+        if !pr.headRefName.isEmpty {
+            Button { handleTriageAction(.copyBranch, on: pr) } label: {
+                Label("Copy Branch Name", systemImage: "doc.on.doc")
+            }
+        }
         if pr.vercelPreviewUrl != nil {
             Button { handleTriageAction(.openPreview, on: pr) } label: {
                 Label("Open Preview", systemImage: "globe")
@@ -1351,6 +1360,12 @@ struct TriageDeckView: View {
             return nil
         }
 
+        // Copy the focused PR's head branch name to the clipboard.
+        if shortcutMatches(.copyBranch, event: event) {
+            if let pr = focusedPR { copyBranch(pr) }
+            return nil
+        }
+
         return event
     }
 
@@ -1432,6 +1447,8 @@ struct TriageDeckView: View {
             manager.openPR(pr)
         case .openPreview:
             openPreview(pr)
+        case .copyBranch:
+            copyBranch(pr)
         case .toggleMute:
             let prevOverride = manager.inboxMuteOverride(for: pr)
             let nowMuted = manager.toggleInboxMute(pr)
@@ -1448,6 +1465,19 @@ struct TriageDeckView: View {
         guard let preview = pr.vercelPreviewUrl, let url = URL(string: preview) else { return }
         TelemetryService.shared.recordTriageInteraction("open_preview")
         NSWorkspace.shared.open(url)
+    }
+
+    /// Copies the PR's head branch name to the system clipboard and confirms with a
+    /// toast. Silent no-op when the branch name is unknown (empty `headRefName`) —
+    /// matches how the other verbs no-op when inapplicable.
+    private func copyBranch(_ pr: PRSnapshot) {
+        let branch = pr.headRefName
+        guard !branch.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(branch, forType: .string)
+        TelemetryService.shared.recordTriageInteraction("copy_branch")
+        manager.showInfoToast("Copied branch: \(branch)", symbol: "doc.on.doc")
     }
 
     /// Marks a draft PR as ready for review — fires immediately (no NSAlert confirm),

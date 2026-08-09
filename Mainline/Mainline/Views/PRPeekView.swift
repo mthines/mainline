@@ -77,10 +77,11 @@ struct PRPeekView: View {
             .frame(height: scrollHeight)
         }
         .onPreferenceChange(PeekContentHeightKey.self) { contentHeight = $0 }
-        // Width fits inside the 360pt MenuBarExtra popover; height sizes to content
-        // (see `scrollHeight`). Opaque fill so the list behind can't bleed through
-        // (`.background(.background)` is translucent here).
-        .frame(maxWidth: 344)
+        // Width fits inside the 400pt MenuBarExtra popover minus the presenter's
+        // `.padding(.horizontal, 8)` (MenuBarView) → 384pt usable; height sizes to
+        // content (see `scrollHeight`). Opaque fill so the list behind can't bleed
+        // through (`.background(.background)` is translucent here).
+        .frame(maxWidth: 384)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .windowBackgroundColor))

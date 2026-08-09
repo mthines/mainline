@@ -90,7 +90,7 @@ struct MenuBarView: View {
 
             footer
         }
-        .frame(width: 360)
+        .frame(width: 400)
         .padding(.vertical, 4)
         .onPreferenceChange(BodyHeightKey.self) { newValue in
             // Store the measured natural body height so the scroll region can size
