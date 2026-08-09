@@ -149,13 +149,25 @@ struct InboxSettingsView: View {
     }
 
     /// Orgs to render a Focus section for: those with current PRs, those already
-    /// configured, and those added this session — de-duplicated and sorted.
+    /// configured, and those added this session. De-duplicated case-insensitively
+    /// (GitHub org logins are case-insensitive, and the engine + storage key on the
+    /// lowercased form) with `knownOrgs`' canonical casing preferred for display.
     private var focusOrgs: [String] {
-        var set = Set(knownOrgs)
-        set.formUnion(settings.reviewFocusByOrg.keys)
-        set.formUnion(sessionOrgs)
-        return set.sorted()
+        var byLower: [String: String] = [:]
+        for org in knownOrgs { byLower[org.lowercased()] = org }
+        for org in settings.reviewFocusByOrg.keys where byLower[org.lowercased()] == nil {
+            byLower[org.lowercased()] = org
+        }
+        for org in sessionOrgs where byLower[org.lowercased()] == nil {
+            byLower[org.lowercased()] = org
+        }
+        return byLower.values.sorted()
     }
+
+    /// Canonical storage key for an org's focus config — lowercased so two case
+    /// variants can never persist as separate entries and the engine's
+    /// case-insensitive lookup stays deterministic.
+    private func focusKey(_ org: String) -> String { org.lowercased() }
 
     /// Adds a manually-typed org (one you don't currently have PRs from) so its
     /// Focus section appears. Case-insensitive de-dupe against the existing list.
@@ -171,7 +183,7 @@ struct InboxSettingsView: View {
     /// Bridges one org's `authors` list to a comma-separated text field.
     private func focusAuthorsBinding(for org: String) -> Binding<String> {
         Binding(
-            get: { settings.reviewFocusByOrg[org]?.authors.joined(separator: ", ") ?? "" },
+            get: { settings.reviewFocusByOrg[focusKey(org)]?.authors.joined(separator: ", ") ?? "" },
             set: { newValue in updateFocus(org: org) { $0.authors = parseCSV(newValue) } }
         )
     }
@@ -179,17 +191,19 @@ struct InboxSettingsView: View {
     /// Bridges one org's `teams` list to a comma-separated text field.
     private func focusTeamsBinding(for org: String) -> Binding<String> {
         Binding(
-            get: { settings.reviewFocusByOrg[org]?.teams.joined(separator: ", ") ?? "" },
+            get: { settings.reviewFocusByOrg[focusKey(org)]?.teams.joined(separator: ", ") ?? "" },
             set: { newValue in updateFocus(org: org) { $0.teams = parseCSV(newValue) } }
         )
     }
 
-    /// Mutates one org's focus config and prunes it back to nil when it becomes
-    /// empty, so the saved map never accumulates empty (no-op) entries.
+    /// Mutates one org's focus config (keyed on the canonical lowercased form) and
+    /// prunes it back to nil when it becomes empty, so the saved map never
+    /// accumulates empty (no-op) entries.
     private func updateFocus(org: String, _ mutate: (inout OrgFocusConfig) -> Void) {
-        var cfg = settings.reviewFocusByOrg[org] ?? .empty
+        let key = focusKey(org)
+        var cfg = settings.reviewFocusByOrg[key] ?? .empty
         mutate(&cfg)
-        settings.reviewFocusByOrg[org] = cfg.isEmpty ? nil : cfg
+        settings.reviewFocusByOrg[key] = cfg.isEmpty ? nil : cfg
     }
 
     /// Splits a comma-separated field into trimmed, non-empty tokens.

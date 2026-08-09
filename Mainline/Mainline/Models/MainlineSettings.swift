@@ -512,7 +512,10 @@ final class MainlineSettings: ObservableObject {
         static let muteBotAuthors       = "muteBotAuthors"
         static let botAllowList         = "botAllowList"
         static let reviewFocusByOrg     = "reviewFocusByOrg"
-        // Legacy (pre-per-org) global focus keys — read once for migration, then unused.
+        // Legacy (pre-per-org) global focus keys. Intentionally NOT migrated and no
+        // longer read (that global apply-everywhere behavior was the bug per-org
+        // focus replaced); kept only so the old values are left on disk rather than
+        // silently deleted. See `reviewFocusByOrg` init.
         static let reviewFocusAuthors   = "reviewFocusAuthors"
         static let reviewFocusTeams     = "reviewFocusTeams"
         static let muteLabels           = "muteLabels"

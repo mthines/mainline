@@ -539,6 +539,15 @@ struct PRSnapshot: Codable, Equatable {
         return .none
     }
 
+    // MARK: - Repo owner
+
+    /// The repo owner — the `owner` of `owner/repo`. Empty if `repoFullName` is
+    /// malformed. Single source of truth for org derivation (scope chips, per-org
+    /// review focus) so call sites don't each re-split `repoFullName`.
+    var org: String {
+        repoFullName.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
+    }
+
     // MARK: - Inbox role
 
     /// The role this PR plays in the Inbox view, from the point of view of `myLogin`.

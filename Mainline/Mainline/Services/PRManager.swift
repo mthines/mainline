@@ -114,10 +114,8 @@ final class PRManager: ObservableObject {
     /// appear without having to type them.
     var knownOrgs: [String] {
         var set = Set<String>()
-        for pr in prs {
-            if let owner = pr.repoFullName.split(separator: "/", maxSplits: 1).first {
-                set.insert(String(owner))
-            }
+        for pr in prs where !pr.org.isEmpty {
+            set.insert(pr.org)
         }
         return set.sorted()
     }
@@ -172,7 +170,6 @@ final class PRManager: ObservableObject {
     /// Pure rule-based mute verdict (ignores manual overrides).
     private func ruleMuted(_ pr: PRSnapshot, config: InboxMuteConfig) -> Bool {
         let role = pr.inboxRole(myLogin: config.myLogin)
-        let org = pr.repoFullName.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
         return InboxMuteEngine.muteVerdict(
             title:          pr.title,
             headRef:        pr.headRefName,
@@ -180,7 +177,7 @@ final class PRManager: ObservableObject {
             authorIsBot:    pr.authorIsBot,
             requestedTeams: pr.requestedTeams,
             labels:         pr.labels,
-            org:            org,
+            org:            pr.org,
             role:           role,
             config:         config
         ) != nil
