@@ -104,9 +104,12 @@ enum InboxMuteEngine {
         // org can't demote PRs in another. This is what keeps a `dash0hq` team focus
         // from muting your personal `mthines/*` PRs.
         if role == .needsYourReview, let focus = focusConfig(for: org, in: config), !focus.isEmpty {
-            let authorInFocus = focus.authors.contains(
-                where: { $0.lowercased() == authorLogin.lowercased() }
-            )
+            // Normalize the `[bot]` suffix on both sides, mirroring Rule 2's bot
+            // allow-list: a focus entry typed as `dash0-dev[bot]` must still match
+            // the bare GraphQL login `dash0-dev` (and vice-versa). For a human login
+            // (no suffix) this is just a lowercase compare, so it stays correct.
+            let normalizedAuthor = normalizeBotLogin(authorLogin)
+            let authorInFocus = focus.authors.contains { normalizeBotLogin($0) == normalizedAuthor }
             let teamInFocus = requestedTeams.contains { team in
                 focus.teams.contains(where: { $0.lowercased() == team.lowercased() })
             }
@@ -437,6 +440,24 @@ enum InboxMuteEngine {
             config: cfg
         )
         assert(r4f == nil, "PR requested via a focus team must stay active")
+
+        // --- Focus author match normalizes the `[bot]` suffix (mirrors Rule 2) ---
+        // With muteBotAuthors OFF, a bot reaches Rule 4; a focus entry typed as
+        // `dash0-dev[bot]` must still match the bare GraphQL login `dash0-dev`.
+        cfg = base
+        cfg.focusByOrg = ["acme": OrgFocusConfig(authors: ["dash0-dev[bot]"], teams: [])]
+        let r4g = muteVerdict(
+            title: "some PR",
+            headRef: "branch",
+            authorLogin: "dash0-dev",   // bare GraphQL login
+            authorIsBot: true,
+            requestedTeams: [],
+            labels: [],
+            org: "acme",
+            role: .needsYourReview,
+            config: cfg
+        )
+        assert(r4g == nil, "Focus author entered as `name[bot]` must match the bare bot login")
     }
     #endif
 }
