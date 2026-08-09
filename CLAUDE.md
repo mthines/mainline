@@ -57,7 +57,7 @@ Mainline/Mainline/                     ← Source root
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab
     ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView
-    ├── InboxSettingsView.swift   ← Inbox noise-filter settings: mute patterns, muteBotAuthors toggle, per-org Review Focus sections (authors+teams keyed by org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
+    ├── InboxSettingsView.swift   ← Inbox noise-filter settings: mute patterns, muteBotAuthors toggle, per-org Review Focus (org sub-blocks nested INSIDE the one Review Focus card via `orgFocusBlock`, each with a Remove button; authors+teams keyed by lowercased org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
     ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/E/M/F/R/S/N/X/V/D/Q/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView; deck keys are user-configurable via settings.shortcutBindings; Inbox mode: role sections (yourPRs / needsYourReview) + collapsed Muted group; Q toggles per-PR manual mute (settings.inboxMuteOverrides); F marks draft PR ready for review (draft-only, write-gated, plain toast)
