@@ -72,7 +72,7 @@ struct InboxSettingsView: View {
         }
 
         Section("Review Focus") {
-            Label("Focus is set per org. In each org below, list the authors and teams whose PRs should stay in \"Needs your review\" — everything else in that org is demoted to Muted. An org with no entries shows all of its PRs, and a rule in one org never affects another.",
+            Label("Focus is set per org. For each org below, list the authors and teams whose PRs should stay in \"Needs your review\" — everything else in that org is demoted to Muted. An org with no entries shows all of its PRs, and a rule in one org never affects another.",
                   systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -85,29 +85,11 @@ struct InboxSettingsView: View {
                 Button("Add", action: addOrg)
                     .disabled(trimmedNewOrg.isEmpty)
             }
-        }
 
-        ForEach(focusOrgs, id: \.self) { org in
-            Section(org) {
-                TextField(
-                    "Focus authors",
-                    text: focusAuthorsBinding(for: org),
-                    prompt: Text("alice, bob")
-                )
-                .textFieldStyle(.roundedBorder)
-
-                TextField(
-                    "Focus teams",
-                    text: focusTeamsBinding(for: org),
-                    prompt: Text("ai, platform")
-                )
-                .textFieldStyle(.roundedBorder)
-
-                Label("Comma-separated logins / team slugs. A PR is kept if its author OR a requested team matches. Empty = all \(org) PRs stay active.",
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            // Per-org sub-blocks live INSIDE this section so they read as children
+            // of "Review Focus" rather than as siblings of the other mute cards.
+            ForEach(focusOrgs, id: \.self) { org in
+                orgFocusBlock(org)
             }
         }
 
@@ -124,6 +106,48 @@ struct InboxSettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    // MARK: - Per-org focus block
+
+    /// One org's focus editor: a header row (org name + Remove) and the two
+    /// allow-list fields, laid out as a single card row so the whole block reads
+    /// as belonging to the enclosing "Review Focus" section.
+    @ViewBuilder
+    private func orgFocusBlock(_ org: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(org)
+                    .font(.headline)
+                Spacer()
+                if canRemove(org) {
+                    Button(role: .destructive) {
+                        removeOrg(org)
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                }
+            }
+
+            LabeledContent("Focus authors") {
+                TextField("", text: focusAuthorsBinding(for: org), prompt: Text("alice, bob"))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 320)
+            }
+            LabeledContent("Focus teams") {
+                TextField("", text: focusTeamsBinding(for: org), prompt: Text("ai, platform"))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 320)
+            }
+
+            Text("Comma-separated logins / team slugs. A PR is kept if its author OR a requested team matches. Empty = all \(org) PRs stay active.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 6)
     }
 
     // MARK: - Comma-separated bindings
@@ -168,6 +192,23 @@ struct InboxSettingsView: View {
     /// variants can never persist as separate entries and the engine's
     /// case-insensitive lookup stays deterministic.
     private func focusKey(_ org: String) -> String { org.lowercased() }
+
+    /// Whether the org has removable state — a saved config, or a section you added
+    /// this session. Orgs shown purely because you have open PRs there (and haven't
+    /// configured focus) have nothing to remove, so no button is offered; clearing
+    /// their fields is the same as "show all".
+    private func canRemove(_ org: String) -> Bool {
+        settings.reviewFocusByOrg[focusKey(org)] != nil
+            || sessionOrgs.contains { $0.caseInsensitiveCompare(org) == .orderedSame }
+    }
+
+    /// Removes an org's focus rule: clears its saved config and drops it from the
+    /// session-added list. A configured-only org (no open PRs) disappears; an org
+    /// you actively review reverts to its "show all" state and stays listed.
+    private func removeOrg(_ org: String) {
+        settings.reviewFocusByOrg[focusKey(org)] = nil
+        sessionOrgs.removeAll { $0.caseInsensitiveCompare(org) == .orderedSame }
+    }
 
     /// Adds a manually-typed org (one you don't currently have PRs from) so its
     /// Focus section appears. Case-insensitive de-dupe against the existing list.
