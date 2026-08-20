@@ -80,6 +80,12 @@ final class PRPoller {
 
         var allSnapshots: [PRSnapshot] = []
 
+        // Tabs whose fetch produced no fresh data this cycle (304, or a 5xx that
+        // survived the client-side retry). `PRStateStore.update` rebuilds its dict
+        // from exactly the array it is handed, so anything missing is dropped — the
+        // stale tabs' last known snapshots are carried forward below instead.
+        var staleTabs: Set<ReviewTab> = []
+
         for (tab, query) in queries {
             let queryType = tab == .created ? "author" : "reviewer"
             let pollStart = Date()
@@ -104,6 +110,7 @@ final class PRPoller {
                     duration: duration,
                     etag304: true
                 )
+                staleTabs.insert(tab)
                 continue
             } catch GitHubAPIError.cancelled {
                 // Popover closed mid-request; SwiftUI cancelled the `.task`.
@@ -112,15 +119,29 @@ final class PRPoller {
                 TelemetryService.shared.recordPollFailed(queryType: queryType, error: .cancelled, duration: duration)
                 return
             } catch is CancellationError {
-                // Task cancellation — benign, keep prior state.
+                // Task cancellation — benign, keep prior state. Still close the poll
+                // span: leaving it open makes the NEXT poll end it as "abandoned",
+                // which shows up in telemetry as a phantom multi-second poll.
+                let duration = Date().timeIntervalSince(pollStart)
+                TelemetryService.shared.recordPollFailed(queryType: queryType, error: .cancelled, duration: duration)
                 return
             } catch GitHubAPIError.serverError(let code) {
-                // Transient GitHub 5xx (500/502/503/504). Treat like cancellation:
-                // keep the last successful data/counts and do NOT surface an error
-                // banner. The next scheduled poll retries automatically.
+                // Transient GitHub 5xx (500/502/503/504), already retried once at a
+                // reduced page size by `GitHubClient.searchPRs`. Keep the last
+                // successful data/counts for THIS tab and do NOT surface an error
+                // banner — the next scheduled poll retries automatically.
+                //
+                // `continue`, not `return`: the tabs are independent queries, and the
+                // reviewer query is the expensive one that times out. Returning here
+                // threw away the author query's snapshots that had already been
+                // fetched successfully in this cycle, so one flaky tab stalled the
+                // whole panel (no store update, no notifications) until a cycle where
+                // both tabs happened to succeed. This tab's own PRs are carried
+                // forward unchanged after the loop, so nothing disappears.
                 let duration = Date().timeIntervalSince(pollStart)
                 TelemetryService.shared.recordPollFailed(queryType: queryType, error: .serverError(code), duration: duration)
-                return
+                staleTabs.insert(tab)
+                continue
             } catch GitHubAPIError.rateLimited(let seconds) {
                 let duration = Date().timeIntervalSince(pollStart)
                 TelemetryService.shared.recordPollFailed(queryType: queryType, error: .rateLimited(retryAfter: seconds), duration: duration)
@@ -141,6 +162,19 @@ final class PRPoller {
                 }
                 await MainActor.run { self.statusMessage = "Error: \(error.localizedDescription)" }
                 return
+            }
+        }
+
+        // Carry forward the last known snapshots for any tab that returned no fresh
+        // data, so a single failed/unchanged query never empties that tab's list.
+        // Only PRs the successful queries did NOT return are re-added, and they are
+        // re-added verbatim — an unchanged snapshot diffs to no transition, so this
+        // preserves the list without firing a notification.
+        if !staleTabs.isEmpty {
+            let fetchedIds = Set(allSnapshots.map(\.nodeId))
+            for snapshot in store.snapshots.values
+            where !fetchedIds.contains(snapshot.nodeId) && !snapshot.tabs.isDisjoint(with: staleTabs) {
+                allSnapshots.append(snapshot)
             }
         }
 
