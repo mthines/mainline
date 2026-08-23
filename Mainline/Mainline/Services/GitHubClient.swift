@@ -230,12 +230,49 @@ final class GitHubClient {
 
     // MARK: - Search PRs (GraphQL)
 
+    /// Page size for the open-PR search. GitHub aborts a GraphQL request that
+    /// exceeds its server-side time budget with a 5xx, and this document fans out
+    /// per node (labels, comments, reviews, reviewRequests, reviewThreads, commits),
+    /// so a full 100-node page sits right at that budget on large review queues.
+    static let searchPageSize = 100
+
+    /// Reduced page size used for the single retry after a 5xx. Halving the fan-out
+    /// roughly halves the server-side work, so the retry usually completes inside
+    /// the budget that the full-size request blew.
+    static let searchPageSizeDegraded = 50
+
+    /// Delay before the post-5xx retry, in nanoseconds.
+    private static let searchRetryDelayNanos: UInt64 = 750_000_000
+
     /// Search for PRs matching `query` and tag the results with `tab`.
     /// GraphQL returns review decision + CI rollup in a single round trip, so
     /// no per-PR check-runs fan-out is needed.
     /// Throws `.notModified` if the server returned 304 (ETag unchanged).
+    ///
+    /// A 5xx is retried ONCE at `searchPageSizeDegraded` before being rethrown: the
+    /// 5xx on this endpoint is overwhelmingly a server-side timeout on an expensive
+    /// query, not an outage, so a smaller page is far more likely to succeed than an
+    /// identical retry. Every other error (401, 304, rate limit, cancellation)
+    /// propagates unchanged on the first attempt — only `.serverError` retries.
     func searchPRs(query: String, token: String, tab: ReviewTab) async throws -> (snapshots: [PRSnapshot], etag: String?) {
-        try await runSearch(query: query, token: token, tab: tab, first: 100, etagPrefix: "graphql.search")
+        do {
+            return try await runSearch(
+                query: query,
+                token: token,
+                tab: tab,
+                first: Self.searchPageSize,
+                etagPrefix: "graphql.search"
+            )
+        } catch GitHubAPIError.serverError(_) {
+            try await Task.sleep(nanoseconds: Self.searchRetryDelayNanos)
+            return try await runSearch(
+                query: query,
+                token: token,
+                tab: tab,
+                first: Self.searchPageSizeDegraded,
+                etagPrefix: "graphql.search"
+            )
+        }
     }
 
     /// Shared GraphQL search executor backing both `searchPRs` (open, first: 100)
@@ -266,9 +303,10 @@ final class GitHubClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        // ETag caching — keyed per prefix + tab + query so the two tabs (and the
-        // open vs. done fetches) never collide.
-        let etagKey = "\(etagPrefix).\(tab.rawValue).\(query)"
+        // ETag caching — keyed per prefix + tab + query + page size so the two tabs
+        // (and the open vs. done fetches) never collide, and so a 304 earned by the
+        // degraded retry page can't suppress the next full-size fetch.
+        let etagKey = "\(etagPrefix).\(tab.rawValue).\(first).\(query)"
         if let storedEtag = settings.etag(for: etagKey) {
             request.setValue(storedEtag, forHTTPHeaderField: "If-None-Match")
         }
