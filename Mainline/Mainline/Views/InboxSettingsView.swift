@@ -25,6 +25,39 @@ struct InboxSettingsView: View {
     @State private var sessionOrgs: [String] = []
 
     var body: some View {
+        Section("Review Readiness") {
+            Label("A PR you were asked to review shows under \"Ready for review\" only when it is genuinely ready for you. Turn on a signal below to send matching PRs to \"Waiting\" instead — the author still owns them. Your own PRs are unaffected.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            reviewReadyToggle(
+                "Merge conflicts",
+                get: { settings.reviewNotReadyOnConflict },
+                set: { settings.reviewNotReadyOnConflict = $0 },
+                key: "reviewNotReadyOnConflict"
+            )
+            reviewReadyToggle(
+                "Failing CI",
+                get: { settings.reviewNotReadyOnFailingCI },
+                set: { settings.reviewNotReadyOnFailingCI = $0 },
+                key: "reviewNotReadyOnFailingCI"
+            )
+            reviewReadyToggle(
+                "Unresolved comment threads",
+                get: { settings.reviewNotReadyOnUnresolvedThreads },
+                set: { settings.reviewNotReadyOnUnresolvedThreads = $0 },
+                key: "reviewNotReadyOnUnresolvedThreads"
+            )
+            reviewReadyToggle(
+                "Already approved by you",
+                get: { settings.reviewNotReadyOnMyApproval },
+                set: { settings.reviewNotReadyOnMyApproval = $0 },
+                key: "reviewNotReadyOnMyApproval"
+            )
+        }
+
         Section("Pattern Muting") {
             TextField(
                 "Mute patterns",
@@ -106,6 +139,26 @@ struct InboxSettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    // MARK: - Review readiness toggle
+
+    /// One review-readiness toggle. "On" means the signal marks a review PR as NOT
+    /// ready (sends it to Waiting). Records a telemetry setting-change on flip.
+    @ViewBuilder
+    private func reviewReadyToggle(
+        _ title: String,
+        get: @escaping () -> Bool,
+        set: @escaping (Bool) -> Void,
+        key: String
+    ) -> some View {
+        Toggle(title, isOn: Binding(
+            get: get,
+            set: { newValue in
+                set(newValue)
+                TelemetryService.shared.recordSettingChanged(name: key, enabled: newValue)
+            }
+        ))
     }
 
     // MARK: - Per-org focus block

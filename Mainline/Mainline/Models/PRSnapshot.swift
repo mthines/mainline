@@ -103,18 +103,32 @@ enum PRState: String, Codable, Equatable, CaseIterable {
 /// deck; `PRState` is retained only for the trailing Merged/Closed sections and
 /// for ordering/legacy helpers.
 ///
-/// The three open, non-draft buckets are mutually exclusive and evaluated
-/// first-match-wins in `PRSnapshot.actionGroup`:
-///   - `.needsAttention` — CI failing OR changes requested OR unresolved threads.
-///     Explicitly does NOT include merge conflicts (they happen constantly and
-///     aren't an attention driver).
-///   - `.readyToMerge` — approved && mergeable && CI green.
-///   - `.waiting` — everything else open (awaiting review, green, approved-but-
-///     not-mergeable, etc.). Nothing needed from the user right now.
+/// Grouping is ROLE-AWARE: the top bucket means opposite things depending on
+/// whether the PR is one you AUTHORED or one you were asked to REVIEW. The role
+/// is derived from `author == myLogin` (see `inboxRole(myLogin:)`).
+///
+/// Author role (your PRs) — three buckets, first-match-wins:
+///   - `.needsAttention` — blocked on YOU: CI failing OR changes requested OR
+///     unresolved threads OR merge conflict. Unlike the role-agnostic
+///     `needsAttention`, this DOES include merge conflicts — resolving a conflict
+///     on your own PR is a manual action you must take.
+///   - `.readyToMerge` — approved && mergeable && CI green (one-click merge).
+///   - `.waiting` — blocked on others: awaiting review, CI pending, etc.
+///
+/// Reviewer role (PRs assigned to you) — two buckets:
+///   - `.readyForReview` — genuinely ready for your eyes: none of the enabled
+///     "author still owns it" signals fire (see `readyForMyReview`).
+///   - `.waiting` — the author still owns it (conflict, red CI, unresolved
+///     threads, changes requested, draft, or already approved by you).
+///
+/// `.needsAttention` and `.readyForReview` never coexist in one role's section
+/// list, so they share the top sort slot.
+///
 /// Plus the terminal buckets: `.draft` (only used when `splitDrafts` is on),
 /// `.merged`, `.closed`.
 enum ActionGroup: String, Codable, Equatable, CaseIterable {
     case needsAttention
+    case readyForReview
     case readyToMerge
     case waiting
     case draft
@@ -143,6 +157,7 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
     var title: String {
         switch self {
         case .needsAttention: return "Needs attention"
+        case .readyForReview: return "Ready for review"
         case .readyToMerge:   return "Ready to merge"
         case .waiting:        return "Waiting"
         case .draft:          return "Draft"
@@ -157,7 +172,11 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
     /// Deterministic display order used to sort sections.
     var sortIndex: Int {
         switch self {
+        // `.needsAttention` (author role) and `.readyForReview` (reviewer role)
+        // both occupy the top slot; they never coexist in one role's list, so the
+        // shared index 0 is harmless.
         case .needsAttention: return 0
+        case .readyForReview: return 0
         case .readyToMerge:   return 1
         case .waiting:        return 2
         case .draft:          return 3
@@ -168,6 +187,32 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
         case .muted:          return 8
         }
     }
+}
+
+// MARK: - ReviewReadyConfig
+
+/// User-configurable gate for the reviewer-role "Ready for review" bucket. Each
+/// flag, when ON, means the corresponding signal marks a review PR as NOT ready
+/// (the author still owns it) so it drops to `.waiting`. All default ON.
+///
+/// Built from `MainlineSettings` and threaded into `PRSnapshot.actionGroup` so the
+/// classification stays a pure function with no settings dependency of its own.
+struct ReviewReadyConfig: Equatable {
+    /// Merge conflicts (`mergeable == false`) → author must rebase first.
+    var notReadyOnConflict: Bool
+    /// Failing or erroring CI → the author's change is broken.
+    var notReadyOnFailingCI: Bool
+    /// Any unresolved review thread → the author hasn't addressed feedback.
+    var notReadyOnUnresolvedThreads: Bool
+    /// You already approved it → your review is done.
+    var notReadyOnMyApproval: Bool
+
+    static let defaults = ReviewReadyConfig(
+        notReadyOnConflict: true,
+        notReadyOnFailingCI: true,
+        notReadyOnUnresolvedThreads: true,
+        notReadyOnMyApproval: true
+    )
 }
 
 // MARK: - PRSnapshot
@@ -267,6 +312,14 @@ struct PRSnapshot: Codable, Equatable {
     /// `false` for backward compat. NOT compared in PRDiffEngine.
     var authorIsBot: Bool
 
+    /// Whether the authenticated viewer's own latest review on this PR is an
+    /// approval. Sourced from GraphQL `latestReviews`, matched against the viewer's
+    /// login at map time. Drives the reviewer-role "already approved by you → not
+    /// ready" gate. Decoded with `decodeIfPresent` + default `false` for backward
+    /// compat. NOT compared in PRDiffEngine (a review by you is never a notifiable
+    /// transition for your own attention state).
+    var viewerHasApproved: Bool
+
     /// Total lines changed in this PR.
     var totalLines: Int { linesAdded + linesDeleted }
 
@@ -304,7 +357,8 @@ struct PRSnapshot: Codable, Equatable {
         vercelPreviewUrl: String? = nil,
         vercelPreviewCheckedAt: String? = nil,
         labels: [String] = [],
-        authorIsBot: Bool = false
+        authorIsBot: Bool = false,
+        viewerHasApproved: Bool = false
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -340,6 +394,7 @@ struct PRSnapshot: Codable, Equatable {
         self.vercelPreviewCheckedAt = vercelPreviewCheckedAt
         self.labels = labels
         self.authorIsBot = authorIsBot
+        self.viewerHasApproved = viewerHasApproved
     }
 
     // MARK: - Codable (explicit to support decodeIfPresent defaults for new fields)
@@ -353,7 +408,7 @@ struct PRSnapshot: Codable, Equatable {
         case sensitivePathFlags, unresolvedThreadCount
         case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
         case vercelPreviewUrl, vercelPreviewCheckedAt
-        case labels, authorIsBot
+        case labels, authorIsBot, viewerHasApproved
     }
 
     init(from decoder: Decoder) throws {
@@ -393,6 +448,7 @@ struct PRSnapshot: Codable, Equatable {
         // New inbox mute fields — backward-compat: default when absent in old snapshots
         labels                = try c.decodeIfPresent([String].self,   forKey: .labels) ?? []
         authorIsBot           = try c.decodeIfPresent(Bool.self,       forKey: .authorIsBot) ?? false
+        viewerHasApproved     = try c.decodeIfPresent(Bool.self,       forKey: .viewerHasApproved) ?? false
     }
 
     // MARK: - Bot detection
@@ -499,30 +555,75 @@ struct PRSnapshot: Codable, Equatable {
         return false
     }
 
-    /// The actionability section this PR belongs to (first match wins).
+    /// Author-role attention: whether an OPEN PR YOU authored is blocked on YOU.
+    /// Same signals as the role-agnostic `needsAttention` PLUS merge conflicts —
+    /// resolving a conflict on your own PR is a manual action you must take.
+    /// Evaluated ignoring `isDraft` so a shown draft lands in its real group.
+    var authorNeedsAttention: Bool {
+        guard !merged, !closed else { return false }
+        if ciStatus == .failure || ciStatus == .error { return true }
+        if reviewDecision == .changesRequested { return true }
+        if unresolvedThreadCount > 0 { return true }
+        if mergeable == false { return true }
+        return false
+    }
+
+    /// Reviewer-role readiness: whether this PR is genuinely ready for YOUR review,
+    /// i.e. none of the enabled "author still owns it" signals fire. Drafts are
+    /// never ready. `reviewDecision == .changesRequested` always marks it not ready
+    /// (the author owes a follow-up) regardless of `config`; the other four signals
+    /// are individually gated by `config` (all default ON).
+    func readyForMyReview(_ config: ReviewReadyConfig) -> Bool {
+        guard !merged, !closed, !isDraft else { return false }
+        if reviewDecision == .changesRequested { return false }
+        if config.notReadyOnConflict && mergeable == false { return false }
+        if config.notReadyOnFailingCI && (ciStatus == .failure || ciStatus == .error) { return false }
+        if config.notReadyOnUnresolvedThreads && unresolvedThreadCount > 0 { return false }
+        if config.notReadyOnMyApproval && viewerHasApproved { return false }
+        return true
+    }
+
+    /// The ROLE-AWARE actionability section this PR belongs to (first match wins).
     ///
-    /// - Parameter splitDrafts: when true, an open draft is routed to its own
-    ///   `.draft` group; when false, an open draft is placed in the actionability
-    ///   group implied by its non-draft signal (so it mixes in, distinguished only
-    ///   by the Draft badge + dimming).
-    func actionGroup(splitDrafts: Bool) -> ActionGroup {
+    /// The role is derived from `inboxRole(myLogin:)`: a PR you authored uses the
+    /// author buckets (`.needsAttention` / `.readyToMerge` / `.waiting`); a PR you
+    /// were asked to review uses the reviewer buckets (`.readyForReview` /
+    /// `.waiting`). See the `ActionGroup` doc comment for the full contract.
+    ///
+    /// - Parameters:
+    ///   - splitDrafts: when true, an open draft is routed to its own `.draft`
+    ///     group; when false, an open draft is placed in the actionability group
+    ///     implied by its non-draft signal (distinguished by the Draft badge).
+    ///   - myLogin: the authenticated user's login, used to pick the role.
+    ///   - reviewReady: which signals gate the reviewer-role "Ready for review"
+    ///     bucket (all default ON).
+    func actionGroup(splitDrafts: Bool, myLogin: String, reviewReady: ReviewReadyConfig) -> ActionGroup {
         if merged { return .merged }
         if closed { return .closed }
         if splitDrafts && isDraft { return .draft }
 
-        // For an open PR (draft or not) evaluate the actionability signal. Draft
-        // short-circuits are already handled above, and `needsAttention` /
-        // `readyToMerge` both guard on `!isDraft`; to classify a *shown* draft by
-        // its underlying signal we evaluate the same predicates ignoring draft.
-        if ciStatus == .failure || ciStatus == .error
-            || reviewDecision == .changesRequested
-            || unresolvedThreadCount > 0 {
-            return .needsAttention
+        switch inboxRole(myLogin: myLogin) {
+        case .yourPRs:
+            if authorNeedsAttention { return .needsAttention }
+            if reviewDecision == .approved && mergeable == true && ciStatus == .success {
+                return .readyToMerge
+            }
+            return .waiting
+        case .needsYourReview:
+            return readyForMyReview(reviewReady) ? .readyForReview : .waiting
         }
-        if reviewDecision == .approved && mergeable == true && ciStatus == .success {
-            return .readyToMerge
+    }
+
+    /// Whether this PR needs YOUR time right now, role-aware — the single predicate
+    /// behind the menu-bar "needs attention" badge. Author role → blocked on you
+    /// (`authorNeedsAttention`); reviewer role → ready for your review
+    /// (`readyForMyReview`). Merged/closed PRs never count.
+    func needsMyTime(myLogin: String, reviewReady: ReviewReadyConfig) -> Bool {
+        guard !merged, !closed else { return false }
+        switch inboxRole(myLogin: myLogin) {
+        case .yourPRs:         return authorNeedsAttention
+        case .needsYourReview: return readyForMyReview(reviewReady)
         }
-        return .waiting
     }
 
     /// Why this PR is in the "For me" set, from the point of view of `myLogin`.
@@ -556,8 +657,86 @@ struct PRSnapshot: Codable, Equatable {
     /// A PR where the user is a requested reviewer but NOT the author belongs to
     /// "Needs your review"; a PR the user authored belongs to "Your PRs".
     /// Pure — no I/O, safe to call from any thread.
+    ///
+    /// The author match is case-insensitive (GitHub logins are), matching the
+    /// sibling `viewerHasApproved` normalization in `GitHubClient.makeSnapshot`.
+    /// Since `actionGroup` / `needsMyTime` now route grouping AND the menu-bar badge
+    /// off this role, a non-canonical `githubUsername` case must not misfile your
+    /// own PRs into the reviewer role.
     func inboxRole(myLogin: String) -> InboxRole {
-        guard !myLogin.isEmpty, author == myLogin else { return .needsYourReview }
+        guard !myLogin.isEmpty,
+              author.caseInsensitiveCompare(myLogin) == .orderedSame
+        else { return .needsYourReview }
         return .yourPRs
     }
 }
+
+// MARK: - Classification self-checks (DEBUG)
+
+#if DEBUG
+/// Lightweight, dependency-free assertions for the role-aware `actionGroup`
+/// classification. Mirrors `InboxMuteEngine.runSelfChecks()` — invoked once at
+/// launch so a logic regression trips an assertion in a debug build without a
+/// full XCTest target.
+enum PRClassificationChecks {
+    private static func make(
+        author: String,
+        reviewDecision: ReviewDecision? = nil,
+        ciStatus: CIStatus = .success,
+        mergeable: Bool? = true,
+        unresolvedThreadCount: Int = 0,
+        isDraft: Bool = false,
+        viewerHasApproved: Bool = false
+    ) -> PRSnapshot {
+        PRSnapshot(
+            nodeId: "n", number: 1, title: "t", htmlUrl: "u", repoFullName: "o/r",
+            isDraft: isDraft, state: "open", reviewDecision: reviewDecision,
+            ciStatus: ciStatus, reviewState: .none, commentCount: 0,
+            updatedAt: "", author: author, requestedReviewers: [],
+            mergeable: mergeable, unresolvedThreadCount: unresolvedThreadCount,
+            viewerHasApproved: viewerHasApproved
+        )
+    }
+
+    static func run() {
+        let me = "me"
+        let cfg = ReviewReadyConfig.defaults
+
+        func group(_ pr: PRSnapshot) -> ActionGroup {
+            pr.actionGroup(splitDrafts: false, myLogin: me, reviewReady: cfg)
+        }
+
+        // Author role — merge conflict now routes to Needs attention.
+        assert(group(make(author: me, mergeable: false)) == .needsAttention,
+               "author + conflict → needsAttention")
+        // Author role — clean, awaiting review → Waiting.
+        assert(group(make(author: me, reviewDecision: .reviewRequired)) == .waiting,
+               "author + awaiting review → waiting")
+        // Author role — approved + clean + green → Ready to merge.
+        assert(group(make(author: me, reviewDecision: .approved)) == .readyToMerge,
+               "author + approved + clean → readyToMerge")
+
+        // Reviewer role — clean, no signals → Ready for review.
+        assert(group(make(author: "someone")) == .readyForReview,
+               "reviewer + clean → readyForReview")
+        // Reviewer role — each not-ready signal drops it to Waiting.
+        assert(group(make(author: "someone", mergeable: false)) == .waiting,
+               "reviewer + conflict → waiting")
+        assert(group(make(author: "someone", ciStatus: .failure)) == .waiting,
+               "reviewer + failing CI → waiting")
+        assert(group(make(author: "someone", unresolvedThreadCount: 2)) == .waiting,
+               "reviewer + unresolved threads → waiting")
+        assert(group(make(author: "someone", viewerHasApproved: true)) == .waiting,
+               "reviewer + approved by me → waiting")
+        assert(group(make(author: "someone", reviewDecision: .changesRequested)) == .waiting,
+               "reviewer + changes requested → waiting")
+
+        // Reviewer role — a disabled gate keeps the signal from demoting.
+        var relaxed = ReviewReadyConfig.defaults
+        relaxed.notReadyOnMyApproval = false
+        assert(make(author: "someone", viewerHasApproved: true)
+            .actionGroup(splitDrafts: false, myLogin: me, reviewReady: relaxed) == .readyForReview,
+               "reviewer + approved-by-me gate OFF → readyForReview")
+    }
+}
+#endif

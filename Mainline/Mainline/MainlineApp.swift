@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // regression in the pure mute engine.
         #if DEBUG
         InboxMuteEngine.runSelfChecks()
+        PRClassificationChecks.run()
         #endif
 
         // Listen for open-settings requests from MenuBarView

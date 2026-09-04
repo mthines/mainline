@@ -398,17 +398,19 @@ final class PRManager: ObservableObject {
         settings.menuBarScopeFollowsSelection ? currentViewPRs : prs
     }
 
-    /// PRs that need attention — the SINGLE "needs attention" concept. Uses the one
-    /// shared predicate `PRSnapshot.needsAttention` (CI failing / changes requested /
-    /// unresolved threads), the same one the browse list's "Needs attention"
-    /// (`ActionGroup.needsAttention`) group uses, computed over `badgeBasePRs` so the
-    /// badge follows the current view (tab + scope + drafts + For-me sub-filter) when
-    /// follow-view is on, or all PRs when off. The list group counts over
-    /// `currentViewPRs`; with follow-view on (the default) `badgeBasePRs ==
-    /// currentViewPRs`, so the badge and the list group agree.
+    /// PRs that need YOUR time — the role-aware "needs attention" concept. Uses the
+    /// shared predicate `PRSnapshot.needsMyTime(myLogin:reviewReady:)`, which counts
+    /// a PR you AUTHORED when it is blocked on you (`authorNeedsAttention`, including
+    /// merge conflicts) and a PR you were asked to REVIEW when it is ready for your
+    /// review (`readyForMyReview`). This matches the browse list's top sections
+    /// (`.needsAttention` for your PRs, `.readyForReview` for reviews). Computed over
+    /// `badgeBasePRs` so the badge follows the current view (tab + scope + drafts +
+    /// For-me sub-filter) when follow-view is on, or all PRs when off.
     var needsAttentionPRs: [PRSnapshot] {
-        badgeBasePRs
-            .filter { $0.needsAttention }
+        let myLogin = settings.githubUsername
+        let cfg = settings.reviewReadyConfig
+        return badgeBasePRs
+            .filter { $0.needsMyTime(myLogin: myLogin, reviewReady: cfg) }
             .sorted(by: PRSnapshot.triageOrder)
     }
 
