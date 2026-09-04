@@ -150,8 +150,13 @@ final class NotificationService {
     // MARK: - Fire transitions
 
     /// Fires notifications per the per-event attention policy.
-    /// Returns the nodeIds of events processed at `.quiet` level —
-    /// these should be added to unread without a banner.
+    ///
+    /// Returns the nodeIds of events processed at `.quiet` level. This is
+    /// informational only and is NOT how unread is derived: the sole caller
+    /// (`PRPoller.poll`) discards this value and marks EVERY surviving
+    /// transition unread, so `.notify`, `.quiet` and `.off` all light the unread
+    /// dot. Changing an event's attention level therefore changes whether a
+    /// banner appears — never whether the PR counts as unread.
     @discardableResult
     func fireTransitions(_ transitions: [PRTransition], settings: MainlineSettings, myLogin: String = "") -> [String] {
         var quietNodeIds: [String] = []

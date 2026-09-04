@@ -472,8 +472,9 @@ final class PRManager: ObservableObject {
         let myLogin = settings.githubUsername
         guard !myLogin.isEmpty else { return 0 }
         return prs.filter { pr in
-            let isMyPR = pr.author == myLogin
-            let reviewRequested = pr.tabs.contains(.forMe) && pr.requestedReviewers.contains(myLogin)
+            let isMyPR = PRSnapshot.loginsMatch(pr.author, myLogin)
+            let reviewRequested = pr.tabs.contains(.forMe)
+                && pr.requestedReviewers.contains(where: { PRSnapshot.loginsMatch($0, myLogin) })
             // Merge blocker: my PR with failing CI
             if isMyPR && (pr.ciStatus == .failure || pr.ciStatus == .error) { return true }
             // Review needed: I'm requested + CI is ready
@@ -509,7 +510,8 @@ final class PRManager: ObservableObject {
         case .reviewRequests:
             guard !myLogin.isEmpty else { return .attention(0) }
             let count = scoped.filter { pr in
-                pr.tabs.contains(.forMe) && pr.requestedReviewers.contains(myLogin)
+                pr.tabs.contains(.forMe)
+                    && pr.requestedReviewers.contains(where: { PRSnapshot.loginsMatch($0, myLogin) })
             }.count
             return .attention(count)
 
@@ -625,11 +627,20 @@ final class PRManager: ObservableObject {
         guard !didStart else { return }
         didStart = true
 
-        await notifications.requestAuthorization()
-        // Read back what macOS will actually do. A denied prompt (or an alert
-        // style of "None") silently breaks every banner; Settings → Notifications
-        // now says so instead of leaving the user to guess.
-        await refreshNotificationAuthorization()
+        // Notification authorization runs OFF the critical path, in its own task.
+        // The system prompt does not return until the user answers it, and nothing
+        // below depends on the answer — awaiting it here parked `store.load()`,
+        // the Keychain read, `hasToken` and `poller.start()` behind the modal
+        // prompt, so a first launch showed "Not configured — open Settings" and
+        // never polled (`didStart` is already latched, so nothing retried).
+        Task { [weak self] in
+            guard let self else { return }
+            await self.notifications.requestAuthorization()
+            // Read back what macOS will actually do. A denied prompt (or an alert
+            // style of "None") silently breaks every banner; Settings →
+            // Notifications now says so instead of leaving the user to guess.
+            await self.refreshNotificationAuthorization()
+        }
 
         // Load the persisted snapshot baseline BEFORE the first poll so the diff
         // engine compares against last-known state instead of an empty set (which

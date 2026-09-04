@@ -114,8 +114,10 @@ level governs all "New PR" banners, not just direct review requests.
 ### Viewer identity
 
 `PRSnapshot.loginsMatch(_:_:)` is the single source of truth for "is this me?".
-GitHub logins are case-insensitive and `GitHubClient.makeSnapshot` normalizes with
-`.lowercased()`, so a stored `MThines` against an API `mthines` must still match.
+GitHub logins are case-insensitive, and snapshot fields (`author`,
+`requestedReviewers`) are stored **verbatim as the API returned them** — only the
+local `myLogin` in `GitHubClient.makeSnapshot`'s `viewerHasApproved` match is
+lowercased — so a stored `MThines` against an API `mthines` must still match.
 Empty on either side never matches. Used by `inboxRole`, `reviewRequestSource`, and both
 identity checks in `NotificationService.resolveTransition` — never hand-roll `==` on a
 login.

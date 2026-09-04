@@ -1313,13 +1313,25 @@ final class MainlineSettings: ObservableObject {
         // `level(for:)` honours a stored value over the baked-in default, so a
         // default change alone never reaches a user who has opened the
         // Notifications pane — this is what makes the new default actually land.
-        // Runs after every stored property is set, so the re-assignment fires the
-        // `attentionPolicy` didSet and persists. The version key is written
-        // regardless, so the upgrade happens exactly once per version.
+        // The explicit `defaults.set` is NOT redundant. Swift does not run
+        // property observers for assignments inside the declaring type's own
+        // `init`, and `attentionPolicy` is a STORED property whose only
+        // persistence path is its `didSet` — so assigning it here changes memory
+        // only, while the version key below marks the migration done forever.
+        // The net effect was that the new default applied on the launch you would
+        // test and silently reverted from the second launch on, permanently.
+        //
+        // (The `notifMutedNodeIds` seeding above escapes this trap by accident of
+        // API shape: that property is COMPUTED, so its setter body assigns the
+        // stored `notifMutedNodeIdsList`, and *that* call does fire the observer.)
+        //
+        // The version key is written regardless, so the upgrade runs exactly once
+        // per version.
         if defaults.integer(forKey: Keys.attentionPolicyMigrationVersion) < PREvent.policyMigrationVersion {
             let migrated = PREvent.migratedPolicy(from: attentionPolicy)
             if migrated != attentionPolicy {
                 attentionPolicy = migrated
+                defaults.set(migrated, forKey: Keys.attentionPolicy)
             }
             defaults.set(PREvent.policyMigrationVersion,
                          forKey: Keys.attentionPolicyMigrationVersion)
