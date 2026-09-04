@@ -657,8 +657,16 @@ struct PRSnapshot: Codable, Equatable {
     /// A PR where the user is a requested reviewer but NOT the author belongs to
     /// "Needs your review"; a PR the user authored belongs to "Your PRs".
     /// Pure — no I/O, safe to call from any thread.
+    ///
+    /// The author match is case-insensitive (GitHub logins are), matching the
+    /// sibling `viewerHasApproved` normalization in `GitHubClient.makeSnapshot`.
+    /// Since `actionGroup` / `needsMyTime` now route grouping AND the menu-bar badge
+    /// off this role, a non-canonical `githubUsername` case must not misfile your
+    /// own PRs into the reviewer role.
     func inboxRole(myLogin: String) -> InboxRole {
-        guard !myLogin.isEmpty, author == myLogin else { return .needsYourReview }
+        guard !myLogin.isEmpty,
+              author.caseInsensitiveCompare(myLogin) == .orderedSame
+        else { return .needsYourReview }
         return .yourPRs
     }
 }
