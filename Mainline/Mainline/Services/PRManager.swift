@@ -16,6 +16,39 @@ enum WriteAction {
     case dismiss(PRSnapshot)
 }
 
+// MARK: - UsernameFetchError
+
+/// Why resolving the authenticated GitHub login failed. Typed so the UI can
+/// explain the degradation instead of the old `try?` silently discarding it —
+/// an unresolved login disables every CI notification.
+///
+/// Declared at file scope (not nested in the `@MainActor` `PRManager`) so the
+/// `nonisolated` fetch can throw it without any actor-isolation question.
+enum UsernameFetchError: LocalizedError {
+    case badURL
+    case transport(String)
+    case httpStatus(Int)
+    case undecodable
+    case emptyLogin
+
+    var errorDescription: String? {
+        switch self {
+        case .badURL:
+            return "Couldn't build the GitHub user request."
+        case .transport(let detail):
+            return "Couldn't reach GitHub: \(detail)"
+        case .httpStatus(401), .httpStatus(403):
+            return "GitHub rejected the token when looking up your username. Re-import or re-paste it."
+        case .httpStatus(let code):
+            return "GitHub returned HTTP \(code) when looking up your username."
+        case .undecodable:
+            return "GitHub's user response couldn't be read."
+        case .emptyLogin:
+            return "GitHub returned an empty username."
+        }
+    }
+}
+
 // MARK: - PRManager
 
 /// @MainActor orchestrator that owns all services and drives the polling lifecycle.
@@ -38,6 +71,20 @@ final class PRManager: ObservableObject {
     @Published var hasToken: Bool = false
     @Published var tokenInvalid: Bool = false
     @Published var isRefreshing: Bool = false
+
+    /// Why the GitHub login could not be resolved, or `nil` when it is known.
+    ///
+    /// `settings.githubUsername` is load-bearing far beyond cosmetics: an unknown
+    /// login makes `NotificationService.resolveTransition` drop EVERY CI
+    /// notification and misfiles your own PRs into the reviewer role. The fetch
+    /// used to swallow all errors via `try?`, so that degradation was invisible.
+    /// Surfaced in Settings → GitHub.
+    @Published var usernameError: String?
+
+    /// Whether macOS will actually deliver notification banners. Refreshed at
+    /// launch and whenever the Notifications settings pane appears, so a change
+    /// made in System Settings while the app runs is picked up.
+    @Published var notificationAuthorization: NotificationAuthorizationState = .unknown
 
     /// True once the poller has been started. Guards `start()` against being
     /// invoked twice (label `.task` + popover-content `.task`) which would
@@ -578,7 +625,12 @@ final class PRManager: ObservableObject {
         guard !didStart else { return }
         didStart = true
 
-        notifications.requestAuthorization()
+        await notifications.requestAuthorization()
+        // Read back what macOS will actually do. A denied prompt (or an alert
+        // style of "None") silently breaks every banner; Settings → Notifications
+        // now says so instead of leaving the user to guess.
+        await refreshNotificationAuthorization()
+
         // Load the persisted snapshot baseline BEFORE the first poll so the diff
         // engine compares against last-known state instead of an empty set (which
         // would fire a "New PR" banner for every open PR on launch).
@@ -588,6 +640,24 @@ final class PRManager: ObservableObject {
         if let token, !token.isEmpty {
             hasToken = true
             tokenInvalid = false
+
+            // Self-heal the stored GitHub login. Its only other writer is the
+            // post-token-save path in Settings, so a failure there (or a token
+            // imported before that code existed) leaves it empty forever — which
+            // silences ALL CI notifications and misfiles your own PRs.
+            //
+            // When it is empty we AWAIT the repair, so the very first poll already
+            // has a viewer identity; that is exactly the broken case and there is
+            // no good value to lose. When it is already populated we only
+            // re-verify opportunistically in the background — a rename or a case
+            // correction is worth picking up, but an unreachable GitHub must never
+            // delay polling.
+            if settings.githubUsername.isEmpty {
+                await refreshUsername(token: token)
+            } else {
+                Task { [weak self] in await self?.refreshUsername(token: token) }
+            }
+
             poller.start(token: token)
         } else {
             hasToken = false
@@ -831,18 +901,80 @@ final class PRManager: ObservableObject {
         settings.unreadPRIdsList = []
     }
 
-    // MARK: - Fetch username after token save
+    // MARK: - GitHub login resolution
 
+    /// Resolves the authenticated user's login and publishes the outcome.
+    ///
+    /// On success clears `usernameError` and stores the login (only when it
+    /// actually changed, so the `didSet` write is not churned). On failure the
+    /// EXISTING value is left untouched — a network blip must never downgrade a
+    /// known-good login to empty, because empty is the state that breaks
+    /// notifications.
+    func refreshUsername(token: String) async {
+        do {
+            let login = try await Self.fetchLogin(token: token)
+            if settings.githubUsername != login {
+                settings.githubUsername = login
+            }
+            usernameError = nil
+        } catch {
+            // Only complain when we have nothing usable. An opportunistic
+            // re-verify that fails while a good login is already stored is not
+            // worth alarming the user about.
+            if settings.githubUsername.isEmpty {
+                usernameError = error.localizedDescription
+                print("[Mainline] Could not resolve GitHub username: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Backwards-compatible entry point used by the Settings token-save paths.
     func fetchUsername(token: String) async {
-        guard let url = URL(string: "https://api.github.com/user") else { return }
+        await refreshUsername(token: token)
+    }
+
+    /// The actual network call. `nonisolated` so it runs OFF the main actor per
+    /// the repo's thread model; the `@MainActor` wrapper above owns all published
+    /// state. Bounded by an explicit timeout so an unreachable GitHub cannot hang
+    /// the awaited launch-time repair in `start()`.
+    private nonisolated static func fetchLogin(token: String) async throws -> String {
+        guard let url = URL(string: "https://api.github.com/user") else {
+            throw UsernameFetchError.badURL
+        }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 15
 
         struct UserResponse: Decodable { let login: String }
-        if let (data, _) = try? await URLSession.shared.data(for: request),
-           let user = try? JSONDecoder().decode(UserResponse.self, from: data) {
-            settings.githubUsername = user.login
+
+        let result: (Data, URLResponse)
+        do {
+            result = try await URLSession.shared.data(for: request)
+        } catch {
+            throw UsernameFetchError.transport(error.localizedDescription)
         }
+        let data = result.0
+        let response = result.1
+
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw UsernameFetchError.httpStatus(http.statusCode)
+        }
+
+        guard let user = try? JSONDecoder().decode(UserResponse.self, from: data) else {
+            throw UsernameFetchError.undecodable
+        }
+        let login = user.login.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !login.isEmpty else { throw UsernameFetchError.emptyLogin }
+        return login
+    }
+
+    // MARK: - Notification authorization
+
+    /// Re-reads whether macOS will deliver banners. Cheap; safe to call from a
+    /// view's `.task` so the warning reflects changes made in System Settings
+    /// while the app is running.
+    func refreshNotificationAuthorization() async {
+        notificationAuthorization = await notifications.authorizationState()
     }
 }

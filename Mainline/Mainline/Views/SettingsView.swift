@@ -214,6 +214,29 @@ struct SettingsView: View {
             }
         }
 
+        Section("GitHub Account") {
+            if settings.githubUsername.isEmpty {
+                // An unknown login is not cosmetic: it disables every CI
+                // notification and files your own PRs under "Needs your review".
+                Label("Your GitHub username couldn't be determined, so CI notifications are disabled and your own PRs may be grouped as review requests. Re-saving the token resolves it.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label("Signed in as \(settings.githubUsername)", systemImage: "person.crop.circle")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+
+            if let usernameError = manager.usernameError {
+                Label(usernameError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
         Section("Search Queries") {
             TextField("Author query", text: $settings.searchQueryAuthor)
                 .textFieldStyle(.roundedBorder)
@@ -321,11 +344,29 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var notificationsSection: some View {
+        // System-level delivery warning. Without this, denying the permission
+        // prompt (or setting the alert style to "None") made every banner fail
+        // with no indication anywhere in the app — the events below would look
+        // correctly configured and still never fire.
+        if let warning = manager.notificationAuthorization.warningText {
+            Section("macOS Permission") {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open System Settings…") {
+                    NotificationService.openSystemNotificationSettings()
+                }
+            }
+        }
+
         Section("Attention Policy") {
             Text("Control how interrupting each event is.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            ForEach(PREvent.allCases, id: \.rawValue) { event in
+            // Only events the notification service can actually emit. Three
+            // `PREvent` cases have no `PRTransition` behind them, so their rows
+            // were dead controls — configuring them did nothing.
+            ForEach(PREvent.deliverable, id: \.rawValue) { event in
                 HStack {
                     Text(event.displayName)
                     Spacer()
@@ -359,6 +400,11 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+        // Re-read on appear so a permission changed in System Settings while the
+        // app is running is reflected without a relaunch.
+        .task {
+            await manager.refreshNotificationAuthorization()
         }
     }
 
