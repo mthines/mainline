@@ -358,7 +358,11 @@ struct TriageDeckView: View {
     /// Waiting) rather than raw review state. Drafts either form their own section
     /// (`splitDrafts`) or mix into their actionability group (default).
     private func groupFor(_ pr: PRSnapshot) -> ActionGroup {
-        pr.actionGroup(splitDrafts: settings.splitDrafts)
+        pr.actionGroup(
+            splitDrafts: settings.splitDrafts,
+            myLogin: settings.githubUsername,
+            reviewReady: settings.reviewReadyConfig
+        )
     }
 
     /// Grouped sections in canonical actionability order, excluding empty ones:
@@ -401,7 +405,13 @@ struct TriageDeckView: View {
         var result: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] = []
         for (role, rolePRs) in [(InboxRole.yourPRs, yourPRs), (.needsYourReview, needsReview)] {
             guard !rolePRs.isEmpty else { continue }
-            let grouped = Dictionary(grouping: rolePRs, by: { $0.actionGroup(splitDrafts: settings.splitDrafts) })
+            let grouped = Dictionary(grouping: rolePRs, by: {
+                $0.actionGroup(
+                    splitDrafts: settings.splitDrafts,
+                    myLogin: settings.githubUsername,
+                    reviewReady: settings.reviewReadyConfig
+                )
+            })
             let actionSections: [(group: ActionGroup, prs: [PRSnapshot])] = ActionGroup.allCases
                 .filter { $0 != .postponed && $0 != .done && $0 != .muted }
                 .sorted { $0.sortIndex < $1.sortIndex }

@@ -520,6 +520,12 @@ final class MainlineSettings: ObservableObject {
         static let reviewFocusTeams     = "reviewFocusTeams"
         static let muteLabels           = "muteLabels"
         static let inboxMuteOverrides   = "inboxMuteOverrides"
+        // Review readiness — which signals push a review-requested PR out of
+        // "Ready for review" and into "Waiting" (author still owns it). All default ON.
+        static let reviewNotReadyOnConflict         = "reviewNotReadyOnConflict"
+        static let reviewNotReadyOnFailingCI        = "reviewNotReadyOnFailingCI"
+        static let reviewNotReadyOnUnresolvedThreads = "reviewNotReadyOnUnresolvedThreads"
+        static let reviewNotReadyOnMyApproval       = "reviewNotReadyOnMyApproval"
         // Vercel preview detection
         static let vercelPreviewEnabled = "vercelPreviewEnabled"
         static let vercelPreviewDomains = "vercelPreviewDomains"
@@ -747,6 +753,43 @@ final class MainlineSettings: ObservableObject {
     /// logins ending in `[bot]`) to the Muted group. Default ON.
     @Published var muteBotAuthors: Bool {
         didSet { defaults.set(muteBotAuthors, forKey: Keys.muteBotAuthors) }
+    }
+
+    // MARK: - Review readiness
+
+    /// Whether a merge conflict marks a review-requested PR as NOT ready for your
+    /// review (drops it to Waiting). Default ON.
+    @Published var reviewNotReadyOnConflict: Bool {
+        didSet { defaults.set(reviewNotReadyOnConflict, forKey: Keys.reviewNotReadyOnConflict) }
+    }
+
+    /// Whether failing/erroring CI marks a review-requested PR as NOT ready for your
+    /// review. Default ON.
+    @Published var reviewNotReadyOnFailingCI: Bool {
+        didSet { defaults.set(reviewNotReadyOnFailingCI, forKey: Keys.reviewNotReadyOnFailingCI) }
+    }
+
+    /// Whether unresolved review threads mark a review-requested PR as NOT ready for
+    /// your review. Default ON.
+    @Published var reviewNotReadyOnUnresolvedThreads: Bool {
+        didSet { defaults.set(reviewNotReadyOnUnresolvedThreads, forKey: Keys.reviewNotReadyOnUnresolvedThreads) }
+    }
+
+    /// Whether a PR you already approved is marked as NOT ready (your review is
+    /// done, so it drops out of the top section). Default ON.
+    @Published var reviewNotReadyOnMyApproval: Bool {
+        didSet { defaults.set(reviewNotReadyOnMyApproval, forKey: Keys.reviewNotReadyOnMyApproval) }
+    }
+
+    /// The four review-readiness toggles assembled into the pure `ReviewReadyConfig`
+    /// consumed by `PRSnapshot.actionGroup` / `needsMyTime`.
+    var reviewReadyConfig: ReviewReadyConfig {
+        ReviewReadyConfig(
+            notReadyOnConflict: reviewNotReadyOnConflict,
+            notReadyOnFailingCI: reviewNotReadyOnFailingCI,
+            notReadyOnUnresolvedThreads: reviewNotReadyOnUnresolvedThreads,
+            notReadyOnMyApproval: reviewNotReadyOnMyApproval
+        )
     }
 
     /// Bot logins that bypass the `muteBotAuthors` rule. Even when `muteBotAuthors`
@@ -1174,6 +1217,15 @@ final class MainlineSettings: ObservableObject {
             ? true
             : defaults.bool(forKey: Keys.muteBotAuthors)
         botAllowList       = defaults.stringArray(forKey: Keys.botAllowList) ?? []
+        // Review readiness — default ON when unset (absent key → true).
+        reviewNotReadyOnConflict = defaults.object(forKey: Keys.reviewNotReadyOnConflict) == nil
+            ? true : defaults.bool(forKey: Keys.reviewNotReadyOnConflict)
+        reviewNotReadyOnFailingCI = defaults.object(forKey: Keys.reviewNotReadyOnFailingCI) == nil
+            ? true : defaults.bool(forKey: Keys.reviewNotReadyOnFailingCI)
+        reviewNotReadyOnUnresolvedThreads = defaults.object(forKey: Keys.reviewNotReadyOnUnresolvedThreads) == nil
+            ? true : defaults.bool(forKey: Keys.reviewNotReadyOnUnresolvedThreads)
+        reviewNotReadyOnMyApproval = defaults.object(forKey: Keys.reviewNotReadyOnMyApproval) == nil
+            ? true : defaults.bool(forKey: Keys.reviewNotReadyOnMyApproval)
         // Per-org review focus. Note: the legacy global `reviewFocusAuthors` /
         // `reviewFocusTeams` lists are intentionally NOT migrated into an all-orgs
         // rule — that global apply-everywhere behavior was the bug this replaced

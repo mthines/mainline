@@ -34,7 +34,7 @@ Mainline.xcodeproj/                 ← Xcode project (at repo root)
 Mainline/Mainline/                     ← Source root
 ├── MainlineApp.swift               ← @main, MenuBarExtra scene, AppDelegate
 ├── Models/
-│   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields
+│   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields; `viewerHasApproved` (viewer's own latest review == APPROVED, from GraphQL `latestReviews`); role-aware `actionGroup(splitDrafts:myLogin:reviewReady:)` + `needsMyTime(...)` + `ReviewReadyConfig`; `PRClassificationChecks.run()` #if DEBUG
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
 │   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); .defaults
 │   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding); `launchAtLogin` (SMAppService-backed launch-at-login toggle)
@@ -57,7 +57,7 @@ Mainline/Mainline/                     ← Source root
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab
     ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView
-    ├── InboxSettingsView.swift   ← Inbox noise-filter settings: mute patterns, muteBotAuthors toggle, per-org Review Focus (org sub-blocks nested INSIDE the one Review Focus card via `orgFocusBlock`, each with a Remove button; authors+teams keyed by lowercased org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
+    ├── InboxSettingsView.swift   ← Inbox noise-filter settings: Review Readiness (four reviewer "not ready → Waiting" toggles: conflict / failing CI / unresolved threads / approved-by-me, all default ON), mute patterns, muteBotAuthors toggle, per-org Review Focus (org sub-blocks nested INSIDE the one Review Focus card via `orgFocusBlock`, each with a Remove button; authors+teams keyed by lowercased org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
     ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/E/M/F/R/S/N/X/V/D/Q/⌘Z) + TriageAction enum + per-row context menu + first-responder KeyCaptureView; deck keys are user-configurable via settings.shortcutBindings; Inbox mode: role sections (yourPRs / needsYourReview) + collapsed Muted group; Q toggles per-PR manual mute (settings.inboxMuteOverrides); F marks draft PR ready for review (draft-only, write-gated, plain toast)
@@ -103,6 +103,15 @@ All 15 in-popover deck/peek action keys are **user-configurable** via Settings �
 
 ### Global shortcut
 System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `GlobalHotKey`. Stored as `globalShortcutKeyCode` + `globalShortcutModifiers` (Cocoa `NSEvent.ModifierFlags` raw value; converted to a Carbon mask by `GlobalHotKey.carbonModifiers(from:)`). `AppDelegate.setUpGlobalHotKey()` subscribes to the three `MainlineSettings` published props so the recorder, toggle, and reset button all live re-register. The recorder UI (`ShortcutRecorder` + the "Global Shortcut" section) lives in the **Keyboard** settings pane (`SettingsView.keyboardSection`), directly above the in-app `KeyboardShortcutsView` — so every keyboard binding, global and in-app, sits in one place. Default: **⇧⌃ + ISO section key** (`kVK_ISO_Section` = 0x0A; the "$" key on a Danish layout) — see `defaultShortcutKeyCode`/`defaultShortcutModifiers`. `keyGlyph(for:)` renders the key label, falling back to `UCKeyTranslate` against the active keyboard layout for non-ANSI physical keys.
+
+### Role-aware actionability
+
+`PRSnapshot.actionGroup(splitDrafts:myLogin:reviewReady:)` is the single source of truth for section grouping, and it is **role-aware** — the top section means opposite things for a PR you authored versus one you were asked to review. Role comes from `inboxRole(myLogin:)` (`author == myLogin`).
+
+- **Author role (your PRs)** — three buckets: `.needsAttention` (blocked on you: failing CI, changes requested, unresolved threads, **or merge conflict** — conflicts count here, unlike the role-agnostic `needsAttention`), `.readyToMerge` (approved + mergeable + green), `.waiting` (blocked on reviewers/CI).
+- **Reviewer role (assigned to you)** — two buckets: `.readyForReview` (genuinely ready for your eyes) and `.waiting` (author still owns it). `readyForMyReview(_:)` gates readiness on `changesRequested` (always) plus four **user-configurable** signals in `ReviewReadyConfig` (merge conflict, failing CI, unresolved threads, `viewerHasApproved`), all default ON, edited in Settings → Inbox → Review Readiness and stored as four bools on `MainlineSettings` (`reviewReadyConfig` assembles them).
+
+`.needsAttention` and `.readyForReview` share sortIndex 0 (they never coexist in one role's section list). The menu-bar "needs attention" badge (`PRManager.needsAttentionPRs`) now counts the role-aware `PRSnapshot.needsMyTime(myLogin:reviewReady:)` — author-role blocked-on-you PLUS reviewer-role ready-for-you — so the count means "needs my time" across both roles. `viewerHasApproved` is fetched via GraphQL `latestReviews(first:20)` matched against the authenticated login at map time (`GitHubClient.makeSnapshot` takes `myLogin`); it decodes with a `false` default and is excluded from `PRDiffEngine`.
 
 ### Inbox / review focus
 
@@ -155,6 +164,10 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `botAllowList` | [String] | `[]` |
 | `reviewFocusByOrg` | Data (JSON `[String: OrgFocusConfig]`) | `{}` |
 | `muteLabels` | [String] | `[]` |
+| `reviewNotReadyOnConflict` | Bool | true |
+| `reviewNotReadyOnFailingCI` | Bool | true |
+| `reviewNotReadyOnUnresolvedThreads` | Bool | true |
+| `reviewNotReadyOnMyApproval` | Bool | true |
 
 ## Bundle ID
 

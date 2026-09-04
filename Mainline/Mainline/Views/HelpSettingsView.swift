@@ -8,8 +8,9 @@ import SwiftUI
 /// Wired into `SettingsView` as `SettingsCategory.help`.
 ///
 /// The explanations here mirror the real decision logic:
-///  - Actionability grouping — `PRSnapshot.actionGroup(splitDrafts:)`
-///    (Needs attention / Ready to merge / Waiting / Draft).
+///  - Role-aware actionability grouping — `PRSnapshot.actionGroup(splitDrafts:myLogin:reviewReady:)`.
+///    Your PRs use Needs attention / Ready to merge / Waiting; PRs you were asked
+///    to review use Ready for review / Waiting.
 ///  - Inbox mute rules — `InboxMuteEngine.muteVerdict(...)`
 ///    (Muted / low-priority).
 ///
@@ -18,13 +19,13 @@ import SwiftUI
 struct HelpSettingsView: View {
     var body: some View {
         Section {
-            Text("Every open PR lands in exactly one section — the first one below that fits. That's how the deck decides what needs you now versus what can wait.")
+            Text("Sections mean different things for your PRs versus PRs you were asked to review. The goal is the same: show what needs your time now, and let the rest wait.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
 
-        Section("The sections you see") {
+        Section("Your PRs") {
             FAQItem(
                 icon: "exclamationmark.triangle.fill",
                 tint: .orange,
@@ -33,9 +34,10 @@ struct HelpSettingsView: View {
                 bullets: [
                     "CI is red (failing)",
                     "Someone requested changes",
-                    "There are open review comments to resolve"
+                    "There are open review comments to resolve",
+                    "It has merge conflicts to rebase"
                 ],
-                youSee: "The top group. Look for the red \"changes\" badge or a 💬 comment count."
+                youSee: "The top group. Look for the red \"changes\" badge, a 💬 comment count, or a conflict flag."
             )
 
             FAQItem(
@@ -55,24 +57,36 @@ struct HelpSettingsView: View {
                 icon: "clock.fill",
                 tint: .secondary,
                 title: "Waiting",
-                blurb: "Not on you — waiting on someone or something else:",
+                blurb: "Not on you — waiting on reviewers or CI:",
                 bullets: [
                     "CI still running",
-                    "Not approved yet",
-                    "Approved but not mergeable yet"
+                    "Not approved yet"
                 ],
-                youSee: "Most PRs live here. A green ✓ shows CI passed — but it's still waiting on a review."
+                youSee: "A green ✓ shows CI passed — but it's still waiting on a review."
             )
         }
 
-        Section("The gotcha") {
-            Label(
-                "A green ✓ alone is NOT \"Ready to merge.\" A PR with passing CI stays in Waiting until it's also approved and conflict-free. All three together promote it.",
-                systemImage: "lightbulb.fill"
+        Section("PRs you were asked to review") {
+            FAQItem(
+                icon: "eye.fill",
+                tint: .orange,
+                title: "Ready for review",
+                blurb: "Genuinely ready for your eyes — none of the \"author still owns it\" signals fire.",
+                youSee: "The top group. These are the ones worth your review time right now."
             )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            FAQItem(
+                icon: "clock.fill",
+                tint: .secondary,
+                title: "Waiting",
+                blurb: "The author still owns it, so reviewing now is premature. Lands here if any of:",
+                bullets: [
+                    "Merge conflicts",
+                    "Failing CI",
+                    "Unresolved comment threads",
+                    "You already approved it"
+                ],
+                youSee: "Pick which signals count in Settings › Inbox › Review Readiness. All on by default."
+            )
         }
 
         Section("Two more sections") {

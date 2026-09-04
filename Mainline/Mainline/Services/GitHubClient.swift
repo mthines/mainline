@@ -101,6 +101,18 @@ private struct GraphQLNode: Decodable {
     let reviewRequests: GraphQLReviewRequests?
     let reviewThreads: GraphQLReviewThreads?
     let labels: GraphQLLabels?
+    let latestReviews: GraphQLLatestReviews?
+}
+
+/// The most recent review per author, from `latestReviews`. Used to determine
+/// whether the authenticated viewer's own latest review is an approval.
+private struct GraphQLLatestReviews: Decodable {
+    let nodes: [GraphQLLatestReviewNode]
+}
+
+private struct GraphQLLatestReviewNode: Decodable {
+    let state: String?               // APPROVED | CHANGES_REQUESTED | COMMENTED | ...
+    let author: GraphQLTypedActor?
 }
 
 private struct GraphQLReviewThreads: Decodable {
@@ -355,8 +367,11 @@ final class GitHubClient {
             return ([], newEtag)
         }
 
+        // The authenticated user's login, used to resolve the viewer's own review
+        // state (`viewerHasApproved`). Lowercased for case-insensitive matching.
+        let myLogin = settings.githubUsername.lowercased()
         let snapshots: [PRSnapshot] = nodes.compactMap { node in
-            Self.makeSnapshot(from: node, tab: tab)
+            Self.makeSnapshot(from: node, tab: tab, myLogin: myLogin)
         }
 
         return (snapshots, newEtag)
@@ -390,7 +405,7 @@ final class GitHubClient {
 
     // MARK: - Snapshot mapping
 
-    private static func makeSnapshot(from node: GraphQLNode, tab: ReviewTab) -> PRSnapshot? {
+    private static func makeSnapshot(from node: GraphQLNode, tab: ReviewTab, myLogin: String) -> PRSnapshot? {
         // Non-PR results (issues) lack these fields — skip them.
         guard let nodeId = node.id,
               let number = node.number,
@@ -461,6 +476,14 @@ final class GitHubClient {
         // Collect label names (first 10, decoded from GraphQL).
         let labels: [String] = node.labels?.nodes.compactMap { $0.name } ?? []
 
+        // Whether the viewer's OWN latest review is an approval. `latestReviews`
+        // returns the most recent review per author; match the viewer's login
+        // (case-insensitive) and check for APPROVED. Empty myLogin → false.
+        let viewerHasApproved: Bool = !myLogin.isEmpty && (node.latestReviews?.nodes.contains {
+            ($0.author?.login?.lowercased() == myLogin)
+                && ($0.state?.uppercased() == "APPROVED")
+        } ?? false)
+
         return PRSnapshot(
             nodeId:             nodeId,
             number:             number,
@@ -492,7 +515,8 @@ final class GitHubClient {
             squashMergeAllowed: node.repository?.squashMergeAllowed ?? true,
             rebaseMergeAllowed: node.repository?.rebaseMergeAllowed ?? true,
             labels:             labels,
-            authorIsBot:        authorIsBot
+            authorIsBot:        authorIsBot,
+            viewerHasApproved:  viewerHasApproved
         )
     }
 
@@ -544,6 +568,9 @@ final class GitHubClient {
             }
             reviewThreads(first: 20) {
               nodes { isResolved }
+            }
+            latestReviews(first: 20) {
+              nodes { state author { __typename login } }
             }
             commits(last: 1) {
               nodes {
