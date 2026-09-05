@@ -300,7 +300,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                 TextField("Preview domains", text: previewDomainsBinding, prompt: Text("dash0-preview.com, vercel.app"))
                     .textFieldStyle(.roundedBorder)
-                Label("Comma-separated host suffixes, most-preferred first. A labelled link on one of these wins outright; failing that, a bare URL on one of them is used. A matching PR shows a “Preview” badge; press E to open it.", systemImage: "info.circle")
+                Label("Comma-separated host suffixes, most-preferred first. A labelled link on one of these wins outright; failing that, a bare URL on one of them is used. A matching PR shows a “Preview” badge; press \(MainlineSettings.glyph(for: settings.shortcutBindings.binding(for: .openPreview))) to open it.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -14,7 +14,8 @@ Mainline finds that preview URL and puts it one keystroke away, either way.
 Mainline reads the PR's comments, keeps the ones written by a configured author, and
 pulls the preview URL out of them.
 When a PR has a preview, the row shows a **Preview** badge.
-Press `E` — in the deck or in the peek card — to open it.
+Press `E` — in the deck or in the peek card — to open it. (`E` is the default;
+rebind it in **Settings → Keyboard**.)
 On a PR without a preview, `E` does nothing.
 
 The URL is found in three passes, so a comment doesn't have to look like Vercel's:
@@ -37,7 +38,7 @@ Mainline keys the URL to the commit it was checked at and reuses it until a new 
 
 ### Configure
 
-Set these in **Settings → General → Preview Deployments**.
+Set these in **Settings → GitHub → Preview Deployments**.
 
 - **Detect preview deployments** — on by default. Turning it off stops the extra per-PR comment fetches.
 - **Comment authors** — whose comments get scanned. Defaults to `vercel[bot]` and

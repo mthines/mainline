@@ -202,7 +202,7 @@ The **Inbox tab** (`ReviewTab.inbox`) is a client-side derived union of the forM
 ### Preview deployment detection
 Each PR can carry a `vercelPreviewUrl` extracted from a PR issue comment (REST `GitHubClient.fetchPreviewURL`, pure `extractPreviewURL(from:domains:linkLabels:)`). The row shows a `PreviewBadge` when present, and `E` (deck or peek, default binding — user-configurable) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition).
 
-Detection is **not Vercel-specific** — a repo that rolls its own preview deploy in GitHub Actions posts under `github-actions[bot]`, not `vercel[bot]`, and the old hard-coded author filter dropped those comments before any URL match ran. Three user-editable settings now shape it (Settings → General → Preview Deployments):
+Detection is **not Vercel-specific** — a repo that rolls its own preview deploy in GitHub Actions posts under `github-actions[bot]`, not `vercel[bot]`, and the old hard-coded author filter dropped those comments before any URL match ran. Three user-editable settings now shape it (Settings → GitHub → Preview Deployments):
 
 | Setting | Role |
 |---------|------|
