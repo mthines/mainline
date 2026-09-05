@@ -757,27 +757,49 @@ final class GitHubClient {
         let url: String
     }
 
-    /// Extracts every `[label](http…)` inline link, in document order. Image links
-    /// (`![alt](…)`) are skipped by requiring the character before `[` not to be
-    /// `!` — otherwise the `![Ready](…status/ready.svg)` icon in a Vercel-shaped
-    /// table would be read as a link whose "label" sits next to the real one.
+    /// Extracts every `[label](http…)` inline link, in document order.
+    ///
+    /// Two shapes are recognised, and the order of the two passes does not matter
+    /// because the results are re-sorted by position — callers rely on document
+    /// order for their last-match-wins rule.
+    ///
+    /// 1. A plain inline link. Image links (`![alt](…)`) are skipped by requiring
+    ///    the character before `[` not to be `!`, so the `![Ready](…/ready.svg)`
+    ///    icon in a Vercel-shaped table is not read as a link.
+    /// 2. A **linked badge** — an image used as a link's label,
+    ///    `[![Preview](badge.svg)](https://…)`. Pass 1 cannot see it: its label
+    ///    group excludes brackets, so it matches only the inner image, which the
+    ///    `!` check then drops, and the outer href is never reached. The alt text
+    ///    becomes the label. This is a common hand-rolled-comment shape, i.e. the
+    ///    population this detection exists for.
     static func markdownLinks(in text: String) -> [MarkdownLink] {
-        let pattern = "\\[([^\\[\\]]*)\\]\\((https?://[^\\s)]+)\\)"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let full = NSRange(text.startIndex..., in: text)
-        var out: [MarkdownLink] = []
-        for m in regex.matches(in: text, range: full) {
-            guard let labelRange = Range(m.range(at: 1), in: text),
-                  let urlRange   = Range(m.range(at: 2), in: text) else { continue }
-            // Skip images: look at the character immediately before the `[`.
-            if let whole = Range(m.range, in: text), whole.lowerBound > text.startIndex {
-                let before = text[text.index(before: whole.lowerBound)]
-                if before == "!" { continue }
+        // (position, label, url) so both passes can be merged in document order.
+        var found: [(Int, String, String)] = []
+
+        func scan(_ pattern: String, skippingImages: Bool) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+            for m in regex.matches(in: text, range: full) {
+                guard let labelRange = Range(m.range(at: 1), in: text),
+                      let urlRange   = Range(m.range(at: 2), in: text),
+                      let whole      = Range(m.range, in: text) else { continue }
+                if skippingImages, whole.lowerBound > text.startIndex {
+                    // Look at the character immediately before the `[`.
+                    if text[text.index(before: whole.lowerBound)] == "!" { continue }
+                }
+                found.append((m.range.location,
+                              String(text[labelRange]),
+                              String(text[urlRange])))
             }
-            out.append(MarkdownLink(label: String(text[labelRange]),
-                                    url: String(text[urlRange])))
         }
-        return out
+
+        scan("\\[([^\\[\\]]*)\\]\\((https?://[^\\s)]+)\\)", skippingImages: true)
+        scan("\\[!\\[([^\\[\\]]*)\\]\\([^\\s)]*\\)\\]\\((https?://[^\\s)]+)\\)",
+             skippingImages: false)
+
+        return found
+            .sorted { $0.0 < $1.0 }
+            .map { MarkdownLink(label: $0.1, url: $0.2) }
     }
 
     /// Whether `urlString`'s host is `suffix` or a subdomain of it. Compared on the
@@ -1082,6 +1104,20 @@ enum PreviewDetectionChecks {
         let image = "![preview](https://img.example.com/badge.svg) build failed"
         assert(extract(image, domains, labels) == nil,
                "preview: ![preview](…) is an image, not a preview link")
+
+        // --- A LINKED badge is a link; its alt text is the label ---
+        // The inner image is still dropped, but the outer href is captured.
+        let badge = "[![Preview](https://img.shields.io/b.svg)](https://pr-99.acme.dev)"
+        assert(extract(badge, domains, labels) == "https://pr-99.acme.dev",
+               "preview: [![Preview](badge)](href) must resolve to the outer href")
+        assert(GitHubClient.markdownLinks(in: badge).count == 1,
+               "preview: a linked badge yields exactly one link, not the inner image too")
+
+        // --- Document order survives the two-pass merge ---
+        let mixed = "[Preview](https://a.acme.dev) then [![Preview](https://i.svg)](https://b.acme.dev)"
+        let mixedURLs = GitHubClient.markdownLinks(in: mixed).map { $0.url }
+        assert(mixedURLs == ["https://a.acme.dev", "https://b.acme.dev"],
+               "preview: plain and badge links must come back in document order")
 
         // --- Domain priority is honoured within tier 1 ---
         let both = "[Preview](https://a.vercel.app) and [Preview](https://b.dash0-preview.com)"
