@@ -257,12 +257,17 @@ final class PRPoller {
     /// with small batched applies so indicators appear progressively on first load;
     /// the natural upper bound is the search page size, so no extra cap is needed.
     /// Every error is non-critical: the PR is simply left unchecked and retried on
-    /// the next poll. Skipped entirely when the feature is off or no domains are set.
+    /// the next poll. Skipped entirely when the feature is off, or when the user has
+    /// cleared BOTH match rules — a domain suffix and a link label are independent
+    /// ways to find the URL, so either one alone is enough to keep detecting.
     private func enrichVercelPreviews(from snapshots: [PRSnapshot], token: String) async {
         guard settings.vercelPreviewEnabled else { return }
         let domains = settings.vercelPreviewDomains
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard !domains.isEmpty else { return }
+        let linkLabels = settings.previewLinkLabels
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !domains.isEmpty || !linkLabels.isEmpty else { return }
+        let authors = settings.previewCommentAuthors
 
         // Only PRs whose preview hasn't been checked at their current `updatedAt`.
         let toFetch = snapshots.filter { $0.vercelPreviewCheckedAt != $0.updatedAt }
@@ -273,10 +278,12 @@ final class PRPoller {
             if Task.isCancelled { break }
             let url: String?
             do {
-                url = try await client.fetchVercelPreviewURL(
+                url = try await client.fetchPreviewURL(
                     repoFullName: pr.repoFullName,
                     number: pr.number,
                     domains: domains,
+                    authors: authors,
+                    linkLabels: linkLabels,
                     token: token
                 )
             } catch {

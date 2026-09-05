@@ -286,14 +286,17 @@ struct PRSnapshot: Codable, Equatable {
     /// Whether the PR's repository allows rebase merges (`allow_rebase_merge`).
     var rebaseMergeAllowed: Bool
 
-    // MARK: - Vercel preview deployment
+    // MARK: - Preview deployment
 
-    /// The Vercel preview deployment URL for this PR, extracted lazily from the
-    /// `vercel[bot]` PR comment. nil = no preview detected (or not yet checked).
-    /// Drives the row "Preview" indicator and the `P` open-preview verb.
+    /// The preview deployment URL for this PR, extracted lazily from a PR comment
+    /// posted by one of `MainlineSettings.previewCommentAuthors` (Vercel's own bot
+    /// or a self-hosted preview workflow). nil = no preview detected (or not yet
+    /// checked). Drives the row "Preview" indicator and the `E` open-preview verb.
+    /// The `vercel` prefix on these two fields is historical — it is the persisted
+    /// `Codable` key, so renaming it would drop every cached URL on upgrade.
     var vercelPreviewUrl: String?
 
-    /// The `updatedAt` value at which the Vercel preview was last checked. Used as
+    /// The `updatedAt` value at which the preview was last checked. Used as
     /// a cache key by the poller: while a PR's `updatedAt` is unchanged the cached
     /// `vercelPreviewUrl` is carried forward (no extra comment fetch); a new commit
     /// bumps `updatedAt`, which re-triggers the check. nil = never checked.

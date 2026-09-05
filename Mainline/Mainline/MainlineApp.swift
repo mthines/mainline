@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         #if DEBUG
         InboxMuteEngine.runSelfChecks()
         PRClassificationChecks.run()
+        PreviewDetectionChecks.run()
         #endif
 
         // Listen for open-settings requests from MenuBarView

@@ -15,7 +15,7 @@ A key acts on the focused row unless noted.
 | `K` / `↑`  | Move up          | Steps to the previous PR.                                         |
 | `Space`    | Peek             | Opens the glance card. See [Peek](#peek).                         |
 | `↩`        | Open             | Opens the PR in the browser (or Linear — see [Integrations](./integrations.md)). |
-| `E`        | Open preview     | Opens the Vercel preview deployment. Silent no-op if none.        |
+| `E`        | Open preview     | Opens the PR's preview deployment. Silent no-op if none.        |
 | `N`        | Mark seen        | Clears the unread state.                                          |
 | `S`        | Postpone / resume | Postpones with your default duration, or resumes if already postponed. |
 | `X`        | Dismiss          | Removes the PR from the view.                                     |
@@ -37,7 +37,7 @@ The card shows an instant glance, then loads the changed-files list.
 While the card is open:
 
 - `J` / `K` / arrows step through PRs and update the card in place.
-- `E` opens the Vercel preview.
+- `E` opens the PR's preview deployment.
 - `Space` or `Esc` closes the card.
 
 ## Postpone and resume

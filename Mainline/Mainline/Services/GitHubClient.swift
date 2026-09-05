@@ -140,7 +140,7 @@ private struct GraphQLRequestedReviewer: Decodable {
 }
 
 /// Response model for REST `/repos/{owner}/{repo}/issues/{number}/comments`.
-/// Only the fields needed to find the Vercel bot comment and its body.
+/// Only the fields needed to find the preview-deployment comment and its body.
 private struct IssueComment: Decodable {
     struct User: Decodable { let login: String? }
     let user: User?
@@ -613,23 +613,27 @@ final class GitHubClient {
         }
     }
 
-    // MARK: - Vercel preview URL (REST)
+    // MARK: - Preview URL (REST)
 
-    /// Login of the Vercel GitHub App that posts the deployment comment.
-    static let vercelBotLogin = "vercel[bot]"
-
-    /// Fetches the PR's issue comments and extracts the Vercel preview URL from the
-    /// `vercel[bot]` comment, mirroring the Alfred workflow: filter comments by the
-    /// bot login, then match the configured host suffixes in priority order and
-    /// take the last match. Returns nil when no preview is present.
+    /// Fetches the PR's issue comments and extracts the preview URL from the ones
+    /// posted by a configured author, then hands the joined bodies to
+    /// `extractPreviewURL` for the tiered match. Returns nil when no preview is
+    /// present.
+    ///
+    /// `authors` used to be hard-coded to `vercel[bot]`, which meant a repo that
+    /// rolls its own preview deploy in GitHub Actions — posting as
+    /// `github-actions[bot]` — had its comment skipped before the URL match ever
+    /// ran. It is now the user's list; an EMPTY list means "scan every author".
     ///
     /// Uses the issue-comments endpoint (`/issues/{n}/comments`) because a PR's
-    /// conversation comments are issue comments in the REST API — that's where the
-    /// Vercel bot posts its sticky deployment comment.
-    func fetchVercelPreviewURL(
+    /// conversation comments are issue comments in the REST API — that's where
+    /// deployment bots post their sticky comment.
+    func fetchPreviewURL(
         repoFullName: String,
         number: Int,
         domains: [String],
+        authors: [String],
+        linkLabels: [String],
         token: String
     ) async throws -> String? {
         let urlString = "https://api.github.com/repos/\(repoFullName)/issues/\(number)/comments?per_page=100"
@@ -656,23 +660,81 @@ final class GitHubClient {
             throw GitHubAPIError.decodingError(error)
         }
 
+        let allowed = authors
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+
         let botBody = comments
-            .filter { $0.user?.login == Self.vercelBotLogin }
+            .filter { comment in
+                // Empty allow-list = scan every author (a bespoke GitHub App).
+                guard !allowed.isEmpty else { return true }
+                guard let login = comment.user?.login else { return false }
+                return allowed.contains(login.lowercased())
+            }
             .compactMap { $0.body }
             .joined(separator: "\n")
 
-        return Self.extractPreviewURL(from: botBody, domains: domains)
+        return Self.extractPreviewURL(from: botBody, domains: domains, linkLabels: linkLabels)
     }
 
-    /// Pure preview-URL extractor. Scans `text` for the first configured host
-    /// suffix (in priority order) that produces a match and returns the LAST such
-    /// URL (the most recent deployment). Returns nil if no suffix matches.
-    static func extractPreviewURL(from text: String, domains: [String]) -> String? {
+    /// Hosts that appear in a preview comment but are never the preview itself —
+    /// Vercel's own comment links its dashboard (`vercel.com`) and its feedback
+    /// widget (`vercel.live`) alongside the deployment, and a hand-rolled comment
+    /// links back to the workflow run on `github.com`. Only the un-domained tier
+    /// below consults this; a host the user explicitly listed always wins.
+    static let nonPreviewHosts = ["github.com", "vercel.com", "vercel.live"]
+
+    /// Pure preview-URL extractor, matched in three tiers so a custom preview
+    /// comment works without Mainline knowing its layout. Within every tier the
+    /// LAST match wins (the most recent deployment).
+    ///
+    /// 1. A markdown link whose label matches `linkLabels` AND whose host is on a
+    ///    configured `domains` suffix — the strongest signal, and the one Vercel's
+    ///    own `[Visit Preview](…)` cell hits.
+    /// 2. A label-matched link on any other host (minus `nonPreviewHosts`). This is
+    ///    what makes a bespoke preview domain work with no configuration at all.
+    /// 3. A bare host-suffix scan over the whole body — the original behaviour,
+    ///    kept so a comment that prints a naked URL still resolves.
+    static func extractPreviewURL(
+        from text: String,
+        domains: [String],
+        linkLabels: [String] = []
+    ) -> String? {
         guard !text.isEmpty else { return nil }
-        for domain in domains {
-            let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            let escaped = NSRegularExpression.escapedPattern(for: trimmed)
+
+        let cleanDomains = domains
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let cleanLabels = linkLabels
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+
+        var labelled: [MarkdownLink] = []
+        if !cleanLabels.isEmpty {
+            labelled = Self.markdownLinks(in: text).filter { link in
+                let label = link.label.lowercased()
+                return cleanLabels.contains { label.contains($0) }
+            }
+        }
+
+        // Tier 1 — label AND domain, domains in priority order.
+        for domain in cleanDomains {
+            if let match = labelled.last(where: { Self.host($0.url, matchesSuffix: domain) }) {
+                return match.url
+            }
+        }
+
+        // Tier 2 — label alone, on a host that isn't a known non-preview one.
+        if let match = labelled.last(where: { link in
+            guard let h = URL(string: link.url)?.host?.lowercased() else { return false }
+            return !Self.nonPreviewHosts.contains { h == $0 || h.hasSuffix("." + $0) }
+        }) {
+            return match.url
+        }
+
+        // Tier 3 — bare host-suffix scan (original behaviour).
+        for domain in cleanDomains {
+            let escaped = NSRegularExpression.escapedPattern(for: domain)
             // https://<subdomain>.<suffix><optional path/query>, matching the
             // Alfred workflow's character classes.
             let pattern = "https://[a-zA-Z0-9._-]+\\.\(escaped)[a-zA-Z0-9./_?=&-]*"
@@ -684,6 +746,44 @@ final class GitHubClient {
             }
         }
         return nil
+    }
+
+    /// A markdown inline link, `[label](url)`.
+    struct MarkdownLink {
+        let label: String
+        let url: String
+    }
+
+    /// Extracts every `[label](http…)` inline link, in document order. Image links
+    /// (`![alt](…)`) are skipped by requiring the character before `[` not to be
+    /// `!` — otherwise the `![Ready](…status/ready.svg)` icon in a Vercel-shaped
+    /// table would be read as a link whose "label" sits next to the real one.
+    static func markdownLinks(in text: String) -> [MarkdownLink] {
+        let pattern = "\\[([^\\[\\]]*)\\]\\((https?://[^\\s)]+)\\)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let full = NSRange(text.startIndex..., in: text)
+        var out: [MarkdownLink] = []
+        for m in regex.matches(in: text, range: full) {
+            guard let labelRange = Range(m.range(at: 1), in: text),
+                  let urlRange   = Range(m.range(at: 2), in: text) else { continue }
+            // Skip images: look at the character immediately before the `[`.
+            if let whole = Range(m.range, in: text), whole.lowerBound > text.startIndex {
+                let before = text[text.index(before: whole.lowerBound)]
+                if before == "!" { continue }
+            }
+            out.append(MarkdownLink(label: String(text[labelRange]),
+                                    url: String(text[urlRange])))
+        }
+        return out
+    }
+
+    /// Whether `urlString`'s host is `suffix` or a subdomain of it. Compared on the
+    /// parsed host rather than the raw string so a path segment can never satisfy a
+    /// domain match.
+    static func host(_ urlString: String, matchesSuffix suffix: String) -> Bool {
+        guard let h = URL(string: urlString)?.host?.lowercased() else { return false }
+        let s = suffix.lowercased()
+        return h == s || h.hasSuffix("." + s)
     }
 
     // MARK: - Perform GraphQL mutation
@@ -907,3 +1007,98 @@ final class GitHubClient {
         }
     }
 }
+
+#if DEBUG
+/// Asserts the preview-URL extractor against the real comment shapes it has to
+/// survive. Invoked once at app launch in DEBUG builds from
+/// MainlineApp/AppDelegate, alongside `InboxMuteEngine.runSelfChecks()`.
+///
+/// Compiling these is not the same as running them — they execute only when
+/// someone launches a Debug build. They also cover the pure extractor ONLY: the
+/// author allow-list lives in `fetchPreviewURL`'s network path and is not
+/// exercised here.
+enum PreviewDetectionChecks {
+    static func run() {
+        let domains = MainlineSettings.defaultVercelPreviewDomains
+        let labels  = MainlineSettings.defaultPreviewLinkLabels
+
+        // --- Vercel's own sticky comment (the shape that already worked) ---
+        let vercel = """
+        | Name | Status | Preview | Comments | Updated (UTC) |
+        | :--- | :----- | :------ | :------- | :------ |
+        | **web** | ✅ Ready ([Inspect](https://vercel.com/acme/web/9xk)) | \
+        [Visit Preview](https://web-git-feat-acme.vercel.app) | \
+        💬 [**Add feedback**](https://vercel.live/open-feedback/web.vercel.app) | Sep 1, 2026 |
+        """
+        assert(extract(vercel, domains, labels) == "https://web-git-feat-acme.vercel.app",
+               "preview: Vercel's [Visit Preview] cell must win over [Inspect]/[Add feedback]")
+
+        // --- A hand-rolled GitHub Actions comment: Vercel-shaped table ---
+        // The `[Ready](…)` cell is the IMMUTABLE per-commit build and appears
+        // BEFORE `[Preview](…)`; only the labelled one may be returned.
+        let custom = """
+        <!-- lorekit-web-preview sha=0123456789abcdef0123456789abcdef01234567 -->
+        The dashboard preview for this PR.
+
+        | Project | Deployment | Actions | Updated |
+        | :--- | :----- | :------ | :------ |
+        | **lorekit** | ![Ready](https://vercel.com/static/status/ready.svg) \
+        [Ready](https://lorekit-abc123.vercel.app) | \
+        [Preview](https://lorekit-pr-650.vercel.app) | Sep 1, 2026 |
+        """
+        assert(extract(custom, domains, labels) == "https://lorekit-pr-650.vercel.app",
+               "preview: the [Preview] link must win over the [Ready] per-commit build")
+
+        // --- A hand-rolled comment with the URL inside the link label ---
+        let inline = "🔗 **[Open preview → https://lorekit-x.vercel.app](https://lorekit-x.vercel.app)**"
+        assert(extract(inline, domains, labels) == "https://lorekit-x.vercel.app",
+               "preview: [Open preview → url](url) must resolve")
+
+        // --- The failure comment must yield nothing ---
+        let failed = """
+        <!-- lorekit-web-preview -->
+        | Project | Deployment | Actions | Updated |
+        | **lorekit** | ![Error](https://vercel.com/static/status/error.svg) Error | — | Sep 1, 2026 |
+        > **The preview deploy for `abc1234` failed — no preview is available.**
+        [Workflow logs](https://github.com/mthines/lorekit/actions/runs/42)
+        """
+        assert(extract(failed, domains, labels) == nil,
+               "preview: a failed deploy has no preview URL — the status icon and the workflow link are not one")
+
+        // --- Tier 2: a labelled link on a domain the user never listed ---
+        let bespoke = "Deployed. [Preview](https://pr-650.previews.acme.internal/dash)"
+        assert(extract(bespoke, domains, labels) == "https://pr-650.previews.acme.internal/dash",
+               "preview: a labelled link must resolve on an unlisted host (tier 2)")
+
+        // --- Tier 3: a bare URL with no markdown link at all ---
+        let bare = "Preview is up: https://web-git-feat.vercel.app"
+        assert(extract(bare, domains, labels) == "https://web-git-feat.vercel.app",
+               "preview: a naked URL on a configured domain must still resolve (tier 3)")
+
+        // --- An image's alt text is not a link label ---
+        let image = "![preview](https://img.example.com/badge.svg) build failed"
+        assert(extract(image, domains, labels) == nil,
+               "preview: ![preview](…) is an image, not a preview link")
+
+        // --- Domain priority is honoured within tier 1 ---
+        let both = "[Preview](https://a.vercel.app) and [Preview](https://b.dash0-preview.com)"
+        assert(extract(both, domains, labels) == "https://b.dash0-preview.com",
+               "preview: dash0-preview.com outranks vercel.app")
+
+        // --- A host suffix must match on the host, not on the path ---
+        let pathTrap = "[Preview](https://github.com/acme/web/tree/vercel.app)"
+        assert(extract(pathTrap, domains, labels) == nil,
+               "preview: 'vercel.app' in a github.com path is not a preview host")
+
+        // --- Clearing the labels degrades to the original domain-only behaviour ---
+        assert(extract(custom, domains, []) == "https://lorekit-pr-650.vercel.app",
+               "preview: with no labels, tier 3 takes the LAST matching URL")
+        assert(extract(bespoke, domains, []) == nil,
+               "preview: with no labels, an unlisted host cannot be found")
+    }
+
+    private static func extract(_ text: String, _ domains: [String], _ labels: [String]) -> String? {
+        GitHubClient.extractPreviewURL(from: text, domains: domains, linkLabels: labels)
+    }
+}
+#endif

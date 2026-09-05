@@ -47,7 +47,7 @@ It's pure: given the old and new snapshots, it returns one of a small set of tra
 Those transitions drive both notifications and the actionability grouping.
 
 Some fields deliberately don't trigger a transition.
-Labels, the bot-author flag, and the Vercel preview URL are excluded, so enriching a PR with a preview never fires a spurious "new PR" banner.
+Labels, the bot-author flag, and the preview URL are excluded, so enriching a PR with a preview never fires a spurious "new PR" banner.
 
 ## Notifications
 
