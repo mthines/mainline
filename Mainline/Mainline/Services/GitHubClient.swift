@@ -661,7 +661,7 @@ final class GitHubClient {
         }
 
         let allowed = authors
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
         let botBody = comments
@@ -669,7 +669,10 @@ final class GitHubClient {
                 // Empty allow-list = scan every author (a bespoke GitHub App).
                 guard !allowed.isEmpty else { return true }
                 guard let login = comment.user?.login else { return false }
-                return allowed.contains(login.lowercased())
+                // Identity comparison goes through the shared helper rather than a
+                // second case-folding idiom — a bot login is as case-insensitive as
+                // a human one, and one path for all of them is the point of it.
+                return allowed.contains { PRSnapshot.loginsMatch($0, login) }
             }
             .compactMap { $0.body }
             .joined(separator: "\n")

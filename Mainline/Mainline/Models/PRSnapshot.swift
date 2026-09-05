@@ -466,6 +466,29 @@ struct PRSnapshot: Codable, Equatable {
         return false
     }
 
+    // MARK: - Viewer identity
+
+    /// Whether two GitHub logins refer to the same account.
+    ///
+    /// GitHub logins are case-insensitive, so `MThines` and `mthines` are one
+    /// user. An empty login on EITHER side never matches: an unknown viewer must
+    /// not match anybody, which preserves the intent of the `!myLogin.isEmpty`
+    /// guards this helper replaced.
+    ///
+    /// Single source of truth for viewer-identity comparison. `inboxRole`,
+    /// `reviewRequestSource`, and both `NotificationService.resolveTransition`
+    /// identity checks route through it, because a non-canonical stored
+    /// `githubUsername` was silently suppressing notifications: a case-sensitive
+    /// `pr.author == myLogin` made `MThines` vs the API's `mthines` behave
+    /// exactly like an empty login — no CI notifications at all, and your own new
+    /// PRs demoted to the reviewer path.
+    ///
+    /// Pure — no I/O, safe to call from any thread.
+    static func loginsMatch(_ lhs: String, _ rhs: String) -> Bool {
+        guard !lhs.isEmpty, !rhs.isEmpty else { return false }
+        return lhs.caseInsensitiveCompare(rhs) == .orderedSame
+    }
+
     // MARK: - Canonical ordering
 
     /// The single shared comparator used everywhere PRs are listed.
@@ -633,8 +656,12 @@ struct PRSnapshot: Codable, Equatable {
     /// `.direct` when the user is personally a requested reviewer; `.team` when
     /// only a team the user belongs to is requested (the PR was pulled in by a
     /// team request); `.none` otherwise.
+    ///
+    /// The reviewer match is case-insensitive via `loginsMatch` — GitHub logins
+    /// are, and a case mismatch here silently demoted a DIRECT request to the
+    /// quieter `.team` branch (or to `.none`).
     func reviewRequestSource(myLogin: String) -> ReviewRequestSource {
-        if !myLogin.isEmpty && requestedReviewers.contains(myLogin) {
+        if requestedReviewers.contains(where: { PRSnapshot.loginsMatch($0, myLogin) }) {
             return .direct
         }
         if !requestedTeams.isEmpty {
@@ -665,11 +692,10 @@ struct PRSnapshot: Codable, Equatable {
     /// sibling `viewerHasApproved` normalization in `GitHubClient.makeSnapshot`.
     /// Since `actionGroup` / `needsMyTime` now route grouping AND the menu-bar badge
     /// off this role, a non-canonical `githubUsername` case must not misfile your
-    /// own PRs into the reviewer role.
+    /// own PRs into the reviewer role. Shares `loginsMatch` with
+    /// `reviewRequestSource` and `NotificationService.resolveTransition`.
     func inboxRole(myLogin: String) -> InboxRole {
-        guard !myLogin.isEmpty,
-              author.caseInsensitiveCompare(myLogin) == .orderedSame
-        else { return .needsYourReview }
+        guard PRSnapshot.loginsMatch(author, myLogin) else { return .needsYourReview }
         return .yourPRs
     }
 }
@@ -689,13 +715,16 @@ enum PRClassificationChecks {
         mergeable: Bool? = true,
         unresolvedThreadCount: Int = 0,
         isDraft: Bool = false,
-        viewerHasApproved: Bool = false
+        viewerHasApproved: Bool = false,
+        requestedReviewers: [String] = [],
+        requestedTeams: [String] = []
     ) -> PRSnapshot {
         PRSnapshot(
             nodeId: "n", number: 1, title: "t", htmlUrl: "u", repoFullName: "o/r",
             isDraft: isDraft, state: "open", reviewDecision: reviewDecision,
             ciStatus: ciStatus, reviewState: .none, commentCount: 0,
-            updatedAt: "", author: author, requestedReviewers: [],
+            updatedAt: "", author: author, requestedReviewers: requestedReviewers,
+            requestedTeams: requestedTeams,
             mergeable: mergeable, unresolvedThreadCount: unresolvedThreadCount,
             viewerHasApproved: viewerHasApproved
         )
@@ -740,6 +769,43 @@ enum PRClassificationChecks {
         assert(make(author: "someone", viewerHasApproved: true)
             .actionGroup(splitDrafts: false, myLogin: me, reviewReady: relaxed) == .readyForReview,
                "reviewer + approved-by-me gate OFF → readyForReview")
+
+        // MARK: Viewer identity — GitHub logins are case-insensitive.
+        assert(PRSnapshot.loginsMatch("MThines", "mthines"),
+               "logins differing only in case are the same account")
+        assert(PRSnapshot.loginsMatch("mthines", "mthines"), "identical logins match")
+        assert(!PRSnapshot.loginsMatch("", "mthines"), "empty lhs never matches")
+        assert(!PRSnapshot.loginsMatch("mthines", ""), "empty rhs never matches")
+        assert(!PRSnapshot.loginsMatch("", ""), "two empty logins never match")
+        assert(!PRSnapshot.loginsMatch("mthines", "someone"), "different logins never match")
+
+        // A differently-cased stored login must still file your own PR under
+        // "Your PRs" — this is the visible side-symptom of the notification bug.
+        assert(make(author: "mthines").inboxRole(myLogin: "MThines") == .yourPRs,
+               "case-mismatched author still resolves to the author role")
+        assert(make(author: "someone").inboxRole(myLogin: "MThines") == .needsYourReview,
+               "someone else's PR resolves to the reviewer role")
+        assert(make(author: "mthines").inboxRole(myLogin: "") == .needsYourReview,
+               "an unknown viewer never claims authorship")
+
+        // MARK: Review-request source — a DIRECT request must not be demoted to
+        // .team (which is quiet by default) just because the case differs.
+        assert(make(author: "someone", requestedReviewers: ["mthines"])
+            .reviewRequestSource(myLogin: "MThines") == .direct,
+               "case-mismatched direct reviewer is still .direct")
+        assert(make(author: "someone", requestedReviewers: ["mthines"], requestedTeams: ["ai"])
+            .reviewRequestSource(myLogin: "MThines") == .direct,
+               "a direct request outranks a coincident team request")
+        assert(make(author: "someone", requestedTeams: ["ai"])
+            .reviewRequestSource(myLogin: "MThines") == .team,
+               "team-only request is .team")
+        // Spelled out to avoid any `Optional.none` ambiguity at the call site.
+        assert(make(author: "someone")
+            .reviewRequestSource(myLogin: "MThines") == ReviewRequestSource.none,
+               "no reviewer and no team is .none")
+        assert(make(author: "someone", requestedReviewers: ["mthines"])
+            .reviewRequestSource(myLogin: "") == ReviewRequestSource.none,
+               "an unknown viewer is never a direct reviewer")
     }
 }
 #endif

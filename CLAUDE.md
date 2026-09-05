@@ -36,7 +36,7 @@ Mainline/Mainline/                     ← Source root
 ├── Models/
 │   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields; `viewerHasApproved` (viewer's own latest review == APPROVED, from GraphQL `latestReviews`); role-aware `actionGroup(splitDrafts:myLogin:reviewReady:)` + `needsMyTime(...)` + `ReviewReadyConfig`; `PRClassificationChecks.run()` #if DEBUG
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
-│   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); .defaults
+│   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); `.defaults` (reviewRequested = notify); `isDeliverable`/`deliverable` SSOT for which events can actually fire; pure `migratedPolicy(from:)` + `policyMigrationVersion` for persisted-policy upgrades; `AttentionPolicyChecks.run()` #if DEBUG
 │   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding); `launchAtLogin` (SMAppService-backed launch-at-login toggle)
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor); account-parameterized
@@ -44,8 +44,8 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRStateStore.swift       ← @MainActor [nodeId: PRSnapshot] dict
 │   ├── PRDiffEngine.swift       ← Pure diff(previous:next:myLogin:)
 │   ├── PRPoller.swift           ← Task-based poll loop + pollOnce()
-│   ├── NotificationService.swift← UNNotificationRequest per transition
-│   ├── PRManager.swift          ← @MainActor orchestrator + write actions; inbox-derived populations (inboxActivePRs, inboxMutedPRs, inboxMuteConfig); currentViewPRs routes to inboxActivePRs on .inbox tab
+│   ├── NotificationService.swift← UNNotificationRequest per transition; `async requestAuthorization()` (no longer discards `granted`); `authorizationState()` + pure `classify(...)` → `NotificationAuthorizationState`; `openSystemNotificationSettings()`; case-insensitive `resolveTransition` via `PRSnapshot.loginsMatch`; `NotificationRoutingChecks.run()` #if DEBUG
+│   ├── PRManager.swift          ← @MainActor orchestrator + write actions; inbox-derived populations (inboxActivePRs, inboxMutedPRs, inboxMuteConfig); currentViewPRs routes to inboxActivePRs on .inbox tab; self-healing `refreshUsername` (nonisolated fetch + `UsernameFetchError` + published `usernameError`); published `notificationAuthorization` via `refreshNotificationAuthorization()`
 │   ├── SensitivePathMatcher.swift ← Pure path/branch-name heuristic classifier
 │   ├── TriageClassifier.swift   ← Pure needsHuman predicate engine
 │   ├── InboxMuteEngine.swift    ← Pure glob matcher + four mute-rule predicates (pattern/botAuthor/label/outsideFocus); InboxMuteConfig + per-org OrgFocusConfig value structs; muteVerdict takes the PR's `org`; runSelfChecks() #if DEBUG
@@ -56,7 +56,7 @@ Mainline/Mainline/                     ← Source root
 │   └── LaunchAtLoginService.swift ← SMAppService-backed launch-at-login registration (pure enum, no I/O on the main thread)
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab
-    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView
+    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView; GitHub pane shows the resolved login + `usernameError`; Notifications pane shows the macOS-permission warning (+ Open System Settings) and drives the Attention Policy list from `PREvent.deliverable`
     ├── InboxSettingsView.swift   ← Inbox noise-filter settings: Review Readiness (four reviewer "not ready → Waiting" toggles: conflict / failing CI / unresolved threads / approved-by-me, all default ON), mute patterns, muteBotAuthors toggle, per-org Review Focus (org sub-blocks nested INSIDE the one Review Focus card via `orgFocusBlock`, each with a Remove button; authors+teams keyed by lowercased org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
@@ -78,6 +78,80 @@ All PR state lives in `PRStateStore`. `PRPoller` never writes snapshots directly
 ### Notification IDs
 `NotificationService` uses deterministic IDs (`mainline.new_pr.<nodeId>`) so rapid polls replace rather than stack banners.
 
+### Notification delivery contract
+
+Three independent gates must ALL pass for a banner to appear. When debugging "no
+notifications", check them in this order — the first two used to fail silently:
+
+1. **macOS authorization.** `NotificationService.authorizationState()` reads
+   `getNotificationSettings` (via a continuation, not the `async` accessor — macOS 13
+   availability) and classifies it with the pure
+   `classify(authorizationStatus:alertStyle:alertSetting:)`. `.denied` and `.silent`
+   (authorized but alert style "None", or alerts disabled) both suppress every banner.
+   Surfaced as a warning + "Open System Settings…" button in Settings → Notifications,
+   backed by `PRManager.notificationAuthorization`. `requestAuthorization()` is `async`
+   and no longer discards `granted`.
+2. **A `PRTransition` must exist.** `PRTransition` has only FOUR cases
+   (`newPR`, `readyForReview`, `ciStatusChanged`, `newReviewOrComment`), so only the
+   `PREvent`s reachable from `NotificationService.resolveTransition` can ever fire.
+   `PREvent.isDeliverable` / `PREvent.deliverable` is the single source of truth for
+   that set and is what Settings iterates — `changesRequested` / `prMerged` / `prClosed`
+   are non-deliverable (kept as cases because persisted policy dicts may carry their
+   keys, but never rendered). The `isDeliverable` switch is exhaustive on purpose: a new
+   `PREvent` is a compile error until its deliverability is declared.
+3. **The attention level must be `.notify`.** `MainlineSettings.level(for:)` honours a
+   PERSISTED value over `PREvent.defaults`, so changing a default never reaches a user
+   who has opened the Notifications pane. Any such change needs a bump to
+   `PREvent.policyMigrationVersion` plus a rule in the pure
+   `PREvent.migratedPolicy(from:)`, run once from the trailing block of
+   `MainlineSettings.init()`. v1 REMOVES a stored `reviewRequested: quiet` (removal, not
+   overwrite, so future default changes also land) while preserving a deliberate `off`.
+
+Note `resolveTransition` routes *every* new PR you did not author to `.reviewRequested`
+(or `.reviewRequestedTeam` when only a team was requested) — so `reviewRequested`'s
+level governs all "New PR" banners, not just direct review requests.
+
+### Viewer identity
+
+`PRSnapshot.loginsMatch(_:_:)` is the single source of truth for "is this me?".
+GitHub logins are case-insensitive, and snapshot fields (`author`,
+`requestedReviewers`) are stored **verbatim as the API returned them** — only the
+local `myLogin` in `GitHubClient.makeSnapshot`'s `viewerHasApproved` match is
+lowercased — so a stored `MThines` against an API `mthines` must still match.
+Empty on either side never matches. Used by `inboxRole`, `reviewRequestSource`, and both
+identity checks in `NotificationService.resolveTransition` — never hand-roll `==` on a
+login.
+
+`settings.githubUsername` is load-bearing, not cosmetic: an empty or mismatched value
+makes `resolveTransition` drop EVERY CI notification and files your own PRs under
+"Needs your review". It self-heals in `PRManager.start()` (awaited when empty so the
+first poll has an identity; background re-verify when already set) via a `nonisolated`
+fetch with a 15s timeout, and a failure publishes `PRManager.usernameError` instead of
+being swallowed. A failed fetch never downgrades a known-good login to empty.
+
+### Settings persistence — the `didSet`-in-`init` trap
+
+Most `MainlineSettings` properties persist **only** through their own `didSet`
+(`@Published var x { didSet { defaults.set(x, forKey: Keys.x) } }`). Swift does not run
+property observers for assignments inside the declaring type's own `init`, and
+`MainlineSettings` is a root class, so there is no `super.init()` boundary to escape that
+window. **Every write from `init()` must therefore call `defaults.set(...)` explicitly** —
+assigning the property alone changes memory and nothing else.
+
+This is a silent, self-concealing failure: the value is correct for the rest of that
+launch (so it tests fine) and reverts from the next launch on. It is worse when paired
+with a version key, which marks the work done forever after a write that never landed —
+exactly how the v1 attention-policy migration shipped broken. Write the data first, then
+the version key, so a crash between them re-runs rather than skips.
+
+The trap is easy to miss because `notifMutedNodeIds` seeding in the same block looks like
+a counter-example. It isn't: that property is COMPUTED, so its setter body assigns the
+stored `notifMutedNodeIdsList`, and *that* assignment does fire the observer. Computed
+wrappers escape by accident of API shape; stored properties do not.
+
+Everything else in `init()` is a *load* (`x = defaults.something(forKey:)`), where the
+absent observer is harmless by construction — which is why only writes need the rule.
+
 ### pbxproj wiring
 Every new Swift source file **must** appear in all three places:
 1. `PBXFileReference` section
@@ -92,6 +166,14 @@ Missing any one silently breaks the build with no obvious error.
 ### Pure-shell pattern
 Pure logic (no I/O): `PRDiffEngine`, `TriageClassifier`, `SensitivePathMatcher` — testable without mocks.
 Impure shell (I/O or state): `PRStateStore`, `SnoozeStore` — own persistence.
+
+There is **no XCTest target**. The testing surface is `#if DEBUG` self-check
+functions on pure types, all invoked from `AppDelegate.applicationDidFinishLaunching`:
+`InboxMuteEngine.runSelfChecks()`, `PRClassificationChecks.run()`,
+`AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`. Add new pure logic's
+assertions to one of these (or a sibling enum in the same file) rather than introducing a
+test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:)`,
+`NotificationService.classify(...)` — is what makes it assertable at all.
 
 ### Write actions
 Write actions (Approve, Merge, Request Changes) are gated by `settings.writeActionsEnabled` (default OFF). Always show an `NSAlert` confirmation before calling the GitHub API.
@@ -151,13 +233,14 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `searchQueryReviewer` | String | `is:open is:pr review-requested:@me` |
 | `notifyNewPR` / `Ready` / `CI` / `Comment` | Bool | true |
 | `notifyOnlyHumanComments` | Bool | true |
-| `githubUsername` | String | `""` |
+| `githubUsername` | String | `""` — self-healing: `PRManager.start()` re-fetches it when empty (awaited) and re-verifies opportunistically when set. Load-bearing; see "Viewer identity". |
 | `etag_<url>` | String | — |
 | `writeActionsEnabled` | Bool | false |
 | `mergeMethodPreference` | String | `auto` |
 | `collapsedSectionsRaw` | [String] | [] |
 | `snoozeMapData` | Data (JSON) | {} |
-| `attentionPolicy` | Data (JSON) | `PREvent.defaults` (reviewRequested = quiet) |
+| `attentionPolicy` | [String: String] (`PREvent.rawValue` → `AttentionLevel.rawValue`) | `{}` — an ABSENT key falls back to `PREvent.defaults`, where `reviewRequested` and `reviewRequestedTeam` are `.notify` / `.quiet` respectively |
+| `attentionPolicyMigrationVersion` | Int | `0` (absent) — last-applied `PREvent.policyMigrationVersion`; v1 clears a persisted `reviewRequested: quiet` |
 | `panelHeight` | Int | 1600 |
 | `panelMinHeight` | Int | 600 |
 | `menuBarMetric` | String | `totalOpen` |

@@ -226,7 +226,11 @@ final class PRPoller {
 
         notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
 
-        // ALL surviving transitions (notify + quiet) mark the PR as unread
+        // EVERY surviving transition marks the PR as unread — `.notify`, `.quiet`
+        // AND `.off` alike. This maps the pre-filter array and deliberately
+        // discards `fireTransitions`'s return value, so an event's attention level
+        // decides whether a BANNER appears, never whether the PR counts as unread.
+        // Only the mute filter above removes a PR from this set.
         let allTransitionNodeIds = transitions.map { $0.prNodeId }
         let unreadCandidates = Array(Set(allTransitionNodeIds))
         if !unreadCandidates.isEmpty {

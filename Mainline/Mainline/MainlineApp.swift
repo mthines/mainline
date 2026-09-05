@@ -80,6 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         #if DEBUG
         InboxMuteEngine.runSelfChecks()
         PRClassificationChecks.run()
+        AttentionPolicyChecks.run()
+        NotificationRoutingChecks.run()
         PreviewDetectionChecks.run()
         #endif
 
