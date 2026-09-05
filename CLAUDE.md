@@ -129,6 +129,29 @@ first poll has an identity; background re-verify when already set) via a `noniso
 fetch with a 15s timeout, and a failure publishes `PRManager.usernameError` instead of
 being swallowed. A failed fetch never downgrades a known-good login to empty.
 
+### Settings persistence — the `didSet`-in-`init` trap
+
+Most `MainlineSettings` properties persist **only** through their own `didSet`
+(`@Published var x { didSet { defaults.set(x, forKey: Keys.x) } }`). Swift does not run
+property observers for assignments inside the declaring type's own `init`, and
+`MainlineSettings` is a root class, so there is no `super.init()` boundary to escape that
+window. **Every write from `init()` must therefore call `defaults.set(...)` explicitly** —
+assigning the property alone changes memory and nothing else.
+
+This is a silent, self-concealing failure: the value is correct for the rest of that
+launch (so it tests fine) and reverts from the next launch on. It is worse when paired
+with a version key, which marks the work done forever after a write that never landed —
+exactly how the v1 attention-policy migration shipped broken. Write the data first, then
+the version key, so a crash between them re-runs rather than skips.
+
+The trap is easy to miss because `notifMutedNodeIds` seeding in the same block looks like
+a counter-example. It isn't: that property is COMPUTED, so its setter body assigns the
+stored `notifMutedNodeIdsList`, and *that* assignment does fire the observer. Computed
+wrappers escape by accident of API shape; stored properties do not.
+
+Everything else in `init()` is a *load* (`x = defaults.something(forKey:)`), where the
+absent observer is harmless by construction — which is why only writes need the rule.
+
 ### pbxproj wiring
 Every new Swift source file **must** appear in all three places:
 1. `PBXFileReference` section
