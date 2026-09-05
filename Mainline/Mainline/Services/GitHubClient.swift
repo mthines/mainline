@@ -729,8 +729,11 @@ final class GitHubClient {
 
         // Tier 2 — label alone, on a host that isn't a known non-preview one.
         if let match = labelled.last(where: { link in
-            guard let h = URL(string: link.url)?.host?.lowercased() else { return false }
-            return !Self.nonPreviewHosts.contains { h == $0 || h.hasSuffix("." + $0) }
+            // A link with no parseable host is never a preview — and the guard is
+            // load-bearing: without it an unparseable URL would match no entry in
+            // `nonPreviewHosts` and the negation below would let it through.
+            guard URL(string: link.url)?.host != nil else { return false }
+            return !Self.nonPreviewHosts.contains { Self.host(link.url, matchesSuffix: $0) }
         }) {
             return match.url
         }
