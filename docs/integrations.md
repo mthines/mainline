@@ -30,8 +30,11 @@ The URL is found in three passes, so a comment doesn't have to look like Vercel'
 3. A bare URL anywhere in the comment that matches one of your preview domains.
 
 Image links like `![Ready](…/ready.svg)` are skipped, so a status icon is never
-mistaken for the preview. Domains are matched against the URL's host, not the raw
-text, so `github.com/acme/tree/vercel.app` won't pass as a `vercel.app` preview.
+mistaken for the preview. A badge that *is* a link — `[![Preview](badge.svg)](https://…)`,
+a common shape in hand-rolled comments — still counts: the link it points at is used,
+with the badge's alt text as the label. Domains are matched against the URL's host,
+not the raw text, so `github.com/acme/tree/vercel.app` won't pass as a `vercel.app`
+preview.
 
 Detection is lazy and cached.
 Mainline keys the URL to the commit it was checked at and reuses it until a new commit lands, so a steady poll makes almost no extra requests.
