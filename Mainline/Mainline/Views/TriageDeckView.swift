@@ -1869,7 +1869,7 @@ struct PreviewBadge: View {
             Image(systemName: "globe")
                 .font(.caption2)
                 .foregroundStyle(Color(nsColor: .systemTeal))
-                .help("Vercel preview available — press \(glyph) to open")
+                .help("Preview available — press \(glyph) to open")
                 .accessibilityLabel("Preview deployment available")
         }
     }

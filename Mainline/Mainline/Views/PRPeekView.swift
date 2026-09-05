@@ -134,8 +134,8 @@ struct PRPeekView: View {
                     Image(systemName: "globe").foregroundStyle(Color(nsColor: .systemTeal))
                 }
                 .buttonStyle(.plain)
-                .help("Open Vercel preview (\(MainlineSettings.glyph(for: settings.shortcutBindings.binding(for: .openPreview))))")
-                .accessibilityLabel("Open Vercel preview")
+                .help("Open preview (\(MainlineSettings.glyph(for: settings.shortcutBindings.binding(for: .openPreview))))")
+                .accessibilityLabel("Open preview")
             }
             Button {
                 TelemetryService.shared.recordTriageInteraction("open_in_browser")

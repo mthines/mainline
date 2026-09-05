@@ -530,9 +530,11 @@ final class MainlineSettings: ObservableObject {
         static let reviewNotReadyOnFailingCI        = "reviewNotReadyOnFailingCI"
         static let reviewNotReadyOnUnresolvedThreads = "reviewNotReadyOnUnresolvedThreads"
         static let reviewNotReadyOnMyApproval       = "reviewNotReadyOnMyApproval"
-        // Vercel preview detection
-        static let vercelPreviewEnabled = "vercelPreviewEnabled"
-        static let vercelPreviewDomains = "vercelPreviewDomains"
+        // Preview-deployment detection
+        static let vercelPreviewEnabled  = "vercelPreviewEnabled"
+        static let vercelPreviewDomains  = "vercelPreviewDomains"
+        static let previewCommentAuthors = "previewCommentAuthors"
+        static let previewLinkLabels     = "previewLinkLabels"
         // Global shortcut
         static let globalShortcutEnabled   = "globalShortcutEnabled"
         static let globalShortcutKeyCode   = "globalShortcutKeyCode"
@@ -840,11 +842,11 @@ final class MainlineSettings: ObservableObject {
     /// Default mute patterns seeded on first run.
     static let defaultMutePatterns = ["chore(deps)*", "build(deps)*"]
 
-    // MARK: - Vercel preview detection
+    // MARK: - Preview-deployment detection
 
-    /// Whether Mainline detects a Vercel preview deployment for each PR (from the
-    /// `vercel[bot]` comment) and surfaces the "Preview" indicator + `E` verb.
-    /// Default ON. Turning it off stops the extra per-PR comment fetches.
+    /// Whether Mainline detects a preview deployment for each PR (from a PR
+    /// comment) and surfaces the "Preview" indicator + `E` verb. Default ON.
+    /// Turning it off stops the extra per-PR comment fetches.
     @Published var vercelPreviewEnabled: Bool {
         didSet { defaults.set(vercelPreviewEnabled, forKey: Keys.vercelPreviewEnabled) }
     }
@@ -857,8 +859,34 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(vercelPreviewDomains, forKey: Keys.vercelPreviewDomains) }
     }
 
+    /// Comment authors whose bodies are scanned for a preview URL. Vercel's own
+    /// app posts as `vercel[bot]`, but a repo that rolls its own preview deploy in
+    /// GitHub Actions posts under `github-actions[bot]` (the default `GITHUB_TOKEN`
+    /// identity) — that second case is why detection silently found nothing on
+    /// self-hosted preview workflows. An EMPTY list means "any author", for repos
+    /// that post from a bespoke GitHub App.
+    @Published var previewCommentAuthors: [String] {
+        didSet { defaults.set(previewCommentAuthors, forKey: Keys.previewCommentAuthors) }
+    }
+
+    /// Markdown link labels that identify the preview link inside a comment, matched
+    /// case-insensitively as a substring. This is what makes a custom comment work
+    /// without knowing its layout: Vercel writes `[Visit Preview](…)`, a hand-rolled
+    /// workflow writes `[Preview](…)` or `[Open preview → …](…)`, and all three
+    /// contain "preview". A labelled link also lets a preview on a bespoke domain be
+    /// found without listing that domain.
+    @Published var previewLinkLabels: [String] {
+        didSet { defaults.set(previewLinkLabels, forKey: Keys.previewLinkLabels) }
+    }
+
     /// Default preview host suffixes, in priority order.
     static let defaultVercelPreviewDomains = ["dash0-preview.com", "vercel.app"]
+
+    /// Default comment authors scanned for a preview URL.
+    static let defaultPreviewCommentAuthors = ["vercel[bot]", "github-actions[bot]"]
+
+    /// Default preview link labels.
+    static let defaultPreviewLinkLabels = ["preview"]
 
     // MARK: - Global shortcut
 
@@ -1257,12 +1285,19 @@ final class MainlineSettings: ObservableObject {
             .flatMap { PROpenTarget(rawValue: $0) } ?? .github
         linearRepoFilter = defaults.stringArray(forKey: Keys.linearRepoFilter) ?? []
 
-        // Vercel preview detection — default ON, with the dash0 + vercel.app suffixes
+        // Preview detection — default ON, with the dash0 + vercel.app suffixes.
+        // Authors/labels seed to their defaults on upgrade (absent key → default),
+        // so an existing install picks up github-actions[bot] + labelled links
+        // without touching Settings.
         vercelPreviewEnabled = defaults.object(forKey: Keys.vercelPreviewEnabled) == nil
             ? true
             : defaults.bool(forKey: Keys.vercelPreviewEnabled)
         vercelPreviewDomains = defaults.stringArray(forKey: Keys.vercelPreviewDomains)
             ?? Self.defaultVercelPreviewDomains
+        previewCommentAuthors = defaults.stringArray(forKey: Keys.previewCommentAuthors)
+            ?? Self.defaultPreviewCommentAuthors
+        previewLinkLabels = defaults.stringArray(forKey: Keys.previewLinkLabels)
+            ?? Self.defaultPreviewLinkLabels
 
         // Global shortcut — default ON, ⇧⌃ + ISO section key ("$" on Danish)
         globalShortcutEnabled = defaults.object(forKey: Keys.globalShortcutEnabled) == nil

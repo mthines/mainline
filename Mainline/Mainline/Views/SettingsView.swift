@@ -286,11 +286,21 @@ struct SettingsView: View {
         }
 
         Section("Preview Deployments") {
-            Toggle("Detect Vercel preview deployments", isOn: tracked(\.vercelPreviewEnabled, name: "vercelPreviewEnabled"))
+            Toggle("Detect preview deployments", isOn: tracked(\.vercelPreviewEnabled, name: "vercelPreviewEnabled"))
             if settings.vercelPreviewEnabled {
+                TextField("Comment authors", text: previewCommentAuthorsBinding, prompt: Text("vercel[bot], github-actions[bot]"))
+                    .textFieldStyle(.roundedBorder)
+                Label("Comma-separated logins whose PR comments are scanned. Vercel's own app posts as vercel[bot]; a preview you deploy yourself from GitHub Actions posts as github-actions[bot]. Leave empty to scan every author.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Preview link labels", text: previewLinkLabelsBinding, prompt: Text("preview"))
+                    .textFieldStyle(.roundedBorder)
+                Label("Comma-separated words matched (case-insensitively) against a markdown link's label — “preview” already covers [Preview](…), [Visit Preview](…) and [Open preview → …](…). A labelled link is also how a preview on a domain you haven't listed below still gets found.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 TextField("Preview domains", text: previewDomainsBinding, prompt: Text("dash0-preview.com, vercel.app"))
                     .textFieldStyle(.roundedBorder)
-                Label("Comma-separated host suffixes to match in the Vercel bot comment, most-preferred first. A matching PR shows a “Preview” badge; press P to open it.", systemImage: "info.circle")
+                Label("Comma-separated host suffixes, most-preferred first. A labelled link on one of these wins outright; failing that, a bare URL on one of them is used. A matching PR shows a “Preview” badge; press \(MainlineSettings.glyph(for: settings.shortcutBindings.binding(for: .openPreview))) to open it.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -305,6 +315,33 @@ struct SettingsView: View {
             get: { settings.vercelPreviewDomains.joined(separator: ", ") },
             set: { newValue in
                 settings.vercelPreviewDomains = newValue
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        )
+    }
+
+    /// Bridges the `[String]` preview comment-author allow-list to a comma-separated
+    /// text field (empty = scan every author).
+    private var previewCommentAuthorsBinding: Binding<String> {
+        Binding(
+            get: { settings.previewCommentAuthors.joined(separator: ", ") },
+            set: { newValue in
+                settings.previewCommentAuthors = newValue
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        )
+    }
+
+    /// Bridges the `[String]` preview link-label list to a comma-separated text field.
+    private var previewLinkLabelsBinding: Binding<String> {
+        Binding(
+            get: { settings.previewLinkLabels.joined(separator: ", ") },
+            set: { newValue in
+                settings.previewLinkLabels = newValue
                     .split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
