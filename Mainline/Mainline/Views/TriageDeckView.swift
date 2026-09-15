@@ -2114,8 +2114,13 @@ private struct KeyCaptureView: NSViewRepresentable {
 
         /// Reclaim first responder only when nothing meaningful holds it (the window
         /// or its contentView) — so we don't steal focus from a real control, but we
-        /// do recover if SwiftUI reset the responder chain on a re-render. There are
-        /// no text fields in the deck, so this is safe.
+        /// do recover if SwiftUI reset the responder chain on a re-render.
+        ///
+        /// The search `TextField` shares this popover window, but focusing it makes
+        /// the window's field editor (an `NSText`/`NSTextView`) the first responder —
+        /// which is none of `nil` / `window` / `contentView`, so the guard below skips
+        /// and the field keeps focus. The safety is by the guard's condition, not by
+        /// an absence of text fields.
         func reassertFocusIfIdle() {
             guard let window else { return }
             let fr = window.firstResponder
