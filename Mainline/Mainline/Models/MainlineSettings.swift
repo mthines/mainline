@@ -65,6 +65,8 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case toggleDrafts
     case toggleMute
     case copyBranch
+    case togglePin
+    case search
     case undo
 
     var id: String { rawValue }
@@ -85,6 +87,8 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .toggleDrafts:     return "Toggle Drafts"
         case .toggleMute:       return "Mute / Move Up (Inbox)"
         case .copyBranch:       return "Copy Branch Name"
+        case .togglePin:        return "Pin / Unpin"
+        case .search:           return "Find / Search"
         case .undo:             return "Undo (⌘+key)"
         }
     }
@@ -95,7 +99,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .navigateUp:       return "k"
         case .peek:             return " "
         case .merge:            return "m"
-        case .markReady:        return "f"   // "final / ready" — left-hand key
+        case .markReady:        return "t"   // moved off "f" (now Search); "t" is a free left-hand key
         case .refresh:          return "r"
         case .openPreview:      return "e"   // NEW default (was "p")
         case .snooze:           return "s"
@@ -105,6 +109,8 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .toggleDrafts:     return "d"
         case .toggleMute:       return "q"   // "quiet" — left-hand key (see left-hand default policy)
         case .copyBranch:       return "c"   // "copy" — left-hand key (see left-hand default policy)
+        case .togglePin:        return "p"   // "pin" — mnemonic (right-hand exception, like M/N)
+        case .search:           return "f"   // "find" — mnemonic (freed by moving Mark Ready to "t")
         case .undo:             return "z"
         }
     }
@@ -125,6 +131,8 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .toggleDrafts:     return "pencil.circle"
         case .toggleMute:       return "arrow.down.circle"
         case .copyBranch:       return "doc.on.doc"
+        case .togglePin:        return "pin"
+        case .search:           return "magnifyingglass"
         case .undo:             return "arrow.uturn.backward"
         }
     }
@@ -196,6 +204,8 @@ struct InAppShortcutBindings: Equatable {
     var toggleDrafts:    ShortcutBinding
     var toggleMute:      ShortcutBinding
     var copyBranch:      ShortcutBinding
+    var togglePin:       ShortcutBinding
+    var search:          ShortcutBinding
     var undo:            ShortcutBinding
 
     /// Factory defaults — all bindings bare except undo = ⌘Z.
@@ -206,7 +216,7 @@ struct InAppShortcutBindings: Equatable {
             navigateUp:      ShortcutBinding(key: "k"),
             peek:            ShortcutBinding(key: " "),
             merge:           ShortcutBinding(key: "m"),
-            markReady:       ShortcutBinding(key: "f"),
+            markReady:       ShortcutBinding(key: "t"),   // moved off "f" (now Search)
             refresh:         ShortcutBinding(key: "r"),
             openPreview:     ShortcutBinding(key: "e"),
             snooze:          ShortcutBinding(key: "s"),
@@ -216,6 +226,8 @@ struct InAppShortcutBindings: Equatable {
             toggleDrafts:    ShortcutBinding(key: "d"),
             toggleMute:      ShortcutBinding(key: "q"),
             copyBranch:      ShortcutBinding(key: "c"),
+            togglePin:       ShortcutBinding(key: "p"),
+            search:          ShortcutBinding(key: "f"),
             undo:            ShortcutBinding(key: "z", modifiers: cmdRaw)
         )
     }()
@@ -237,6 +249,8 @@ struct InAppShortcutBindings: Equatable {
         case .toggleDrafts:      return toggleDrafts
         case .toggleMute:        return toggleMute
         case .copyBranch:        return copyBranch
+        case .togglePin:         return togglePin
+        case .search:            return search
         case .undo:              return undo
         }
     }
@@ -258,6 +272,8 @@ struct InAppShortcutBindings: Equatable {
         case .toggleDrafts:      toggleDrafts    = binding
         case .toggleMute:        toggleMute      = binding
         case .copyBranch:        copyBranch      = binding
+        case .togglePin:         togglePin       = binding
+        case .search:            search          = binding
         case .undo:              undo            = binding
         }
     }
@@ -304,7 +320,7 @@ extension InAppShortcutBindings: Codable {
     enum CodingKeys: String, CodingKey {
         case navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview,
              snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
-             toggleMute, copyBranch, undo
+             toggleMute, copyBranch, togglePin, search, undo
     }
 
     /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
@@ -347,6 +363,22 @@ extension InAppShortcutBindings: Codable {
         toggleMute      = try decodeBinding(.toggleMute,      default: d.toggleMute)
         copyBranch      = try decodeBinding(.copyBranch,      default: d.copyBranch)
 
+        // Search + pin migration. `search` and `togglePin` were introduced together;
+        // `search`'s default key is "f", which was `markReady`'s default before this
+        // version. An existing user's stored JSON has no `.search` key AND still has
+        // markReady = bare "f" — so decoding `search` to its "f" default would CLASH
+        // with markReady. Detect the upgrade (search key absent) and, only when
+        // markReady is still the old bare "f", relocate it to the new "t" default so
+        // "f" is free for Search. A user who deliberately rebound markReady to
+        // something else keeps their choice; a user who already has a `.search` key
+        // (re-save on this version) skips the migration entirely.
+        let isUpgrade = !container.contains(.search)
+        if isUpgrade, markReady == ShortcutBinding(key: "f") {
+            markReady = d.markReady   // "t"
+        }
+        togglePin = try decodeBinding(.togglePin, default: d.togglePin)
+        search    = try decodeBinding(.search,    default: d.search)
+
         // Undo migration: bare-string or absent → apply .command modifier.
         if let newShape = try? container.decodeIfPresent(ShortcutBinding.self, forKey: .undo) {
             // New-shape object — use modifiers as stored (trusts the encoder).
@@ -376,6 +408,8 @@ extension InAppShortcutBindings: Codable {
         try container.encode(toggleDrafts,     forKey: .toggleDrafts)
         try container.encode(toggleMute,       forKey: .toggleMute)
         try container.encode(copyBranch,       forKey: .copyBranch)
+        try container.encode(togglePin,        forKey: .togglePin)
+        try container.encode(search,           forKey: .search)
         try container.encode(undo,             forKey: .undo)
     }
 }
@@ -501,6 +535,7 @@ final class MainlineSettings: ObservableObject {
         static let attentionPolicyMigrationVersion = "attentionPolicyMigrationVersion"
         static let unreadPRIds          = "unreadPRIds"
         static let notifMutedNodeIds    = "notifMutedNodeIds"
+        static let pinnedNodeIds        = "pinnedNodeIds"
         static let panelHeight          = "panelHeight"
         static let panelMinHeight       = "panelMinHeight"
         static let menuBarMetric        = "menuBarMetric"
@@ -679,6 +714,46 @@ final class MainlineSettings: ObservableObject {
     var notifMutedNodeIds: Set<String> {
         get { Set(notifMutedNodeIdsList) }
         set { notifMutedNodeIdsList = Array(newValue) }
+    }
+
+    /// PRs the user has PINNED. A pinned PR floats to the top of whatever
+    /// actionability group / role section it already belongs to (it keeps its
+    /// grouping — pinning only reorders within the group and shows a pin glyph).
+    /// Persisted as a nodeId list; membership is read through `pinnedNodeIds`.
+    @Published var pinnedNodeIdsList: [String] {
+        didSet { defaults.set(pinnedNodeIdsList, forKey: Keys.pinnedNodeIds) }
+    }
+
+    /// Set view over `pinnedNodeIdsList` for membership checks and inserts.
+    var pinnedNodeIds: Set<String> {
+        get { Set(pinnedNodeIdsList) }
+        set { pinnedNodeIdsList = Array(newValue) }
+    }
+
+    /// Whether a PR is currently pinned.
+    func isPinned(_ nodeId: String) -> Bool {
+        pinnedNodeIds.contains(nodeId)
+    }
+
+    /// Toggles a PR's pinned state and returns the NEW state (true = now pinned).
+    @discardableResult
+    func togglePin(_ nodeId: String) -> Bool {
+        var set = pinnedNodeIds
+        let nowPinned: Bool
+        if set.contains(nodeId) {
+            set.remove(nodeId); nowPinned = false
+        } else {
+            set.insert(nodeId); nowPinned = true
+        }
+        pinnedNodeIds = set
+        return nowPinned
+    }
+
+    /// Explicitly sets a PR's pinned state (used by undo).
+    func setPinned(_ pinned: Bool, for nodeId: String) {
+        var set = pinnedNodeIds
+        if pinned { set.insert(nodeId) } else { set.remove(nodeId) }
+        pinnedNodeIds = set
     }
 
     /// Preferred MAX panel content height. The panel sizes to content and grows up
@@ -1211,6 +1286,7 @@ final class MainlineSettings: ObservableObject {
         attentionPolicy = defaults.dictionary(forKey: Keys.attentionPolicy) as? [String: String] ?? [:]
         unreadPRIdsList = defaults.stringArray(forKey: Keys.unreadPRIds) ?? []
         notifMutedNodeIdsList = defaults.stringArray(forKey: Keys.notifMutedNodeIds) ?? []
+        pinnedNodeIdsList = defaults.stringArray(forKey: Keys.pinnedNodeIds) ?? []
         panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 1600 : defaults.integer(forKey: Keys.panelHeight)
         panelMinHeight  = defaults.object(forKey: Keys.panelMinHeight) == nil ? 600 : defaults.integer(forKey: Keys.panelMinHeight)
 

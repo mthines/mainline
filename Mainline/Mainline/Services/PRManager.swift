@@ -101,6 +101,34 @@ final class PRManager: ObservableObject {
     /// so it can use the full panel height instead of the short deck's bounds.
     @Published var peekPR: PRSnapshot?
 
+    /// Whether the in-app search field is open. Toggled by the `search` shortcut
+    /// (from `TriageDeckView`) and the field's own close/Esc. When true,
+    /// `MenuBarView` renders the search field and the deck shows a flat results
+    /// list filtered by `searchQuery`.
+    @Published var searchActive: Bool = false
+
+    /// The live search query. Filters `searchBasePRs` via `PRSearchFilter`.
+    @Published var searchQuery: String = ""
+
+    /// Bumped every time the search field should (re)claim keyboard focus. Distinct
+    /// from `searchActive` so pressing the search key while the field is already open
+    /// (but focus has returned to the deck) still refocuses it — `MenuBarView`
+    /// observes this token, not just the on/off flag.
+    @Published var searchFocusToken: Int = 0
+
+    /// Opens the search field (idempotent) and requests keyboard focus on it.
+    /// Called by the `search` shortcut.
+    func openSearch() {
+        searchActive = true
+        searchFocusToken &+= 1
+    }
+
+    /// Closes the search field and clears the query (Esc / close button).
+    func closeSearch() {
+        searchActive = false
+        searchQuery = ""
+    }
+
     /// The undo toast stack. Owned here (not in `TriageDeckView`) so the toast can
     /// be presented at the PANEL level — laid out against the full popover, not the
     /// deck — rather than inside the scrolling deck, where it floated up to the
@@ -266,6 +294,41 @@ final class PRManager: ObservableObject {
         let newMuted = !isInboxMuted(pr)
         settings.inboxMuteOverrides[pr.nodeId] = newMuted
         return newMuted
+    }
+
+    // MARK: - Pinning
+
+    /// Whether a PR is pinned (floats to the top of its group).
+    func isPinned(_ pr: PRSnapshot) -> Bool {
+        settings.isPinned(pr.nodeId)
+    }
+
+    /// Toggles a PR's pinned state; returns the NEW state (true = now pinned).
+    @discardableResult
+    func togglePin(_ pr: PRSnapshot) -> Bool {
+        settings.togglePin(pr.nodeId)
+    }
+
+    /// Explicitly sets a PR's pinned state (used by undo).
+    func setPinned(_ pinned: Bool, for pr: PRSnapshot) {
+        settings.setPinned(pinned, for: pr.nodeId)
+    }
+
+    // MARK: - Search
+
+    /// The population the in-app search box filters over: every PR belonging to the
+    /// currently selected tab, IGNORING the scope chips and the Drafts toggle — so a
+    /// pasted number / URL always finds its PR even when it's a draft or in a
+    /// filtered-out org. Deduplicated by nodeId. The Inbox tab searches the whole
+    /// forMe+created union (muted PRs included), since search is about *locating* a
+    /// PR, not triaging it.
+    var searchBasePRs: [PRSnapshot] {
+        if settings.selectedTab == .inbox {
+            var seen = Set<String>()
+            return prs.filter { $0.tabs.contains(.forMe) || $0.tabs.contains(.created) }
+                .filter { seen.insert($0.nodeId).inserted }
+        }
+        return prs.filter { $0.tabs.contains(settings.selectedTab) }
     }
 
     /// Applies the currently-selected scope (nil = All) to an Inbox PR list.

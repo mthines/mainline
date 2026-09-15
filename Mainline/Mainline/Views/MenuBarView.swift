@@ -16,6 +16,10 @@ struct MenuBarView: View {
     /// `0` until first measured.
     @State private var measuredBodyHeight: CGFloat = 0
 
+    /// Keyboard focus for the in-app search field. Driven by `manager.searchFocusToken`
+    /// (open/re-focus) and cleared on Return (hand focus back to the deck) / close.
+    @FocusState private var searchFieldFocused: Bool
+
     init(manager: PRManager) {
         self.manager = manager
         self.settings = manager.settings
@@ -51,6 +55,13 @@ struct MenuBarView: View {
             scopeFilter
 
             Divider()
+
+            // In-app search field — shown only while search is active (opened via the
+            // `search` shortcut). Filters across the whole tab (ignoring scope/drafts).
+            if manager.searchActive {
+                searchBar
+                Divider()
+            }
 
             // The SINGLE scrollable body: the tabbed browse deck, grouped by
             // actionability (Needs attention → Ready to merge → Waiting → Draft →
@@ -110,6 +121,14 @@ struct MenuBarView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 manager.markAllSeen()
             }
+        }
+        // Focus the search field whenever the search key requests it (token bump);
+        // release focus when search closes so the deck's key capture resumes.
+        .onChange(of: manager.searchFocusToken) { _ in
+            if manager.searchActive { searchFieldFocused = true }
+        }
+        .onChange(of: manager.searchActive) { active in
+            if !active { searchFieldFocused = false }
         }
         .overlay(alignment: .bottom) {
             HStack(spacing: 0) {
@@ -182,6 +201,13 @@ struct MenuBarView: View {
     /// is the single "needs attention" concept; there is no separate top bucket.
     private var visiblePRs: [PRSnapshot] {
         manager.currentViewPRs.sorted(by: PRSnapshot.triageOrder)
+    }
+
+    /// The search matches for the current query, drawn from the whole tab
+    /// (`searchBasePRs` — scope/draft independent) so a number/URL always resolves.
+    /// The deck re-sorts these pinned-first; sorting here just gives a stable base.
+    private var searchResults: [PRSnapshot] {
+        manager.searchBasePRs.filter { PRSearchFilter.matches($0, query: manager.searchQuery) }
     }
 
     /// Whether a PR should count toward the tab labels. Honours both the draft
@@ -276,7 +302,9 @@ struct MenuBarView: View {
     private var chromeReserve: CGFloat {
         let base: CGFloat = 44 + 22 + 44 + 44 + 22 + 48 + 38   // = 262
         let forMeFilter: CGFloat = settings.selectedTab == .forMe ? 36 : 0
-        return base + forMeFilter
+        // The search field + its divider add fixed chrome while search is open.
+        let searchBarReserve: CGFloat = manager.searchActive ? 40 : 0
+        return base + forMeFilter + searchBarReserve
     }
 
     /// The maximum height the single scroll region may occupy: the cap minus the
@@ -517,6 +545,53 @@ struct MenuBarView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Search bar
+
+    /// The in-app search field. Filters the current tab by PR number, GitHub PR
+    /// URL, or free text (title / repo / author / branch) via `PRSearchFilter`.
+    /// Return hands focus back to the deck (keeping the filter) so J/K + pin work;
+    /// Esc / the ✕ / "Done" close search.
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("Search by number, URL, or text…", text: Binding(
+                get: { manager.searchQuery },
+                set: { manager.searchQuery = $0 }
+            ))
+            .textFieldStyle(.plain)
+            .font(.callout)
+            .focused($searchFieldFocused)
+            .onSubmit {
+                // Return: keep the filter, hand focus back to the deck for J/K + pin.
+                searchFieldFocused = false
+            }
+            .onExitCommand {
+                // Esc while the field is focused: close search entirely.
+                manager.closeSearch()
+            }
+            if !manager.searchQuery.isEmpty {
+                Button {
+                    manager.searchQuery = ""
+                    searchFieldFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+            }
+            Button("Done") { manager.closeSearch() }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help("Close search (Esc)")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
     // MARK: - Scope cycling
 
     private func cycleScopeForward() {
@@ -558,11 +633,13 @@ struct MenuBarView: View {
     /// clamped — no NaN/∞/negative can reach the hosting view.
     @ViewBuilder
     private var scrollableBody: some View {
-        let isEmpty = !manager.hasToken || (
+        // While searching, always render the deck (it shows its own "No matching PRs"
+        // state) so a valid match isn't hidden by the tab-level empty short-circuit.
+        let isEmpty = !manager.hasToken || (!manager.searchActive && (
             settings.selectedTab == .inbox
                 ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty
                 : manager.prs.isEmpty
-        )
+        ))
         if isEmpty {
             emptyState
         } else {
@@ -591,9 +668,10 @@ struct MenuBarView: View {
             // "Needs attention" group (`ActionGroup.needsAttention`) is the single
             // "needs attention" concept — there is no separate top bucket.
             TriageDeckView(
-                prs: visiblePRs,
-                mutedPRs: settings.selectedTab == .inbox ? manager.inboxMutedPRs : [],
-                inboxMode: settings.selectedTab == .inbox,
+                prs: manager.searchActive ? searchResults : visiblePRs,
+                mutedPRs: (settings.selectedTab == .inbox && !manager.searchActive) ? manager.inboxMutedPRs : [],
+                inboxMode: settings.selectedTab == .inbox && !manager.searchActive,
+                searchMode: manager.searchActive,
                 manager: manager,
                 settings: settings
             )
@@ -684,6 +762,8 @@ struct MenuBarView: View {
             "\(g(.navigateDown))/\(g(.navigateUp)) move",
             "\(g(.peek)) peek",
             "↵ open",
+            "\(g(.search)) find",
+            "\(g(.togglePin)) pin",
             "\(g(.openPreview)) preview",
             "\(g(.merge)) merge",
             "\(g(.snooze)) later",
