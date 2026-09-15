@@ -281,7 +281,13 @@ struct TriageDeckView: View {
         .background(
             KeyCaptureView(
                 handler: { event in handleKeyDown(event) },
-                onDismiss: { manager.peekPR = nil }
+                onDismiss: {
+                    // Popover closed: dismiss any peek AND exit search, so
+                    // reopening the panel starts on the normal grouped deck
+                    // rather than a stale search field.
+                    manager.peekPR = nil
+                    manager.closeSearch()
+                }
             )
         )
         .onAppear { installScrollMonitor() }
@@ -625,8 +631,15 @@ struct TriageDeckView: View {
     }
 
     /// Empty state shown when a search query matches nothing in the current tab.
+    /// A bare number can only be matched against already-loaded PRs (there's no repo
+    /// to fetch it from), so when that's what was typed we nudge the user to paste
+    /// the full URL — which *does* fetch a PR outside the loaded set.
     private var searchEmptyState: some View {
-        HStack {
+        let isBareNumber: Bool = {
+            if case .number = PRSearchFilter.parse(manager.searchQuery) { return true }
+            return false
+        }()
+        return HStack {
             Spacer()
             VStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
@@ -635,6 +648,12 @@ struct TriageDeckView: View {
                 Text("No matching PRs")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                if isBareNumber {
+                    Text("Paste the full PR URL to open one outside this list.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
             }
             .padding(.vertical, 20)
             Spacer()

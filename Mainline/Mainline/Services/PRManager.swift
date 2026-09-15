@@ -116,6 +116,15 @@ final class PRManager: ObservableObject {
     /// observes this token, not just the on/off flag.
     @Published var searchFocusToken: Int = 0
 
+    /// PRs fetched on demand for search (a pasted PR URL that points outside the
+    /// current tab's local set). `MenuBarView` merges these into the results.
+    /// Cleared when search closes.
+    @Published var searchFetchedPRs: [PRSnapshot] = []
+
+    /// Keys (`owner/repo#number`) of on-demand fetches currently in flight, so a
+    /// second keystroke on the same URL doesn't kick off a duplicate request.
+    private var searchFetchInFlight: Set<String> = []
+
     /// Opens the search field (idempotent) and requests keyboard focus on it.
     /// Called by the `search` shortcut.
     func openSearch() {
@@ -127,6 +136,45 @@ final class PRManager: ObservableObject {
     func closeSearch() {
         searchActive = false
         searchQuery = ""
+        searchFetchedPRs = []
+    }
+
+    /// When the query is a pasted PR URL that no local PR matches, fetch that one PR
+    /// directly from GitHub and add it to the search results. A BARE number can't be
+    /// resolved this way — it carries no repo — so only `.url` queries fetch; bare
+    /// numbers stay a fuzzy filter over the already-loaded set. Failures are silent
+    /// (search simply shows no result). Idempotent per URL and safe to call on every
+    /// keystroke.
+    func resolveSearchTarget(for rawQuery: String) async {
+        guard case let .url(repoFullName, number) = PRSearchFilter.parse(rawQuery) else { return }
+
+        // Already resolvable from the local set or a prior fetch? Nothing to do.
+        if searchBasePRs.contains(where: { PRSearchFilter.matches($0, query: rawQuery) }) { return }
+        if searchFetchedPRs.contains(where: { PRSearchFilter.matches($0, query: rawQuery) }) { return }
+
+        let parts = repoFullName.split(separator: "/").map(String.init)
+        guard parts.count == 2 else { return }
+        let key = "\(repoFullName.lowercased())#\(number)"
+        guard !searchFetchInFlight.contains(key) else { return }
+
+        guard let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
+
+        searchFetchInFlight.insert(key)
+        defer { searchFetchInFlight.remove(key) }
+
+        do {
+            guard let pr = try await client.fetchSinglePR(
+                owner: parts[0], repo: parts[1], number: number,
+                tab: settings.selectedTab, token: token
+            ) else { return }
+            // Search may have closed while the request was in flight.
+            guard searchActive else { return }
+            if !searchFetchedPRs.contains(where: { $0.nodeId == pr.nodeId }) {
+                searchFetchedPRs.append(pr)
+            }
+        } catch {
+            // Silent — an on-demand miss just shows no result.
+        }
     }
 
     /// The undo toast stack. Owned here (not in `TriageDeckView`) so the toast can

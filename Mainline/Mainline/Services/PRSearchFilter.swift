@@ -19,9 +19,12 @@ enum PRSearchFilter {
         /// pasting a full link resolves to exactly one PR even across repos that
         /// happen to share a number.
         case url(repoFullName: String, number: Int)
-        /// A bare number / `#123` — match the number across every repo (you rarely
-        /// remember which repo a number lives in).
-        case number(Int)
+        /// A bare number / `#123` — a digit run matched as a SUBSTRING of each PR's
+        /// number across every repo (you rarely remember which repo a number lives
+        /// in, and often only a fragment of it): `3` finds `300`, `321`, `32`, `13`.
+        /// Carries the normalized digit string, never an Int, so leading-zero and
+        /// substring semantics are preserved.
+        case number(String)
         /// Free text — case-insensitive substring across the searchable fields.
         case text(String)
         /// Empty / whitespace-only — matches everything (the field is open but blank).
@@ -33,7 +36,7 @@ enum PRSearchFilter {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .empty }
         if let url = parsePRURL(trimmed) { return url }
-        if let n = bareNumber(trimmed) { return .number(n) }
+        if let digits = bareNumber(trimmed) { return .number(digits) }
         return .text(trimmed.lowercased())
     }
 
@@ -45,8 +48,9 @@ enum PRSearchFilter {
         case .url(let repo, let number):
             return pr.number == number
                 && pr.repoFullName.caseInsensitiveCompare(repo) == .orderedSame
-        case .number(let number):
-            return pr.number == number
+        case .number(let digits):
+            // Fuzzy: substring of the PR number, so `3` finds `300`/`321`/`32`.
+            return String(pr.number).contains(digits)
         case .text(let needle):
             return haystack(for: pr).contains(needle)
         }
@@ -65,11 +69,11 @@ enum PRSearchFilter {
     /// Extracts a bare PR number from a WHOLE-string query: `200`, `#200`, `  200 `.
     /// Returns nil unless the entire (trimmed) query is a run of digits with an
     /// optional leading `#` — so `200 auth` stays free text, not a number match.
-    static func bareNumber(_ s: String) -> Int? {
+    static func bareNumber(_ s: String) -> String? {
         var t = s.trimmingCharacters(in: .whitespaces)
         if t.hasPrefix("#") { t.removeFirst() }
         guard !t.isEmpty, t.allSatisfy(\.isNumber) else { return nil }
-        return Int(t)
+        return t
     }
 
     /// Parses `<owner>/<repo>/pull/<n>` out of any GitHub PR URL or path, ignoring
@@ -94,7 +98,7 @@ enum PRSearchFilter {
             .replacingOccurrences(of: "https://", with: "", options: .caseInsensitive)
             .replacingOccurrences(of: "http://", with: "", options: .caseInsensitive)
         let comps = beforePull.split(separator: "/").map(String.init)
-        guard comps.count >= 2 else { return .number(number) }
+        guard comps.count >= 2 else { return .number(String(number)) }
         let repo = "\(comps[comps.count - 2])/\(comps[comps.count - 1])"
         return .url(repoFullName: repo, number: number)
     }
@@ -102,10 +106,10 @@ enum PRSearchFilter {
     #if DEBUG
     /// Asserts the parser + matcher invariants at launch (no-op in Release).
     static func runSelfChecks() {
-        // parse — bare numbers
-        assert(parse("200") == .number(200))
-        assert(parse("#200") == .number(200))
-        assert(parse("  42 ") == .number(42))
+        // parse — bare numbers (carry the digit string, not an Int)
+        assert(parse("200") == .number("200"))
+        assert(parse("#200") == .number("200"))
+        assert(parse("  42 ") == .number("42"))
         // parse — URLs (with and without scheme, trailing path)
         assert(parse("https://github.com/acme/web/pull/200") == .url(repoFullName: "acme/web", number: 200))
         assert(parse("https://github.com/acme/web/pull/200/files") == .url(repoFullName: "acme/web", number: 200))
@@ -130,6 +134,12 @@ enum PRSearchFilter {
         assert(matches(pr, query: "#200"))
         assert(matches(pr, query: "https://github.com/acme/web/pull/200"))
         assert(!matches(pr, query: "201"))
+        // fuzzy number: a digit fragment matches as a substring of the PR number
+        assert(matches(pr, query: "2"))     // 200 contains "2"
+        assert(matches(pr, query: "20"))    // 200 contains "20"
+        assert(matches(pr, query: "00"))    // 200 contains "00"
+        assert(!matches(pr, query: "5"))    // 200 has no "5"
+        // a bare-number query still stays exact against the URL tier's repo guard
         // url with a different repo but same number must NOT match
         assert(!matches(pr, query: "https://github.com/other/repo/pull/200"))
         // free-text across fields (case-insensitive)

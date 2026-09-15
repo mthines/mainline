@@ -214,15 +214,38 @@ space (`orderedPRs`) never diverge. `DeckRowKey` carries `isPinned` so a pin tog
 (and reorders) the affected rows. Verb: `togglePin` (default `P`) + a Pin/Unpin row context item.
 
 **Search.** The `search` shortcut (default `F`) sets `PRManager.searchActive`, which makes
-`MenuBarView` render a search `TextField` (focused via `searchFocusToken`) and switch the deck
-into `searchMode`: a single FLAT "Results" list (no grouping, no Postponed/Done/Muted), pinned
-first. The query filters `PRManager.searchBasePRs` — every PR in the current tab, IGNORING the
-scope chips and the Drafts toggle — so a pasted number or URL always resolves. Matching is the
-pure `PRSearchFilter.matches(_:query:)`: a GitHub PR URL matches repo + number, a bare `200` /
-`#200` matches number across repos, anything else is a case-insensitive substring over
+`MenuBarView` render a search `TextField` and switch the deck into `searchMode`: a single FLAT
+"Results" list (no grouping, no Postponed/Done/Muted), pinned first. Focus is driven by
+`searchFocusToken`; because the `TextField` is rendered conditionally on `searchActive`, both
+focus handlers (`searchFocusToken` bump AND `searchActive → true`) set `searchFieldFocused`
+inside `DispatchQueue.main.async` so the field exists in the tree before it is focused —
+pressing `F` lands the cursor in the input. The query filters `PRManager.searchBasePRs` — every
+PR in the current tab, IGNORING the scope chips and the Drafts toggle — so a pasted number or
+URL always resolves. Matching is the pure `PRSearchFilter.matches(_:query:)`: a GitHub PR URL
+matches repo + number (`.url` carries the number as `Int`), a bare `200` / `#200` is FUZZY —
+`PRSearchFilter.Query.number` carries the digit STRING and matches as a substring of each PR's
+number (`3` finds `300`/`321`/`32`), anything else is a case-insensitive substring over
 title/repo/author/branch/`#number`. `PRSearchFilter.runSelfChecks()` (#if DEBUG, wired in
-`MainlineApp`) asserts the parser + matcher. Return hands focus back to the deck (filter kept)
-so J/K + pin work on the results; Esc / ✕ / "Done" call `closeSearch()`.
+`MainlineApp`) asserts the parser + matcher (incl. the fuzzy-number substring cases).
+
+**On-demand URL fetch.** A pasted PR URL may point at a PR that isn't in the current tab's
+loaded set (e.g. a repo you don't watch), so no local PR matches. `MenuBarView`'s
+`.onChange(of: searchQuery)` calls `PRManager.resolveSearchTarget(for:)`, which — ONLY for a
+`.url` query with no local/prior match — fetches that one PR via
+`GitHubClient.fetchSinglePR(owner:repo:number:tab:token:)` and appends it to
+`PRManager.searchFetchedPRs`; `MenuBarView.searchResults` merges those into the results
+(deduped by nodeId). The fetch reuses the shared `GitHubClient.prNodeFields` selection (also
+used by `searchQueryDocument`) via `singlePRQueryDocument`, so the result decodes through the
+same `GraphQLNode` → `makeSnapshot` path; it is idempotent per URL (`searchFetchInFlight`
+guard), un-cached, and silent on failure. A BARE number can't be fetched — it has no repo — so
+bare numbers stay a fuzzy filter over the loaded set, and the empty state nudges the user to
+paste the full URL when a bare-number query finds nothing.
+
+**Lifecycle.** Return hands focus back to the deck (filter kept) so J/K + pin work on the
+results; Esc / ✕ / "Done" call `closeSearch()` (which also clears `searchFetchedPRs`). Closing
+the popover itself also exits search: `KeyCaptureView`'s `onDismiss` (fired on window
+`resignKey`) calls `closeSearch()` alongside clearing the peek, so reopening the panel starts
+on the normal grouped deck.
 
 ### Preview deployment detection
 Each PR can carry a `vercelPreviewUrl` extracted from a PR issue comment (REST `GitHubClient.fetchPreviewURL`, pure `extractPreviewURL(from:domains:linkLabels:)`). The row shows a `PreviewBadge` when present, and `E` (deck or peek, default binding — user-configurable) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition).

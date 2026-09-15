@@ -72,6 +72,21 @@ private struct GraphQLData: Decodable {
     let search: GraphQLSearch
 }
 
+/// Response envelope for the single-PR fetch (`repository { pullRequest }`).
+/// Reuses `GraphQLNode` for the PR itself so it flows through `makeSnapshot`.
+private struct GraphQLSinglePRResponse: Decodable {
+    let data: GraphQLSinglePRData?
+    let errors: [GraphQLError]?
+}
+
+private struct GraphQLSinglePRData: Decodable {
+    let repository: GraphQLSinglePRRepository?
+}
+
+private struct GraphQLSinglePRRepository: Decodable {
+    let pullRequest: GraphQLNode?
+}
+
 private struct GraphQLSearch: Decodable {
     let nodes: [GraphQLNode]
 }
@@ -377,6 +392,71 @@ final class GitHubClient {
         return (snapshots, newEtag)
     }
 
+    // MARK: - Fetch a single PR on demand (search by pasted URL)
+
+    /// Fetches one PR by `owner`/`repo`/`number` for on-demand search. Returns nil
+    /// when the PR doesn't exist or the node can't be mapped. No ETag caching — this
+    /// is a rare, user-initiated lookup, not a poll. `tab` only tags the resulting
+    /// snapshot's `tabs`; role/grouping in search mode is flat, so any value is fine.
+    func fetchSinglePR(
+        owner: String,
+        repo: String,
+        number: Int,
+        tab: ReviewTab,
+        token: String
+    ) async throws -> PRSnapshot? {
+        guard let url = URL(string: "https://api.github.com/graphql") else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        let variables: [String: Any] = ["owner": owner, "name": repo, "number": number]
+        let bodyDict: [String: Any] = ["query": Self.singlePRQueryDocument, "variables": variables]
+        guard let body = try? JSONSerialization.data(withJSONObject: bodyDict) else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        try checkRateLimit(http)
+
+        switch http.statusCode {
+        case 200:       break
+        case 401:       throw GitHubAPIError.unauthorized
+        case 500...599: throw GitHubAPIError.serverError(http.statusCode)
+        default:        throw GitHubAPIError.unknown(http.statusCode)
+        }
+
+        let decoded: GraphQLSinglePRResponse
+        do {
+            decoded = try JSONDecoder().decode(GraphQLSinglePRResponse.self, from: data)
+        } catch {
+            throw GitHubAPIError.decodingError(error)
+        }
+
+        if let errors = decoded.errors, !errors.isEmpty {
+            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+                throw GitHubAPIError.unauthorized
+            }
+            // A NOT_FOUND (wrong repo/number, or no access) is not an error worth
+            // surfacing — treat it as "no such PR" so search just shows no result.
+            return nil
+        }
+
+        guard let node = decoded.data?.repository?.pullRequest else { return nil }
+        let myLogin = settings.githubUsername.lowercased()
+        return Self.makeSnapshot(from: node, tab: tab, myLogin: myLogin)
+    }
+
     // MARK: - Search recently DONE PRs (merged/closed) — display-only
 
     /// Fetches recently completed PRs (merged OR closed-not-merged) for a tab.
@@ -534,52 +614,74 @@ final class GitHubClient {
 
     // MARK: - GraphQL document
 
+    /// The PullRequest field selection shared by the list search and the
+    /// single-PR fetch, so both decode into the SAME `GraphQLNode` /
+    /// `makeSnapshot` path. Keep this the single source of PR fields — a field
+    /// added here is available to both queries at once.
+    private static let prNodeFields = """
+        id
+        number
+        title
+        url
+        isDraft
+        merged
+        closed
+        state
+        reviewDecision
+        updatedAt
+        mergeable
+        headRefName
+        additions
+        deletions
+        author { __typename login }
+        repository { nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
+        labels(first: 10) { nodes { name } }
+        comments(last: 1) { totalCount nodes { author { __typename login } } }
+        reviews(last: 1) { totalCount nodes { author { __typename login } } }
+        reviewRequests(first: 10) {
+          nodes {
+            requestedReviewer {
+              ... on User { login }
+              ... on Team { slug name }
+            }
+          }
+        }
+        reviewThreads(first: 20) {
+          nodes { isResolved }
+        }
+        latestReviews(first: 20) {
+          nodes { state author { __typename login } }
+        }
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup { state }
+            }
+          }
+        }
+    """
+
     private static let searchQueryDocument = """
     query($q: String!, $first: Int!) {
       search(query: $q, type: ISSUE, first: $first) {
         nodes {
           ... on PullRequest {
-            id
-            number
-            title
-            url
-            isDraft
-            merged
-            closed
-            state
-            reviewDecision
-            updatedAt
-            mergeable
-            headRefName
-            additions
-            deletions
-            author { __typename login }
-            repository { nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
-            labels(first: 10) { nodes { name } }
-            comments(last: 1) { totalCount nodes { author { __typename login } } }
-            reviews(last: 1) { totalCount nodes { author { __typename login } } }
-            reviewRequests(first: 10) {
-              nodes {
-                requestedReviewer {
-                  ... on User { login }
-                  ... on Team { slug name }
-                }
-              }
-            }
-            reviewThreads(first: 20) {
-              nodes { isResolved }
-            }
-            latestReviews(first: 20) {
-              nodes { state author { __typename login } }
-            }
-            commits(last: 1) {
-              nodes {
-                commit {
-                  statusCheckRollup { state }
-                }
-              }
-            }
+            \(prNodeFields)
           }
+        }
+      }
+    }
+    """
+
+    /// Fetches ONE PR directly by owner/repo/number — used by search when a pasted
+    /// PR URL points at a PR that isn't in the current tab's local set, so the
+    /// scope-independent base list can't contain it. Reuses `prNodeFields`, so the
+    /// result decodes through the exact same `GraphQLNode` → `makeSnapshot` path.
+    private static let singlePRQueryDocument = """
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          \(prNodeFields)
         }
       }
     }

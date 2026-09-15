@@ -124,11 +124,25 @@ struct MenuBarView: View {
         }
         // Focus the search field whenever the search key requests it (token bump);
         // release focus when search closes so the deck's key capture resumes.
+        // The field is rendered conditionally on `searchActive`, so on the SAME
+        // state change that opens search the TextField is not yet in the view
+        // tree — assigning focus synchronously would be dropped. Defer one runloop
+        // tick so the field exists before it is focused.
         .onChange(of: manager.searchFocusToken) { _ in
-            if manager.searchActive { searchFieldFocused = true }
+            guard manager.searchActive else { return }
+            DispatchQueue.main.async { searchFieldFocused = true }
         }
         .onChange(of: manager.searchActive) { active in
-            if !active { searchFieldFocused = false }
+            if active {
+                DispatchQueue.main.async { searchFieldFocused = true }
+            } else {
+                searchFieldFocused = false
+            }
+        }
+        // A pasted PR URL for a PR outside the current tab has no local match; fetch
+        // it on demand so search can still resolve it. No-op for bare numbers / text.
+        .onChange(of: manager.searchQuery) { query in
+            Task { await manager.resolveSearchTarget(for: query) }
         }
         .overlay(alignment: .bottom) {
             HStack(spacing: 0) {
@@ -207,7 +221,11 @@ struct MenuBarView: View {
     /// (`searchBasePRs` — scope/draft independent) so a number/URL always resolves.
     /// The deck re-sorts these pinned-first; sorting here just gives a stable base.
     private var searchResults: [PRSnapshot] {
-        manager.searchBasePRs.filter { PRSearchFilter.matches($0, query: manager.searchQuery) }
+        let local = manager.searchBasePRs.filter { PRSearchFilter.matches($0, query: manager.searchQuery) }
+        // Merge any PR fetched on demand for a pasted URL that no local PR covers.
+        let fetched = manager.searchFetchedPRs.filter { PRSearchFilter.matches($0, query: manager.searchQuery) }
+        var seen = Set<String>()
+        return (local + fetched).filter { seen.insert($0.nodeId).inserted }
     }
 
     /// Whether a PR should count toward the tab labels. Honours both the draft
