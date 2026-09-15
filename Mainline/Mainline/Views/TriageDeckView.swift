@@ -18,6 +18,7 @@ enum TriageAction: Identifiable {
     case openPreview
     case toggleMute
     case copyBranch
+    case togglePin
 
     var id: String { label }
 
@@ -35,6 +36,7 @@ enum TriageAction: Identifiable {
         case .openPreview:        return "Open Preview"
         case .toggleMute:         return "Mute / Move Up"
         case .copyBranch:         return "Copy Branch Name"
+        case .togglePin:          return "Pin / Unpin"
         }
     }
 
@@ -52,6 +54,7 @@ enum TriageAction: Identifiable {
         case .openPreview:     return "globe"
         case .toggleMute:      return "arrow.down.circle"
         case .copyBranch:      return "doc.on.doc"
+        case .togglePin:       return "pin"
         }
     }
 
@@ -207,6 +210,11 @@ struct TriageDeckView: View {
     var mutedPRs: [PRSnapshot] = []
     /// Whether the Inbox view is active (two role sections + Muted group).
     var inboxMode: Bool = false
+    /// Whether the in-app search is active. When true, `prs` is the already-filtered
+    /// search result set and the deck renders a single flat "Results" list (no
+    /// actionability grouping, no Postponed/Done/Muted sections) so you can scan,
+    /// J/K, and pin a specific PR. Overrides `inboxMode`.
+    var searchMode: Bool = false
     @ObservedObject var manager: PRManager
     @ObservedObject var settings: MainlineSettings
 
@@ -231,7 +239,15 @@ struct TriageDeckView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if inboxMode {
+            if searchMode {
+                // Flat search-results list — grouping is suspended so a single query
+                // shows every match together (pinned first), across all groups.
+                if prs.isEmpty {
+                    searchEmptyState
+                } else {
+                    searchResultsList
+                }
+            } else if inboxMode {
                 // Inbox view: role sections ("Needs your review" / "Your PRs") +
                 // a collapsed "Muted / low-priority" group at the bottom.
                 if inboxSections.isEmpty && mutedPRs.isEmpty {
@@ -270,6 +286,10 @@ struct TriageDeckView: View {
         )
         .onAppear { installScrollMonitor() }
         .onDisappear { removeScrollMonitor() }
+        // Entering search — or changing the query — focuses the top result, so the
+        // stale selection index from the full list can't point off the filtered set.
+        .onChange(of: searchMode) { _ in selectedIndex = 0 }
+        .onChange(of: manager.searchQuery) { _ in if searchMode { selectedIndex = 0 } }
     }
 
     // MARK: - Scroll monitor (hover-thrash guard)
@@ -309,6 +329,26 @@ struct TriageDeckView: View {
         prs.sorted(by: PRSnapshot.triageOrder)
     }
 
+    /// Whether a PR is pinned (reads the live pinned set).
+    private func isPinned(_ pr: PRSnapshot) -> Bool {
+        settings.pinnedNodeIds.contains(pr.nodeId)
+    }
+
+    /// Orders a list for display: PINNED PRs float to the top of the list, then the
+    /// normal triage sort applies within each partition. Used everywhere a section's
+    /// rows are ordered so pinned PRs rise to the top of their group while the
+    /// grouping itself is preserved — and so the display order and the keyboard index
+    /// space (`orderedPRs`) never diverge. Snapshots the pinned set once per call.
+    private func sortedForDisplay(_ list: [PRSnapshot]) -> [PRSnapshot] {
+        let pinned = settings.pinnedNodeIds
+        return list.sorted { a, b in
+            let pa = pinned.contains(a.nodeId)
+            let pb = pinned.contains(b.nodeId)
+            if pa != pb { return pa && !pb }
+            return PRSnapshot.triageOrder(a, b)
+        }
+    }
+
     /// The focusable actionability sections (Needs attention → Ready to merge →
     /// Waiting → Draft → …) in canonical display order, excluding the display-only
     /// Postponed and Done sections. Both `sections` (display) and `orderedPRs`
@@ -320,7 +360,7 @@ struct TriageDeckView: View {
             .sorted { $0.sortIndex < $1.sortIndex }
             .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
                 guard let prs = grouped[group], !prs.isEmpty else { return nil }
-                return (group, prs.sorted(by: PRSnapshot.triageOrder))
+                return (group, sortedForDisplay(prs))
             }
     }
 
@@ -331,11 +371,15 @@ struct TriageDeckView: View {
     /// drafts in the index while the display rendered the draft-heavy "Needs
     /// attention" group first, so pressing J/K jumped focus into the group above.)
     private var orderedPRs: [PRSnapshot] {
+        if searchMode {
+            // Flat results — pinned first, then triage order.
+            return sortedForDisplay(prs)
+        }
         if inboxMode {
             // Inbox: keyboard index space is role-sections + (expanded) muted rows.
             var list = inboxOrderedPRs
             if settings.collapsedSections.contains(.muted) {
-                list += mutedPRs.sorted(by: PRSnapshot.triageOrder)
+                list += sortedForDisplay(mutedPRs)
             }
             return list
         }
@@ -397,10 +441,8 @@ struct TriageDeckView: View {
     /// each populated with `prs` matching that role and sorted by actionability.
     private var inboxSections: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] {
         let myLogin = settings.githubUsername
-        let needsReview = prs.filter { $0.inboxRole(myLogin: myLogin) == .needsYourReview }
-            .sorted(by: PRSnapshot.triageOrder)
-        let yourPRs = prs.filter { $0.inboxRole(myLogin: myLogin) == .yourPRs }
-            .sorted(by: PRSnapshot.triageOrder)
+        let needsReview = sortedForDisplay(prs.filter { $0.inboxRole(myLogin: myLogin) == .needsYourReview })
+        let yourPRs = sortedForDisplay(prs.filter { $0.inboxRole(myLogin: myLogin) == .yourPRs })
 
         var result: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] = []
         for (role, rolePRs) in [(InboxRole.yourPRs, yourPRs), (.needsYourReview, needsReview)] {
@@ -514,7 +556,7 @@ struct TriageDeckView: View {
         .help(expansion.wrappedValue ? "Collapse muted PRs" : "Expand muted PRs")
 
         if expansion.wrappedValue {
-            sectionRows(group: .muted, prs: mutedPRs.sorted(by: PRSnapshot.triageOrder))
+            sectionRows(group: .muted, prs: sortedForDisplay(mutedPRs))
         }
     }
 
@@ -546,6 +588,56 @@ struct TriageDeckView: View {
             ForEach(sections, id: \.group) { section in
                 sectionView(group: section.group, prs: section.prs, expansion: expansionBinding(for: section.group))
             }
+        }
+    }
+
+    // MARK: - Search results
+
+    /// Flat, ungrouped list of the current search matches (pinned first). Reuses the
+    /// standard deck row + keyboard index space (`orderedPRs` returns these rows in
+    /// search mode), so J/K, pin, and every verb work exactly as in the normal deck.
+    private var searchResultsList: some View {
+        let indexMap = orderedIndexByNodeId
+        let results = sortedForDisplay(prs)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Text("Results")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.primary)
+                Text("\(results.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
+            }
+            .padding(.horizontal, RowMetrics.horizontalPadding)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+
+            ForEach(results, id: \.nodeId) { pr in
+                memoizedDeckRow(pr: pr, index: indexMap[pr.nodeId] ?? 0)
+                Divider().padding(.leading, metrics.dividerInset())
+            }
+        }
+    }
+
+    /// Empty state shown when a search query matches nothing in the current tab.
+    private var searchEmptyState: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                Text("No matching PRs")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 20)
+            Spacer()
         }
     }
 
@@ -647,6 +739,7 @@ struct TriageDeckView: View {
             index: index,
             isFocused: index == selectedIndex,
             isSelected: selectedPRs.contains(pr.nodeId),
+            isPinned: settings.pinnedNodeIds.contains(pr.nodeId),
             isUnread: manager.unreadPRIds.contains(pr.nodeId),
             reviewSourceVisible: settings.selectedTab == .forMe,
             myLogin: settings.githubUsername,
@@ -750,11 +843,19 @@ struct TriageDeckView: View {
                 }
 
                 VStack(alignment: .leading, spacing: m.titleMetadataSpacing) {
-                    Text(pr.title)
-                        .font(.callout)
-                        .lineLimit(m.titleLineLimit)
-                        .truncationMode(.tail)
-                        .multilineTextAlignment(.leading)
+                    HStack(spacing: 4) {
+                        if isPinned(pr) {
+                            Image(systemName: "pin.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Color(nsColor: .systemOrange))
+                                .accessibilityLabel("Pinned")
+                        }
+                        Text(pr.title)
+                            .font(.callout)
+                            .lineLimit(m.titleLineLimit)
+                            .truncationMode(.tail)
+                            .multilineTextAlignment(.leading)
+                    }
                     HStack(spacing: 4) {
                         Text(verbatim: pr.author.isEmpty
                              ? "\(pr.repoFullName) #\(pr.number)"
@@ -921,6 +1022,11 @@ struct TriageDeckView: View {
         }
         Button { handleTriageAction(.openInBrowser, on: pr) } label: {
             Label(openActionLabel, systemImage: openActionSymbol)
+        }
+        let pinned = isPinned(pr)
+        Button { handleTriageAction(.togglePin, on: pr) } label: {
+            Label(pinned ? "Unpin" : "Pin to Top",
+                  systemImage: pinned ? "pin.slash" : "pin")
         }
         if !pr.headRefName.isEmpty {
             Button { handleTriageAction(.copyBranch, on: pr) } label: {
@@ -1221,6 +1327,14 @@ struct TriageDeckView: View {
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
 
+        // Esc closes an active search first — before it would close the popover.
+        // (Reached only when focus is on the deck; while the search field itself is
+        // focused, its own onExitCommand handles Esc.)
+        if event.keyCode == 53, manager.searchActive {   // Esc
+            manager.closeSearch()
+            return nil
+        }
+
         // Return opens the selected PR in the browser — regardless of whether the
         // peek card is open (focusedPR stays in sync with the card as you step).
         if event.keyCode == 36 {   // Return
@@ -1376,6 +1490,21 @@ struct TriageDeckView: View {
             return nil
         }
 
+        // Pin / unpin the focused PR (floats it to the top of its group).
+        if shortcutMatches(.togglePin, event: event) {
+            if let pr = focusedPR { handleTriageAction(.togglePin, on: pr) }
+            return nil
+        }
+
+        // Open the in-app search field. `openSearch` also requests keyboard focus
+        // on the field (via a focus token) so pressing it again while search is
+        // already open re-focuses the field for editing.
+        if shortcutMatches(.search, event: event) {
+            manager.openSearch()
+            TelemetryService.shared.recordTriageInteraction("search_open")
+            return nil
+        }
+
         return event
     }
 
@@ -1459,6 +1588,12 @@ struct TriageDeckView: View {
             openPreview(pr)
         case .copyBranch:
             copyBranch(pr)
+        case .togglePin:
+            let nowPinned = manager.togglePin(pr)
+            TelemetryService.shared.recordTriageInteraction(nowPinned ? "pin" : "unpin")
+            pushUndo(label: nowPinned ? "Pinned: \(pr.title)" : "Unpinned: \(pr.title)", pr: pr) {
+                manager.setPinned(!nowPinned, for: pr)
+            }
         case .toggleMute:
             let prevOverride = manager.inboxMuteOverride(for: pr)
             let nowMuted = manager.toggleInboxMute(pr)
@@ -1745,6 +1880,8 @@ private struct DeckRowKey: Equatable {
     let index: Int
     let isFocused: Bool
     let isSelected: Bool
+    /// Part of the key so pinning/unpinning re-renders the row (pin glyph + reorder).
+    let isPinned: Bool
     let isUnread: Bool
     let reviewSourceVisible: Bool
     let myLogin: String
@@ -1977,8 +2114,13 @@ private struct KeyCaptureView: NSViewRepresentable {
 
         /// Reclaim first responder only when nothing meaningful holds it (the window
         /// or its contentView) — so we don't steal focus from a real control, but we
-        /// do recover if SwiftUI reset the responder chain on a re-render. There are
-        /// no text fields in the deck, so this is safe.
+        /// do recover if SwiftUI reset the responder chain on a re-render.
+        ///
+        /// The search `TextField` shares this popover window, but focusing it makes
+        /// the window's field editor (an `NSText`/`NSTextView`) the first responder —
+        /// which is none of `nil` / `window` / `contentView`, so the guard below skips
+        /// and the field keeps focus. The safety is by the guard's condition, not by
+        /// an absence of text fields.
         func reassertFocusIfIdle() {
             guard let window else { return }
             let fr = window.firstResponder

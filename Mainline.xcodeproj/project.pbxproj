@@ -45,6 +45,7 @@
 		IB000000000000000000000B2 /* InboxSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = IB000000000000000000000A2 /* InboxSettingsView.swift */; };
 		HP000000000000000000000B1 /* HelpSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = HP000000000000000000000A1 /* HelpSettingsView.swift */; };
 		LG000000000000000000000B1 /* LaunchAtLoginService.swift in Sources */ = {isa = PBXBuildFile; fileRef = LG000000000000000000000A1 /* LaunchAtLoginService.swift */; };
+		PS000000000000000000000B1 /* PRSearchFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = PS000000000000000000000A1 /* PRSearchFilter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -85,6 +86,7 @@
 		IB000000000000000000000A2 /* InboxSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxSettingsView.swift; sourceTree = "<group>"; };
 		HP000000000000000000000A1 /* HelpSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpSettingsView.swift; sourceTree = "<group>"; };
 		LG000000000000000000000A1 /* LaunchAtLoginService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginService.swift; sourceTree = "<group>"; };
+		PS000000000000000000000A1 /* PRSearchFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRSearchFilter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -152,6 +154,7 @@
 				OT00000000000000000000A1 /* TelemetryService.swift */,
 				IB000000000000000000000A1 /* InboxMuteEngine.swift */,
 				LG000000000000000000000A1 /* LaunchAtLoginService.swift */,
+				PS000000000000000000000A1 /* PRSearchFilter.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -291,6 +294,7 @@
 				IB000000000000000000000B2 /* InboxSettingsView.swift in Sources */,
 				HP000000000000000000000B1 /* HelpSettingsView.swift in Sources */,
 				LG000000000000000000000B1 /* LaunchAtLoginService.swift in Sources */,
+				PS000000000000000000000B1 /* PRSearchFilter.swift in Sources */,
 				OT00000000000000000000B1 /* TelemetryService.swift in Sources */,
 				OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */,
 				OT00000000000000000000B3 /* TelemetryDetailsSheet.swift in Sources */,
