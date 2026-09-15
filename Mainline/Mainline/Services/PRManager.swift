@@ -254,11 +254,14 @@ final class PRManager: ObservableObject {
     private var inboxUnionPRs: [PRSnapshot] {
         let snoozed = snoozeStore.snoozedNodeIds
         // A PR can appear in both tabs (union by nodeId, keeping the last-merged copy).
+        // Source includes on-demand-fetched pins so a pinned PR that fell out of the
+        // live queries still appears. The drafts guard is bypassed for pinned PRs
+        // (always visible); snooze is NOT overridden — an explicit "later" wins.
         var seen = Set<String>()
-        return prs.filter {
+        return prsIncludingPinned.filter {
             ($0.tabs.contains(.forMe) || $0.tabs.contains(.created))
                 && !snoozed.contains($0.nodeId)
-                && (settings.showDrafts || $0.classifiedState != .draft)
+                && (settings.showDrafts || $0.classifiedState != .draft || isPinned($0))
         }.filter { pr in
             guard seen.insert(pr.nodeId).inserted else { return false }
             return true
@@ -310,6 +313,9 @@ final class PRManager: ObservableObject {
     /// wins over the rules — `true` forces Muted, `false` pins the PR active even
     /// when a rule matches. Absent → follow the rules.
     private func effectiveMuted(_ pr: PRSnapshot, config: InboxMuteConfig) -> Bool {
+        // A pin means "always visible": it overrides every mute rule AND a manual
+        // mute override, so a pinned PR is never demoted to the Muted group.
+        if isPinned(pr) { return false }
         if let override = settings.inboxMuteOverrides[pr.nodeId] { return override }
         return ruleMuted(pr, config: config)
     }
@@ -354,12 +360,73 @@ final class PRManager: ObservableObject {
     /// Toggles a PR's pinned state; returns the NEW state (true = now pinned).
     @discardableResult
     func togglePin(_ pr: PRSnapshot) -> Bool {
-        settings.togglePin(pr.nodeId)
+        let nowPinned = settings.togglePin(pr.nodeId)
+        // Unpinning may leave a stale fetched entry; pinning a not-live PR needs a
+        // fetch. Both are handled by a refresh.
+        Task { await refreshPinnedFetches() }
+        return nowPinned
     }
 
     /// Explicitly sets a PR's pinned state (used by undo).
     func setPinned(_ pinned: Bool, for pr: PRSnapshot) {
         settings.setPinned(pinned, for: pr.nodeId)
+        Task { await refreshPinnedFetches() }
+    }
+
+    /// PINNED PRs fetched on demand because they are no longer in the live `prs`
+    /// set (dropped out of the For me / Created queries). Merged into every tab
+    /// population via `prsIncludingPinned` so a pin is always visible. Rebuilt by
+    /// `refreshPinnedFetches`.
+    @Published private(set) var pinnedFetchedPRs: [PRSnapshot] = []
+
+    /// Node ids with an in-flight pin fetch, so overlapping refreshes don't double-fetch.
+    private var pinnedFetchInFlight: Set<String> = []
+
+    /// Pinned node ids that definitively resolved to "no such PR" (deleted or
+    /// inaccessible). Skipped on subsequent refreshes so a dead pin isn't refetched
+    /// every poll; an id is cleared from here once it's unpinned.
+    private var pinnedUnfetchable: Set<String> = []
+
+    /// Keeps `pinnedFetchedPRs` in sync with the pin set and the live `prs`:
+    /// prunes entries that are no longer pinned or have reappeared live, then fetches
+    /// any pinned id missing from BOTH. Safe to call on every poll and on pin toggles;
+    /// idempotent and silent on failure (a pin that can't be fetched just won't show).
+    func refreshPinnedFetches() async {
+        let pinned = Set(settings.pinnedNodeIds)
+        let liveIds = Set(prs.map { $0.nodeId })
+
+        // Drop cached fetches that are no longer pinned or are now live, and forget
+        // negative-cache entries for ids that were unpinned (so re-pinning retries).
+        pinnedFetchedPRs.removeAll { !pinned.contains($0.nodeId) || liveIds.contains($0.nodeId) }
+        pinnedUnfetchable.formIntersection(pinned)
+
+        // Which pinned ids are absent from live prs AND the fetched cache, not
+        // already in flight, and not known-unreachable?
+        let have = liveIds.union(pinnedFetchedPRs.map { $0.nodeId })
+        let missing = pinned.subtracting(have).subtracting(pinnedFetchInFlight).subtracting(pinnedUnfetchable)
+        guard !missing.isEmpty else { return }
+
+        guard let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
+
+        for id in missing {
+            pinnedFetchInFlight.insert(id)
+            defer { pinnedFetchInFlight.remove(id) }
+            do {
+                guard let pr = try await client.fetchPRByNodeId(nodeId: id, token: token) else {
+                    // Definitive "no such PR" — negative-cache so we don't refetch each poll.
+                    pinnedUnfetchable.insert(id)
+                    continue
+                }
+                // Re-check under current state: still pinned, still not live, not already cached.
+                guard settings.isPinned(pr.nodeId),
+                      !prs.contains(where: { $0.nodeId == pr.nodeId }),
+                      !pinnedFetchedPRs.contains(where: { $0.nodeId == pr.nodeId }) else { continue }
+                pinnedFetchedPRs.append(pr)
+            } catch {
+                // Transient error (network / auth / rate limit) — NOT negative-cached,
+                // so the next poll retries. The pin simply won't surface this cycle.
+            }
+        }
     }
 
     // MARK: - Search
@@ -373,16 +440,29 @@ final class PRManager: ObservableObject {
     var searchBasePRs: [PRSnapshot] {
         if settings.selectedTab == .inbox {
             var seen = Set<String>()
-            return prs.filter { $0.tabs.contains(.forMe) || $0.tabs.contains(.created) }
+            return prsIncludingPinned.filter { $0.tabs.contains(.forMe) || $0.tabs.contains(.created) }
                 .filter { seen.insert($0.nodeId).inserted }
         }
-        return prs.filter { $0.tabs.contains(settings.selectedTab) }
+        return prsIncludingPinned.filter { $0.tabs.contains(settings.selectedTab) }
     }
 
-    /// Applies the currently-selected scope (nil = All) to an Inbox PR list.
+    // MARK: - Pin-augmented source
+
+    /// `prs` plus any PINNED PRs fetched on demand (deduped by nodeId, and only
+    /// those not already live in `prs`). Every tab / inbox / search population draws
+    /// from this so a pinned PR that dropped out of the live queries still appears.
+    /// When nothing was fetched this is just `prs` (no allocation).
+    private var prsIncludingPinned: [PRSnapshot] {
+        guard !pinnedFetchedPRs.isEmpty else { return prs }
+        var seen = Set(prs.map { $0.nodeId })
+        return prs + pinnedFetchedPRs.filter { seen.insert($0.nodeId).inserted }
+    }
+
+    /// Applies the currently-selected scope (nil = All) to an Inbox PR list. A
+    /// pinned PR is kept regardless of the selected scope — a pin is always visible.
     private func applyingSelectedScope(_ list: [PRSnapshot]) -> [PRSnapshot] {
         guard let scope = scopeStore.selectedScope else { return list }
-        return list.filter { Self.pr($0, matches: scope) }
+        return list.filter { isPinned($0) || Self.pr($0, matches: scope) }
     }
 
     // MARK: - Current view (drives badge + visible list)
@@ -437,17 +517,18 @@ final class PRManager: ObservableObject {
         // but guard defensively to avoid an accidental empty result.
         guard settings.selectedTab != .inbox else { return [] }
 
-        // 1. Tab.
-        var result = prs.filter { $0.tabs.contains(settings.selectedTab) }
+        // 1. Tab. Source includes on-demand-fetched pins so a pinned PR that fell
+        //    out of the live queries still shows on its tab.
+        var result = prsIncludingPinned.filter { $0.tabs.contains(settings.selectedTab) }
 
-        // 2. Scope (optional).
+        // 2. Scope (optional). A pinned PR is always kept — a pin is always visible.
         if applyScope, let scope = scopeStore.selectedScope {
-            result = result.filter { Self.pr($0, matches: scope) }
+            result = result.filter { isPinned($0) || Self.pr($0, matches: scope) }
         }
 
-        // 3. Drafts.
+        // 3. Drafts. A pinned draft is always kept.
         if !settings.showDrafts {
-            result = result.filter { $0.classifiedState != .draft }
+            result = result.filter { $0.classifiedState != .draft || isPinned($0) }
         }
 
         // 4. For-me Direct/Team sub-filter (only on the For-me tab; `.all` no-op).
@@ -720,11 +801,14 @@ final class PRManager: ObservableObject {
             self.settings.unreadPRIdsList = Array(self.unreadPRIds)
         }
 
-        // Rebuild scope counts after every PR update
+        // Rebuild scope counts after every PR update, and reconcile the on-demand
+        // pinned-PR cache against the fresh live set (prune reappeared/unpinned,
+        // fetch newly-missing pins).
         store.$snapshots
             .map { dict in Array(dict.values) }
             .sink { [weak self] prs in
                 self?.scopeStore.rebuild(from: prs)
+                Task { await self?.refreshPinnedFetches() }
             }
             .store(in: &cancellables)
     }

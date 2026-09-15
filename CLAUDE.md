@@ -213,6 +213,25 @@ search results) routes its ordering through it, so the display order and the key
 space (`orderedPRs`) never diverge. `DeckRowKey` carries `isPinned` so a pin toggle re-renders
 (and reorders) the affected rows. Verb: `togglePin` (default `P`) + a Pin/Unpin row context item.
 
+**Pins are always visible.** A pin means "keep this in front of me," so it overrides the
+noise filters — but NOT snooze (an explicit "later" wins). `PRManager.effectiveMuted` returns
+`false` for a pinned PR (overriding both mute rules AND a manual mute override), so a pinned PR
+pops OUT of the collapsed Muted group into its natural role/actionability section; the scope
+chip (`applyingSelectedScope`, `tabFiltered`) and the Drafts toggle (`inboxUnionPRs`,
+`tabFiltered`) likewise keep a pinned PR regardless. A pin does NOT get its own section — it
+still just floats to the top of the group it belongs to. **On-demand fetch:** a pinned PR can
+also fall out of the live For me / Created queries entirely (nothing to float). `PRManager`
+keeps a `pinnedFetchedPRs` cache reconciled by `refreshPinnedFetches()` (run on every poll via
+the `store.$snapshots` sink, and on `togglePin` / `setPinned`): it prunes entries that are
+unpinned or reappeared live, then fetches each still-missing pinned nodeId via
+`GitHubClient.fetchPRByNodeId(nodeId:token:)` (GraphQL `node(id:)` reusing `prNodeFields` →
+`makeSnapshot`; tab membership derived from role — author → Created, else For me). Results merge
+into every population through the `prsIncludingPinned` source. Guards: `pinnedFetchInFlight`
+(no double-fetch), `pinnedUnfetchable` (a definitive not-found is negative-cached so a
+deleted/inaccessible pin isn't refetched each poll; cleared when unpinned), and transient
+errors are NOT negative-cached (next poll retries). Silent on failure — an unreachable pin just
+won't surface.
+
 **Search.** The `search` shortcut (default `F`) sets `PRManager.searchActive`, which makes
 `MenuBarView` render a search `TextField` and switch the deck into `searchMode`: a single FLAT
 "Results" list (no grouping, no Postponed/Done/Muted), pinned first. Focus is driven by
@@ -302,7 +321,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `previewLinkLabels` | [String] | `["preview"]` — case-insensitive substring match on a markdown link label |
 | `telemetryEnabled` | Bool | false |
 | `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` — 17 `ShortcutBinding { key, modifiers }` entries; all bare except undo=⌘Z (`modifiers = NSEvent.ModifierFlags.command.rawValue`). Includes `markReady` (default `t`, bare — draft→ready write action; **moved off `f`**), `copyBranch` (default `c`, bare), `togglePin` (default `p`, bare — pin/unpin), and `search` (default `f`, bare — open search). Decoded with custom `Codable` that handles both the new object shape and the v1.25.0 legacy bare-string shape; undo bare-string → `.command` migration preserves ⌘Z; on the upgrade that introduces `search` (its key absent in stored JSON), a `markReady` still bound to bare `f` is relocated to `t` so `f` is free for search; absent fields fall back to factory defaults. |
-| `pinnedNodeIds` | [String] | `[]` — nodeIds the user has pinned. A pinned PR floats to the top of its actionability group / role section (grouping preserved) with a pin glyph. Membership read via `settings.pinnedNodeIds`; toggled by the `togglePin` shortcut / context menu. |
+| `pinnedNodeIds` | [String] | `[]` — nodeIds the user has pinned. A pinned PR floats to the top of its actionability group / role section (grouping preserved) with a pin glyph, and is ALWAYS visible: it overrides mute, the scope chip, and the Drafts toggle (but not snooze), and is fetched on demand (`node(id:)`) when it has dropped out of the live queries. Membership read via `settings.pinnedNodeIds`; toggled by the `togglePin` shortcut / context menu. |
 | `mutePatterns` | [String] | `["chore(deps)*", "build(deps)*"]` |
 | `muteBotAuthors` | Bool | true |
 | `botAllowList` | [String] | `[]` |

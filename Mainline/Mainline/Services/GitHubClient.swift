@@ -87,6 +87,16 @@ private struct GraphQLSinglePRRepository: Decodable {
     let pullRequest: GraphQLNode?
 }
 
+/// Response envelope for the fetch-by-node-id query (`node(id:) { ... }`).
+private struct GraphQLNodeByIdResponse: Decodable {
+    let data: GraphQLNodeByIdData?
+    let errors: [GraphQLError]?
+}
+
+private struct GraphQLNodeByIdData: Decodable {
+    let node: GraphQLNode?
+}
+
 private struct GraphQLSearch: Decodable {
     let nodes: [GraphQLNode]
 }
@@ -457,6 +467,65 @@ final class GitHubClient {
         return Self.makeSnapshot(from: node, tab: tab, myLogin: myLogin)
     }
 
+    /// Fetches a PINNED PR by its node id so it stays visible after dropping out of
+    /// the live tab queries. Tab membership is derived from the viewer's role
+    /// (author → Created, otherwise For me) so it lands in the right section; the
+    /// Inbox shows both. Returns nil when the node isn't a reachable PR. No ETag —
+    /// pins are few and this runs only for the missing ones.
+    func fetchPRByNodeId(nodeId: String, token: String) async throws -> PRSnapshot? {
+        guard let url = URL(string: "https://api.github.com/graphql") else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        let variables: [String: Any] = ["id": nodeId]
+        let bodyDict: [String: Any] = ["query": Self.prByNodeIdQueryDocument, "variables": variables]
+        guard let body = try? JSONSerialization.data(withJSONObject: bodyDict) else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        try checkRateLimit(http)
+
+        switch http.statusCode {
+        case 200:       break
+        case 401:       throw GitHubAPIError.unauthorized
+        case 500...599: throw GitHubAPIError.serverError(http.statusCode)
+        default:        throw GitHubAPIError.unknown(http.statusCode)
+        }
+
+        let decoded: GraphQLNodeByIdResponse
+        do {
+            decoded = try JSONDecoder().decode(GraphQLNodeByIdResponse.self, from: data)
+        } catch {
+            throw GitHubAPIError.decodingError(error)
+        }
+
+        if let errors = decoded.errors, !errors.isEmpty {
+            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+                throw GitHubAPIError.unauthorized
+            }
+            return nil
+        }
+
+        guard let node = decoded.data?.node else { return nil }
+        let myLogin = settings.githubUsername.lowercased()
+        // Derive tab membership from role so the pin renders in the correct section
+        // (makeSnapshot sets `tabs = [tab]`; the Inbox shows Created + For me anyway).
+        let tab: ReviewTab = PRSnapshot.loginsMatch(node.author?.login ?? "", myLogin) ? .created : .forMe
+        return Self.makeSnapshot(from: node, tab: tab, myLogin: myLogin)
+    }
+
     // MARK: - Search recently DONE PRs (merged/closed) — display-only
 
     /// Fetches recently completed PRs (merged OR closed-not-merged) for a tab.
@@ -681,6 +750,20 @@ final class GitHubClient {
     query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
+          \(prNodeFields)
+        }
+      }
+    }
+    """
+
+    /// Fetches ONE PR by its GraphQL node id — used to keep a PINNED PR visible even
+    /// when it has dropped out of the current tab's live query results. Reuses
+    /// `prNodeFields`, so the node decodes through the same `GraphQLNode` →
+    /// `makeSnapshot` path as everything else.
+    private static let prByNodeIdQueryDocument = """
+    query($id: ID!) {
+      node(id: $id) {
+        ... on PullRequest {
           \(prNodeFields)
         }
       }
