@@ -76,8 +76,13 @@ enum PRSearchFilter {
     /// scheme/host and any trailing `/files`, `#…`, `?…`. Accepts `/pull/` and the
     /// rarer `/pulls/`. Falls back to `.number` when the repo can't be recovered.
     static func parsePRURL(_ s: String) -> Query? {
-        let lower = s.lowercased()
-        guard let marker = lower.range(of: "/pull/") ?? lower.range(of: "/pulls/") else {
+        // Search case-insensitively on `s` itself so every index below indexes into
+        // the SAME string. Computing the marker range on `s.lowercased()` and then
+        // slicing `s` with it is a latent bug: `String.Index` is instance-specific,
+        // so any character before the marker whose lowercase form differs in UTF-8
+        // length shifts the mapping and the number/repo parse off the wrong offset.
+        guard let marker = s.range(of: "/pull/", options: .caseInsensitive)
+                ?? s.range(of: "/pulls/", options: .caseInsensitive) else {
             return nil
         }
         // Number: the digit run immediately after the marker.
@@ -86,8 +91,8 @@ enum PRSearchFilter {
         // Repo: the two path components immediately before the marker. Strip scheme
         // so the host doesn't get counted as a component.
         let beforePull = String(s[..<marker.lowerBound])
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
+            .replacingOccurrences(of: "https://", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "http://", with: "", options: .caseInsensitive)
         let comps = beforePull.split(separator: "/").map(String.init)
         guard comps.count >= 2 else { return .number(number) }
         let repo = "\(comps[comps.count - 2])/\(comps[comps.count - 1])"
@@ -105,6 +110,9 @@ enum PRSearchFilter {
         assert(parse("https://github.com/acme/web/pull/200") == .url(repoFullName: "acme/web", number: 200))
         assert(parse("https://github.com/acme/web/pull/200/files") == .url(repoFullName: "acme/web", number: 200))
         assert(parse("github.com/acme/web/pull/200") == .url(repoFullName: "acme/web", number: 200))
+        // parse — a non-ASCII char before the marker must not shift the number/repo
+        // offsets (regression guard: indices must index into the same string).
+        assert(parse("İ/acme/web/pull/200") == .url(repoFullName: "acme/web", number: 200))
         // parse — free text and empty
         assert(parse("auth flow") == .text("auth flow"))
         assert(parse("200 auth") == .text("200 auth"))   // not a whole-number query
