@@ -127,6 +127,12 @@ enum PRState: String, Codable, Equatable, CaseIterable {
 /// Plus the terminal buckets: `.draft` (only used when `splitDrafts` is on),
 /// `.merged`, `.closed`.
 enum ActionGroup: String, Codable, Equatable, CaseIterable {
+    /// DISPLAY-ONLY leading section: PRs the user pinned, surfaced as their own
+    /// subsection at the TOP of each role/actionability group so a pin stays
+    /// visible even when the group it would otherwise sit in (e.g. Waiting) is
+    /// collapsed. NEVER returned by `actionGroup(...)` — it is assembled by the
+    /// deck's section builders from the pinned set, orthogonal to actionability.
+    case pinned
     case needsAttention
     case readyForReview
     case readyToMerge
@@ -156,6 +162,7 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
     /// Section header label.
     var title: String {
         switch self {
+        case .pinned:         return "Pinned"
         case .needsAttention: return "Needs attention"
         case .readyForReview: return "Ready for review"
         case .readyToMerge:   return "Ready to merge"
@@ -172,6 +179,9 @@ enum ActionGroup: String, Codable, Equatable, CaseIterable {
     /// Deterministic display order used to sort sections.
     var sortIndex: Int {
         switch self {
+        // Pinned always leads its group; the deck prepends it explicitly, so this
+        // negative index only keeps any incidental sort consistent.
+        case .pinned:         return -1
         // `.needsAttention` (author role) and `.readyForReview` (reviewer role)
         // both occupy the top slot; they never coexist in one role's list, so the
         // shared index 0 is harmless.

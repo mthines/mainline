@@ -202,24 +202,34 @@ The **Inbox tab** (`ReviewTab.inbox`) is a client-side derived union of the forM
 
 ### Pinning & in-app search
 
-**Pinning.** A pinned PR does NOT get its own section — it floats to the top of whatever
-actionability group / role section it already belongs to, keeping the grouping intact, with
-an orange `pin.fill` glyph before its title. The pinned set is `settings.pinnedNodeIds`
+**Pinning.** A pinned PR is surfaced in a dedicated **Pinned** subsection at the TOP of the
+group it belongs to — the top of the deck on the For me / Created tabs, and the top of its
+ROLE group ("Your PRs" / "Needs your review") on the Inbox tab — with an orange `pin.fill` glyph
+on both the section header and the row. It is a *subsection*, not a global section: each role
+gets its own Pinned block, so a pinned PR you authored sits under "Your PRs › Pinned" and a
+pinned PR you're reviewing under "Needs your review › Pinned". This (rather than merely floating
+within another subsection) is what keeps a pin visible when the subsection it would otherwise
+sit in — e.g. "Waiting" — is collapsed. The `.pinned` `ActionGroup` case is DISPLAY-ONLY: it is
+never returned by `PRSnapshot.actionGroup(...)`; the deck's `sectionsWithPinned(from:)` helper
+partitions each role/tab list into a leading `.pinned` section (pinned PRs, `triageOrder`-sorted)
+plus the normal actionability sections built from the REST (pinned removed). Both
+`actionabilitySections` and each role in `inboxSections` route through it, and `orderedPRs` /
+`inboxOrderedPRs` flatten the same section order, so the keyboard index space never diverges from
+the display. The Pinned subsection is collapsible, expanded by default (regular-group semantics
+in `expansionBinding` / `inboxExpansionBinding`). The pinned set is `settings.pinnedNodeIds`
 (persisted `[String]` nodeId list, mirroring `notifMutedNodeIds`); `PRManager` wraps it with
-`isPinned` / `togglePin` / `setPinned` (undo-friendly). `TriageDeckView.sortedForDisplay(_:)`
-is the SINGLE within-group comparator — pinned-first, then `PRSnapshot.triageOrder` — and every
-section builder (`actionabilitySections`, `inboxSections` role lists, the Muted group, the
-search results) routes its ordering through it, so the display order and the keyboard index
-space (`orderedPRs`) never diverge. `DeckRowKey` carries `isPinned` so a pin toggle re-renders
-(and reorders) the affected rows. Verb: `togglePin` (default `P`) + a Pin/Unpin row context item.
+`isPinned` / `togglePin` / `setPinned` (undo-friendly). `sortedForDisplay(_:)` (pinned-first,
+then `triageOrder`) remains the comparator for the FLAT search results and the Muted group only.
+`DeckRowKey` carries `isPinned` so a pin toggle re-renders (and re-partitions) the affected rows.
+Verb: `togglePin` (default `P`) + a Pin/Unpin row context item.
 
 **Pins are always visible.** A pin means "keep this in front of me," so it overrides the
 noise filters — but NOT snooze (an explicit "later" wins). `PRManager.effectiveMuted` returns
 `false` for a pinned PR (overriding both mute rules AND a manual mute override), so a pinned PR
 pops OUT of the collapsed Muted group into its natural role/actionability section; the scope
 chip (`applyingSelectedScope`, `tabFiltered`) and the Drafts toggle (`inboxUnionPRs`,
-`tabFiltered`) likewise keep a pinned PR regardless. A pin does NOT get its own section — it
-still just floats to the top of the group it belongs to. **On-demand fetch:** a pinned PR can
+`tabFiltered`) likewise keep a pinned PR regardless. It then surfaces in the dedicated Pinned
+subsection at the top of its role/tab group (see **Pinning** above). **On-demand fetch:** a pinned PR can
 also fall out of the live For me / Created queries entirely (nothing to float). `PRManager`
 keeps a `pinnedFetchedPRs` cache reconciled by `refreshPinnedFetches()` (run on every poll via
 the `store.$snapshots` sink, and on `togglePin` / `setPinned`): it prunes entries that are
@@ -321,7 +331,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `previewLinkLabels` | [String] | `["preview"]` — case-insensitive substring match on a markdown link label |
 | `telemetryEnabled` | Bool | false |
 | `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` — 17 `ShortcutBinding { key, modifiers }` entries; all bare except undo=⌘Z (`modifiers = NSEvent.ModifierFlags.command.rawValue`). Includes `markReady` (default `t`, bare — draft→ready write action; **moved off `f`**), `copyBranch` (default `c`, bare), `togglePin` (default `p`, bare — pin/unpin), and `search` (default `f`, bare — open search). Decoded with custom `Codable` that handles both the new object shape and the v1.25.0 legacy bare-string shape; undo bare-string → `.command` migration preserves ⌘Z; on the upgrade that introduces `search` (its key absent in stored JSON), a `markReady` still bound to bare `f` is relocated to `t` so `f` is free for search; absent fields fall back to factory defaults. |
-| `pinnedNodeIds` | [String] | `[]` — nodeIds the user has pinned. A pinned PR floats to the top of its actionability group / role section (grouping preserved) with a pin glyph, and is ALWAYS visible: it overrides mute, the scope chip, and the Drafts toggle (but not snooze), and is fetched on demand (`node(id:)`) when it has dropped out of the live queries. Membership read via `settings.pinnedNodeIds`; toggled by the `togglePin` shortcut / context menu. |
+| `pinnedNodeIds` | [String] | `[]` — nodeIds the user has pinned. A pinned PR appears in a dedicated **Pinned** subsection at the top of its role/tab group (a `.pinned` display-only `ActionGroup`, collapsible, expanded by default) with a pin glyph, and is ALWAYS visible: it overrides mute, the scope chip, and the Drafts toggle (but not snooze), and is fetched on demand (`node(id:)`) when it has dropped out of the live queries. Membership read via `settings.pinnedNodeIds`; toggled by the `togglePin` shortcut / context menu. |
 | `mutePatterns` | [String] | `["chore(deps)*", "build(deps)*"]` |
 | `muteBotAuthors` | Bool | true |
 | `botAllowList` | [String] | `[]` |

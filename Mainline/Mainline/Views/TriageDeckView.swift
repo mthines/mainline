@@ -360,14 +360,33 @@ struct TriageDeckView: View {
     /// Postponed and Done sections. Both `sections` (display) and `orderedPRs`
     /// (keyboard index space) build on this, so the two orderings never diverge.
     private var actionabilitySections: [(group: ActionGroup, prs: [PRSnapshot])] {
-        let grouped = Dictionary(grouping: triageSorted, by: { groupFor($0) })
-        return ActionGroup.allCases
-            .filter { $0 != .postponed }
+        sectionsWithPinned(from: prs)
+    }
+
+    /// Splits a role/tab's PR list into a leading `.pinned` section (the pinned PRs,
+    /// triage-sorted) followed by the normal actionability sections built from the
+    /// REST (pinned PRs removed). This is what makes a pin its own subsection at the
+    /// top of the group instead of merely floating inside another subsection — so
+    /// collapsing e.g. "Waiting" no longer hides a pinned PR. Excludes the display-
+    /// only Postponed/Done/Muted groups (their membership is assembled elsewhere).
+    private func sectionsWithPinned(from list: [PRSnapshot]) -> [(group: ActionGroup, prs: [PRSnapshot])] {
+        let pinnedRows = list.filter { isPinned($0) }.sorted(by: PRSnapshot.triageOrder)
+        let rest = list.filter { !isPinned($0) }
+
+        var result: [(group: ActionGroup, prs: [PRSnapshot])] = []
+        if !pinnedRows.isEmpty {
+            result.append((.pinned, pinnedRows))
+        }
+
+        let grouped = Dictionary(grouping: rest, by: { groupFor($0) })
+        result += ActionGroup.allCases
+            .filter { $0 != .pinned && $0 != .postponed && $0 != .done && $0 != .muted }
             .sorted { $0.sortIndex < $1.sortIndex }
             .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
                 guard let prs = grouped[group], !prs.isEmpty else { return nil }
-                return (group, sortedForDisplay(prs))
+                return (group, prs.sorted(by: PRSnapshot.triageOrder))
             }
+        return result
     }
 
     /// The keyboard index space that J/K navigation walks. Flattens the focusable
@@ -447,26 +466,14 @@ struct TriageDeckView: View {
     /// each populated with `prs` matching that role and sorted by actionability.
     private var inboxSections: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] {
         let myLogin = settings.githubUsername
-        let needsReview = sortedForDisplay(prs.filter { $0.inboxRole(myLogin: myLogin) == .needsYourReview })
-        let yourPRs = sortedForDisplay(prs.filter { $0.inboxRole(myLogin: myLogin) == .yourPRs })
+        let needsReview = prs.filter { $0.inboxRole(myLogin: myLogin) == .needsYourReview }
+        let yourPRs = prs.filter { $0.inboxRole(myLogin: myLogin) == .yourPRs }
 
         var result: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] = []
         for (role, rolePRs) in [(InboxRole.yourPRs, yourPRs), (.needsYourReview, needsReview)] {
             guard !rolePRs.isEmpty else { continue }
-            let grouped = Dictionary(grouping: rolePRs, by: {
-                $0.actionGroup(
-                    splitDrafts: settings.splitDrafts,
-                    myLogin: settings.githubUsername,
-                    reviewReady: settings.reviewReadyConfig
-                )
-            })
-            let actionSections: [(group: ActionGroup, prs: [PRSnapshot])] = ActionGroup.allCases
-                .filter { $0 != .postponed && $0 != .done && $0 != .muted }
-                .sorted { $0.sortIndex < $1.sortIndex }
-                .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
-                    guard let sectionPRs = grouped[group], !sectionPRs.isEmpty else { return nil }
-                    return (group, sectionPRs)
-                }
+            // Per role: a leading Pinned subsection, then the actionability sections.
+            let actionSections = sectionsWithPinned(from: rolePRs)
             if !actionSections.isEmpty {
                 result.append((role: role, actionSections: actionSections))
             }
@@ -682,6 +689,11 @@ struct TriageDeckView: View {
             expansion.wrappedValue.toggle()
         } label: {
             HStack(spacing: 6) {
+                if group == .pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
                 Text(group.title)
                     .font(.caption)
                     .fontWeight(.semibold)
