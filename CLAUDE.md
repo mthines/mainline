@@ -107,6 +107,8 @@ that means degraded pages still happen and nothing is protecting the baseline.
 ### Keychain
 `KeychainHelper` is async-only. Never call `loadToken()` synchronously on `@MainActor` — it calls `Task.detached` internally.
 
+`loadToken()` reads the Keychain **once per launch** and serves every later caller from an in-memory cache (`TokenCache` actor). This matters because each `SecItemCopyMatching` can raise a macOS Keychain-access prompt when the running binary isn't on the item's ACL — the state right after an update re-signs the app — so an uncached read would prompt separately at each of the many call sites (poll loop, pin fetches, search, peek, write actions), and a recurring caller (pin-fetch refresh runs every poll) would re-prompt every ~30s. The cache collapses that to a single prompt per launch (none after "Always Allow" on a stably-signed release). Concurrent first-loads are coalesced onto one Keychain read (`inFlight`). `saveToken` seeds the cache with the new value; `deleteToken` invalidates it — so callers never re-read a token the app just wrote or cleared.
+
 ### Notification IDs
 `NotificationService` uses deterministic IDs (`mainline.new_pr.<nodeId>`) so rapid polls replace rather than stack banners.
 
