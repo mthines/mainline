@@ -1,5 +1,30 @@
 import Foundation
 
+// MARK: - Carry-forward value types
+
+/// Why a tab's result set could not be trusted as the whole tab this poll cycle.
+/// Raw values are the bounded `poll.carry_forward_reason` telemetry label.
+///
+/// File scope, not nested in `PRPoller`: `PRPoller` is `@MainActor`, and
+/// `carryingForward` reads `rawValue` from a `nonisolated` context. Keeping these
+/// types outside the isolated class removes any question of a nested declaration
+/// inheriting that isolation.
+enum CarryForwardReason: String, Equatable {
+    /// 304, or a 5xx that survived the client-side retry — the tab returned nothing.
+    case noData = "no_data"
+    /// The post-5xx retry succeeded at the reduced page size — the tab returned a subset.
+    case degradedPage = "degraded_page"
+}
+
+/// The merged snapshot array plus how many PRs the carry-forward rescued, split by
+/// reason. The counts feed `TelemetryService.recordPRsCarriedForward`; each PR is
+/// counted exactly ONCE, so the total is a true PR count rather than a per-tab tally
+/// that double-counts anything sitting in both tabs.
+struct CarryForwardResult: Equatable {
+    var snapshots: [PRSnapshot]
+    var carriedByReason: [String: Int]
+}
+
 /// Task-based poll loop. Cancels cleanly via `stop()`.
 /// All state writes go through PRStateStore — PRPoller never mutates snapshots directly.
 @MainActor
@@ -74,25 +99,37 @@ final class PRPoller {
     /// notification and re-lighting its unread dot. Carrying it forward VERBATIM is
     /// what keeps that from happening: an unchanged snapshot diffs to no transition.
     ///
+    /// A PR sitting in two incomplete tabs is attributed to `degradedPage` over
+    /// `noData` — the more specific reason, and the one worth watching.
+    ///
     /// Pure, `static` and `nonisolated` so `PollCarryForwardChecks` can assert it
     /// from `applicationDidFinishLaunching` — which is not `@MainActor` here — without
     /// a poll loop, a store or the network.
     nonisolated static func carryingForward(
         fetched: [PRSnapshot],
         previous: [String: PRSnapshot],
-        incompleteTabs: Set<ReviewTab>
-    ) -> [PRSnapshot] {
-        guard !incompleteTabs.isEmpty else { return fetched }
+        incompleteTabs: [ReviewTab: CarryForwardReason]
+    ) -> CarryForwardResult {
+        guard !incompleteTabs.isEmpty else {
+            return CarryForwardResult(snapshots: fetched, carriedByReason: [:])
+        }
 
         var result = fetched
+        var carriedByReason: [String: Int] = [:]
         let fetchedIds = Set(fetched.map(\.nodeId))
         // Sorted for determinism: the store is a dictionary, and an unordered
         // carry-forward would make the merged array's order vary between runs.
         for snapshot in previous.values.sorted(by: { $0.nodeId < $1.nodeId })
-        where !fetchedIds.contains(snapshot.nodeId) && !snapshot.tabs.isDisjoint(with: incompleteTabs) {
+        where !fetchedIds.contains(snapshot.nodeId) {
+            let reasons = snapshot.tabs.compactMap { incompleteTabs[$0] }
+            guard !reasons.isEmpty else { continue }
+            // `degradedPage` wins so the attribution is deterministic regardless of
+            // the iteration order of `snapshot.tabs` (a Set).
+            let reason: CarryForwardReason = reasons.contains(.degradedPage) ? .degradedPage : .noData
             result.append(snapshot)
+            carriedByReason[reason.rawValue, default: 0] += 1
         }
-        return result
+        return CarryForwardResult(snapshots: result, carriedByReason: carriedByReason)
     }
 
     // MARK: - Single poll
@@ -120,10 +157,12 @@ final class PRPoller {
         // `PRStateStore.update` rebuilds its dict from exactly the array it is
         // handed, so anything missing is dropped — these tabs' last known snapshots
         // are carried forward below instead.
-        var incompleteTabs: Set<ReviewTab> = []
+        // The reason is kept per tab (not just the fact) so the carry-forward can
+        // attribute each rescued PR to what actually caused it.
+        var incompleteTabs: [ReviewTab: CarryForwardReason] = [:]
 
         for (tab, query) in queries {
-            let queryType = tab == .created ? "author" : "reviewer"
+            let queryType = tab.telemetryQueryType
             let pollStart = Date()
             TelemetryService.shared.recordPollStarted(queryType: queryType)
 
@@ -143,7 +182,7 @@ final class PRPoller {
                 // from the diff baseline: dropping them makes the very next full-size
                 // poll re-diff each one as `.newPR`, which re-fires its notification
                 // and re-lights its unread dot on a PR the user has already seen.
-                if degraded { incompleteTabs.insert(tab) }
+                if degraded { incompleteTabs[tab] = .degradedPage }
                 allSnapshots.append(contentsOf: snapshots)
             } catch GitHubAPIError.notModified {
                 // 304 — keep existing state, no notification
@@ -154,7 +193,7 @@ final class PRPoller {
                     duration: duration,
                     etag304: true
                 )
-                incompleteTabs.insert(tab)
+                incompleteTabs[tab] = .noData
                 continue
             } catch GitHubAPIError.cancelled {
                 // Popover closed mid-request; SwiftUI cancelled the `.task`.
@@ -183,8 +222,16 @@ final class PRPoller {
                 // both tabs happened to succeed. This tab's own PRs are carried
                 // forward unchanged after the loop, so nothing disappears.
                 let duration = Date().timeIntervalSince(pollStart)
-                TelemetryService.shared.recordPollFailed(queryType: queryType, error: .serverError(code), duration: duration)
-                incompleteTabs.insert(tab)
+                // `degraded: true` — reaching this catch means `searchPRs` already
+                // spent its reduced-page retry and that attempt failed too, so this
+                // poll's duration belongs to the degraded bucket, not the healthy one.
+                TelemetryService.shared.recordPollFailed(
+                    queryType: queryType,
+                    error: .serverError(code),
+                    duration: duration,
+                    degraded: true
+                )
+                incompleteTabs[tab] = .noData
                 continue
             } catch GitHubAPIError.rateLimited(let seconds) {
                 let duration = Date().timeIntervalSince(pollStart)
@@ -212,11 +259,21 @@ final class PRPoller {
         // Carry forward the last known snapshots for any tab whose result set was
         // incomplete this cycle, so a failed, unchanged or half-size query never
         // empties — or silently truncates — that tab's list.
-        allSnapshots = Self.carryingForward(
+        let carryForward = Self.carryingForward(
             fetched: allSnapshots,
             previous: store.snapshots,
             incompleteTabs: incompleteTabs
         )
+        allSnapshots = carryForward.snapshots
+
+        // Count what the guard just rescued. Every PR here is one that would
+        // otherwise have been dropped from the diff baseline and re-fired as a
+        // `.newPR` notification on the next complete poll — so this counter, not the
+        // downstream notification count, is where a regression in the guard shows up
+        // first.
+        for (reason, count) in carryForward.carriedByReason {
+            TelemetryService.shared.recordPRsCarriedForward(count: count, reason: reason)
+        }
 
         // De-duplicate by nodeId (same PR can appear in both queries),
         // unioning the tab membership so a PR can belong to both tabs.
@@ -417,40 +474,61 @@ enum PollCarryForwardChecks {
         let a = pr("a", tabs: [.forMe])
         let b = pr("b", tabs: [.forMe])
         let c = pr("c", tabs: [.created])
+        let both = pr("both", tabs: [.forMe, .created])
 
         // Nothing incomplete → the fetched array is returned untouched, so a PR that
-        // genuinely left the search result set is still dropped.
-        assert(PRPoller.carryingForward(
-            fetched: [a], previous: store([a, b]), incompleteTabs: []
-        ).map(\.nodeId) == ["a"], "complete poll drops PRs that left the set")
+        // genuinely left the search result set is still dropped, and nothing is counted.
+        let complete = PRPoller.carryingForward(
+            fetched: [a], previous: store([a, b]), incompleteTabs: [:]
+        )
+        assert(complete.snapshots.map(\.nodeId) == ["a"], "complete poll drops PRs that left the set")
+        assert(complete.carriedByReason.isEmpty, "complete poll carries nothing forward")
 
         // A tab that returned nothing (304 / 5xx) keeps its own PRs...
-        assert(Set(PRPoller.carryingForward(
-            fetched: [c], previous: store([a, b, c]), incompleteTabs: [.forMe]
-        ).map(\.nodeId)) == ["a", "b", "c"], "empty tab carries its PRs forward")
+        let noData = PRPoller.carryingForward(
+            fetched: [c], previous: store([a, b, c]), incompleteTabs: [.forMe: .noData]
+        )
+        assert(Set(noData.snapshots.map(\.nodeId)) == ["a", "b", "c"], "empty tab carries its PRs forward")
+        assert(noData.carriedByReason == ["no_data": 2], "empty tab counts both rescued PRs")
 
         // ...and a HALF-SIZE page does too: `a` came back, `b` was cut off by the
         // reduced page size, and dropping `b` here is what re-fires it as `.newPR`.
-        assert(Set(PRPoller.carryingForward(
-            fetched: [a, c], previous: store([a, b, c]), incompleteTabs: [.forMe]
-        ).map(\.nodeId)) == ["a", "b", "c"], "degraded page carries the cut-off PRs forward")
+        let degraded = PRPoller.carryingForward(
+            fetched: [a, c], previous: store([a, b, c]), incompleteTabs: [.forMe: .degradedPage]
+        )
+        assert(Set(degraded.snapshots.map(\.nodeId)) == ["a", "b", "c"], "degraded page carries the cut-off PRs forward")
+        assert(degraded.carriedByReason == ["degraded_page": 1], "degraded page counts only the cut-off PR")
 
         // A carried-forward PR is re-added VERBATIM — a mutated copy would diff to a
         // transition and notify for a PR nothing actually happened to.
-        let carried = PRPoller.carryingForward(
-            fetched: [], previous: store([b]), incompleteTabs: [.forMe]
+        let verbatim = PRPoller.carryingForward(
+            fetched: [], previous: store([b]), incompleteTabs: [.forMe: .degradedPage]
         )
-        assert(carried.count == 1 && carried[0] == b, "carried-forward snapshot is unchanged")
+        assert(verbatim.snapshots.count == 1 && verbatim.snapshots[0] == b,
+               "carried-forward snapshot is unchanged")
 
         // Another tab's incompleteness never resurrects this tab's PRs.
-        assert(PRPoller.carryingForward(
-            fetched: [c], previous: store([a, b, c]), incompleteTabs: [.created]
-        ).map(\.nodeId) == ["c"], "carry-forward is scoped to the incomplete tabs")
+        let scoped = PRPoller.carryingForward(
+            fetched: [c], previous: store([a, b, c]), incompleteTabs: [.created: .noData]
+        )
+        assert(scoped.snapshots.map(\.nodeId) == ["c"], "carry-forward is scoped to the incomplete tabs")
+        assert(scoped.carriedByReason.isEmpty, "nothing rescued means nothing counted")
 
         // Order is deterministic: fetched first, then carried-forward by nodeId.
         assert(PRPoller.carryingForward(
-            fetched: [c], previous: store([b, a, c]), incompleteTabs: [.forMe]
-        ).map(\.nodeId) == ["c", "a", "b"], "carry-forward order is deterministic")
+            fetched: [c], previous: store([b, a, c]), incompleteTabs: [.forMe: .degradedPage]
+        ).snapshots.map(\.nodeId) == ["c", "a", "b"], "carry-forward order is deterministic")
+
+        // A PR in BOTH incomplete tabs is counted ONCE, under the more specific
+        // reason — otherwise the counter reads as more PRs rescued than exist.
+        let mixed = PRPoller.carryingForward(
+            fetched: [],
+            previous: store([both]),
+            incompleteTabs: [.forMe: .degradedPage, .created: .noData]
+        )
+        assert(mixed.snapshots.map(\.nodeId) == ["both"], "a both-tabs PR is carried once")
+        assert(mixed.carriedByReason == ["degraded_page": 1],
+               "a both-tabs PR counts once, degraded wins over no_data")
     }
 }
 #endif

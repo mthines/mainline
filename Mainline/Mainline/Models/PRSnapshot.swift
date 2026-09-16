@@ -50,6 +50,20 @@ enum ReviewTab: String, Codable, Equatable, CaseIterable, Identifiable {
         case .inbox:   return "Inbox"
         }
     }
+
+    /// The bounded `poll.query_type` telemetry label for this tab.
+    ///
+    /// Single source of truth: `PRPoller` tags the poll span with it and
+    /// `GitHubClient` tags a recovered 5xx with it, and the two MUST agree or the
+    /// same poll shows up under two different label values. `.inbox` is a derived
+    /// view with no query of its own, so it reports as `author` alongside `.created`
+    /// — mirroring `GitHubClient.doneQualifier(for:)`, which resolves it the same way.
+    var telemetryQueryType: String {
+        switch self {
+        case .forMe:            return "reviewer"
+        case .created, .inbox:  return "author"
+        }
+    }
 }
 
 // MARK: - InboxRole

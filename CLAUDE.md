@@ -43,7 +43,7 @@ Mainline/Mainline/                     ← Source root
 │   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files; author now decoded with __typename for bot detection; labels(first:10) added
 │   ├── PRStateStore.swift       ← @MainActor [nodeId: PRSnapshot] dict
 │   ├── PRDiffEngine.swift       ← Pure diff(previous:next:myLogin:)
-│   ├── PRPoller.swift           ← Task-based poll loop + pollOnce(); pure `carryingForward(fetched:previous:incompleteTabs:)` keeps a 304 / 5xx / degraded-page tab from shrinking the diff baseline; `PollCarryForwardChecks.run()` #if DEBUG
+│   ├── PRPoller.swift           ← Task-based poll loop + pollOnce(); pure `carryingForward(fetched:previous:incompleteTabs:)` → `CarryForwardResult` keeps a 304 / 5xx / degraded-page tab from shrinking the diff baseline and counts what it rescued (`mainline.poll.carried_forward`); `CarryForwardReason` enum; `PollCarryForwardChecks.run()` #if DEBUG
 │   ├── NotificationService.swift← UNNotificationRequest per transition; `async requestAuthorization()` (no longer discards `granted`); `authorizationState()` + pure `classify(...)` → `NotificationAuthorizationState`; `openSystemNotificationSettings()`; case-insensitive `resolveTransition` via `PRSnapshot.loginsMatch`; `NotificationRoutingChecks.run()` #if DEBUG
 │   ├── PRManager.swift          ← @MainActor orchestrator + write actions; inbox-derived populations (inboxActivePRs, inboxMutedPRs, inboxMuteConfig); currentViewPRs routes to inboxActivePRs on .inbox tab; self-healing `refreshUsername` (nonisolated fetch + `UsernameFetchError` + published `usernameError`); published `notificationAuthorization` via `refreshNotificationAuthorization()`
 │   ├── SensitivePathMatcher.swift ← Pure path/branch-name heuristic classifier
@@ -90,11 +90,19 @@ the missing PRs forward:
   and re-notify ~49 team-review PRs on the following poll (thousands of spurious
   `reviewRequestedTeam` events a day).
 
-Both land in `PRPoller.poll`'s `incompleteTabs` set and go through the pure
+Both land in `PRPoller.poll`'s `incompleteTabs` map (`[ReviewTab: CarryForwardReason]`
+— the reason is kept, not just the fact) and go through the pure
 `PRPoller.carryingForward(fetched:previous:incompleteTabs:)`, which re-adds each
 missing snapshot **verbatim** — an unchanged snapshot diffs to no transition, so the
 list is preserved without notifying. A *complete* poll deliberately does NOT carry
 forward: that is how a PR that genuinely left the search set gets dropped.
+
+Its `CarryForwardResult.carriedByReason` feeds `mainline.poll.carried_forward`, which
+is **the guard's own regression signal**: every PR counted there is one that would
+otherwise have re-fired as a `.newPR` notification. A PR in two incomplete tabs counts
+ONCE, under `degraded_page` over `no_data`, so the total stays a true PR count.
+Watch for the counter falling to zero while `poll.degraded="true"` keeps arriving —
+that means degraded pages still happen and nothing is protecting the baseline.
 
 ### Keychain
 `KeychainHelper` is async-only. Never call `loadToken()` synchronously on `@MainActor` — it calls `Task.detached` internally.

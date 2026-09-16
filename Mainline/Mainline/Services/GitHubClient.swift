@@ -299,6 +299,13 @@ final class GitHubClient {
     /// forgets every PR the smaller page cut off — and re-notifies for all of them as
     /// `.newPR` on the next full-size poll. Callers must carry the missing PRs
     /// forward instead (see `PRPoller.poll`).
+    ///
+    /// The first-attempt 5xx is COUNTED even when the retry rescues the poll
+    /// (`TelemetryService.recordPollServerErrorRecovered`). It used to vanish: the
+    /// poller only records an error when the whole poll throws, so a rescued attempt
+    /// left `mainline.poll.errors` at zero while a fifth of reviewer polls were
+    /// timing out. A failure the caller recovers from is still a failure that
+    /// happened, and it is the leading indicator for the degraded-page path.
     func searchPRs(
         query: String,
         token: String,
@@ -313,7 +320,7 @@ final class GitHubClient {
                 etagPrefix: "graphql.search"
             )
             return (snapshots, etag, false)
-        } catch GitHubAPIError.serverError(_) {
+        } catch GitHubAPIError.serverError(let code) {
             try await Task.sleep(nanoseconds: Self.searchRetryDelayNanos)
             let (snapshots, etag) = try await runSearch(
                 query: query,
@@ -321,6 +328,13 @@ final class GitHubClient {
                 tab: tab,
                 first: Self.searchPageSizeDegraded,
                 etagPrefix: "graphql.search"
+            )
+            // Only after the retry SUCCEEDS — if it throws too, the poller records a
+            // terminal failure for this cycle and counting here as well would
+            // double-count one poll as two errors.
+            TelemetryService.shared.recordPollServerErrorRecovered(
+                queryType: tab.telemetryQueryType,
+                statusCode: code
             )
             return (snapshots, etag, true)
         }

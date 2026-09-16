@@ -85,7 +85,8 @@ telemetry silently does nothing (correct for dev builds without the token).
 | `mainline.app.launch`              | counter   | —                                                        |
 | `mainline.poll.duration`           | histogram | `poll.query_type`, `poll.result`, `poll.degraded`        |
 | `mainline.poll.etag_hits`          | counter   | `poll.query_type`                                        |
-| `mainline.poll.errors`             | counter   | `poll.query_type`, `error.type`                          |
+| `mainline.poll.errors`             | counter   | `poll.query_type`, `error.type`, `poll.recovered`        |
+| `mainline.poll.carried_forward`    | counter   | `poll.carry_forward_reason`                              |
 | `mainline.write_actions`           | counter   | `write.action`, `write.result`, `write.merge_method`     |
 | `mainline.triage_interactions`     | counter   | `interaction.type`                                       |
 | `mainline.notifications.fired`     | counter   | `notification.event_type`, `notification.attention_level`|
@@ -132,7 +133,9 @@ All attributes use **bounded, low-cardinality values** — never raw user data.
 | -------------------- | ------------------------------------------------------------------------------------------------ |
 | `poll.query_type`    | `"author"`, `"reviewer"` (derived from query string identity, not content)                       |
 | `poll.result`        | `"success"`, `"etag_304"`, `"failure"`, `"abandoned"`, `"app_shutdown"`                          |
-| `poll.degraded`      | `true` / `false` — `true` when the poll only succeeded on the reduced-page retry after a 5xx, so its result set is a SUBSET of the tab |
+| `poll.degraded`      | `true` / `false` — `true` when the poll only succeeded on the reduced-page retry after a 5xx, so its result set is a SUBSET of the tab. Set on BOTH the success and failure paths, so `sum by (poll_degraded)` never gets an empty-labelled bucket |
+| `poll.recovered`     | `true` / `false` — on `mainline.poll.errors`. `true` is a 5xx the reduced-page retry rescued (the poll still succeeded); `false` is a poll that gave up. Read "polls that failed" as `poll.recovered="false"` |
+| `poll.carry_forward_reason` | `"degraded_page"`, `"no_data"` — why a tab's PRs had to be carried forward from the previous baseline |
 | `error.type`         | `"unauthorized"`, `"rate_limited"`, `"server_error"`, `"cancelled"`, `"decoding"`, `"network_error"`, `"action_failed"`, `"not_modified"`, `"unknown"` |
 | `write.action`       | `"approve"`, `"merge"`, `"request_changes"`                                                      |
 | `write.result`       | `"success"`, `"failure"`                                                                         |
