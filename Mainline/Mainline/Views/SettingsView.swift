@@ -542,6 +542,15 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
 
+        Section("Pinning") {
+            Toggle("Unpin PRs when they merge", isOn: tracked(\.unpinOnMerge, name: "unpinOnMerge"))
+            Label("Keeps the Pinned section a list of work that still needs you. A closed-but-unmerged PR stays pinned — unpin it yourself with P.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
         Section("Drafts") {
             Toggle("Show draft PRs", isOn: Binding(
                 get: { settings.showDrafts },
