@@ -293,11 +293,15 @@ live PR's; without it a pin that has dropped out of the live queries freezes at 
 snapshot and never refreshes on subsequent polls. A pin still in the live queries refreshes for
 free through the normal poll, so only the non-live pins cost an extra `node(id:)` call each poll.
 Results merge into every population through the `prsIncludingPinned` source. Guards:
-`pinnedFetchInFlight` (no double-fetch), `pinnedUnfetchable` (a definitive not-found is
-negative-cached so a deleted/inaccessible pin isn't refetched each poll, AND its stale cached
-snapshot is dropped; cleared when unpinned), and transient errors are NOT negative-cached (the
-last-known snapshot is kept and the next poll retries). Silent on failure — an unreachable pin
-just won't surface.
+`pinnedFetchInFlight` (no double-fetch), `pinnedUnfetchable` (negative-cache so an unfetchable pin
+isn't refetched each poll; cleared when unpinned). Because `fetchPRByNodeId` returns `nil` for BOTH
+a genuinely deleted node AND a transient non-FORBIDDEN GraphQL error at HTTP 200 — indistinguishable
+to the caller — a `nil` only negative-caches when the pin was **never** successfully fetched (a
+first fetch that failed); for an **already-cached** pin a `nil` (like a thrown transient error)
+keeps the last-known snapshot and retries next poll, so a GraphQL blip can't permanently hide a
+still-valid pin (the "pins are always visible" invariant). The upsert is guarded by `!=` so an
+unchanged pin doesn't fire `objectWillChange` every poll. Silent on failure — an unreachable
+never-cached pin just won't surface.
 
 **Search.** The `search` shortcut (default `F`) sets `PRManager.searchActive`, which makes
 `MenuBarView` render a search `TextField` and switch the deck into `searchMode`: a single FLAT

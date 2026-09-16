@@ -505,21 +505,30 @@ final class PRManager: ObservableObject {
             defer { pinnedFetchInFlight.remove(id) }
             do {
                 guard let pr = try await client.fetchPRByNodeId(nodeId: id, token: token) else {
-                    // Definitive "no such PR" — negative-cache so we don't refetch each
-                    // poll, and drop any stale cached snapshot for a now-deleted pin.
-                    pinnedUnfetchable.insert(id)
-                    pinnedFetchedPRs.removeAll { $0.nodeId == id }
+                    // `fetchPRByNodeId` returns nil for BOTH a genuinely deleted node
+                    // AND a transient non-FORBIDDEN GraphQL error at HTTP 200 — the two
+                    // are indistinguishable here. Only negative-cache when the pin was
+                    // never successfully fetched (a first fetch that failed, the sole
+                    // case that reached nil before this method re-fetched cached pins).
+                    // For an ALREADY-cached pin, treat nil like a transient error: keep
+                    // the last-known snapshot and retry next poll, so a GraphQL blip
+                    // can't permanently hide a still-valid pinned PR.
+                    if !pinnedFetchedPRs.contains(where: { $0.nodeId == id }) {
+                        pinnedUnfetchable.insert(id)
+                    }
                     continue
                 }
                 // A pin that has since merged auto-unpins (when enabled) instead of
                 // being cached — the guard below then drops it (no longer pinned).
                 applyUnpinOnMerge([pr])
                 // Re-check under current state: still pinned, still not live. Upsert the
-                // fresh snapshot so an already-cached pin refreshes in place.
+                // fresh snapshot so an already-cached pin refreshes in place — but only
+                // when it actually changed, so an unchanged pin doesn't fire
+                // objectWillChange (and a needless re-render) every poll.
                 guard settings.isPinned(pr.nodeId),
                       !prs.contains(where: { $0.nodeId == pr.nodeId }) else { continue }
                 if let idx = pinnedFetchedPRs.firstIndex(where: { $0.nodeId == pr.nodeId }) {
-                    pinnedFetchedPRs[idx] = pr
+                    if pinnedFetchedPRs[idx] != pr { pinnedFetchedPRs[idx] = pr }
                 } else {
                     pinnedFetchedPRs.append(pr)
                 }
