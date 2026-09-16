@@ -239,13 +239,33 @@ enum KeychainHelper {
     // MARK: - Cache self-checks (DEBUG)
 
     #if DEBUG
-    /// Exercises the `TokenCache` cacheable-vs-retry decision — the cache's whole
-    /// correctness — against a stubbed loader, so the real Keychain is never
-    /// touched. `token(loader:)` takes an injectable loader precisely so this is
-    /// possible. Mirrors the pure-logic self-checks elsewhere (`InboxMuteEngine`,
-    /// `PRSearchFilter`, …); invoked once at launch from `applicationDidFinishLaunching`.
-    /// Async because the actor is, so it runs in its own detached task — assertions
-    /// still trip a DEBUG build without a full XCTest target.
+    /// One-shot async gate used only by the concurrency self-check below. Safe by
+    /// construction: `signal()` is idempotent and is always called, so `wait()`
+    /// can never deadlock.
+    private actor SelfCheckGate {
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        func signal() {
+            isOpen = true
+            waiters.forEach { $0.resume() }
+            waiters.removeAll()
+        }
+        func wait() async {
+            if isOpen { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+    }
+
+    /// Exercises `TokenCache` correctness against a stubbed loader, so the real
+    /// Keychain is never touched — `token(loader:)` takes an injectable loader
+    /// precisely so this is possible. Covers the sequential state machine (a
+    /// `.failed` load is retried; `.found`/`.absent` are cached; `store` seeds;
+    /// `invalidate` reloads) AND the concurrent generation guard (a `store`
+    /// landing mid-load wins over the resuming read). Mirrors the pure-logic
+    /// self-checks elsewhere (`InboxMuteEngine`, `PRSearchFilter`, …); invoked
+    /// once at launch from `applicationDidFinishLaunching`. Async because the
+    /// actor is, so it runs in its own detached task — assertions still trip a
+    /// DEBUG build without a full XCTest target.
     static func runCacheSelfChecks() {
         Task {
             // A `.failed` load must NOT be cached: the next read retries and can
@@ -280,6 +300,30 @@ enum KeychainHelper {
             await invalidated.invalidate()
             let afterInvalidate = await invalidated.token { .found("new") }
             assert(afterInvalidate == "new", "invalidate forces a reload")
+
+            // Generation guard: a `store()` that lands WHILE a load is in flight
+            // must win — the resuming, now-stale read must not clobber it. This is
+            // deterministic: the loader signals once it has begun (so `token` has
+            // captured the generation and set `inFlight`) and parks until released,
+            // and actor serialisation guarantees `store()` runs only while `token`
+            // is suspended at `await task.value`.
+            let race = TokenCache()
+            let started = SelfCheckGate()
+            let release = SelfCheckGate()
+            let load = Task {
+                await race.token {
+                    await started.signal()
+                    await release.wait()
+                    return .found("stale")
+                }
+            }
+            await started.wait()        // the load has begun; generation captured
+            await race.store("fresh")   // lands during the load → bumps generation
+            await release.signal()      // let the load resume and lose the commit
+            _ = await load.value
+            let winner = await race.token { .found("unread") }
+            assert(winner == "fresh",
+                   "a store during the load wins; the resuming read does not clobber it")
         }
     }
     #endif
