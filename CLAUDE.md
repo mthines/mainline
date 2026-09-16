@@ -57,7 +57,7 @@ Mainline/Mainline/                     ← Source root
 │   └── LaunchAtLoginService.swift ← SMAppService-backed launch-at-login registration (pure enum, no I/O on the main thread)
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab
-    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView; GitHub pane shows the resolved login + `usernameError`; Notifications pane shows the macOS-permission warning (+ Open System Settings) and drives the Attention Policy list from `PREvent.deliverable`
+    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView; GitHub pane shows the resolved login + `usernameError`; Notifications pane shows the macOS-permission warning with a state-aware CTA (`.notDetermined` → "Enable Notifications…" calling `requestNotificationAuthorization()`; `.denied`/`.silent` → "Open System Settings…") and drives the Attention Policy list from `PREvent.deliverable`
     ├── InboxSettingsView.swift   ← Inbox noise-filter settings: Review Readiness (four reviewer "not ready → Waiting" toggles: conflict / failing CI / unresolved threads / approved-by-me, all default ON), mute patterns, muteBotAuthors toggle, per-org Review Focus (org sub-blocks nested INSIDE the one Review Focus card via `orgFocusBlock`, each with a Remove button; authors+teams keyed by lowercased org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
@@ -122,9 +122,19 @@ notifications", check them in this order — the first two used to fail silently
    availability) and classifies it with the pure
    `classify(authorizationStatus:alertStyle:alertSetting:)`. `.denied` and `.silent`
    (authorized but alert style "None", or alerts disabled) both suppress every banner.
-   Surfaced as a warning + "Open System Settings…" button in Settings → Notifications,
-   backed by `PRManager.notificationAuthorization`. `requestAuthorization()` is `async`
-   and no longer discards `granted`.
+   Surfaced as a warning in Settings → Notifications, backed by
+   `PRManager.notificationAuthorization`. **The CTA is state-aware:** `.notDetermined`
+   gets an **"Enable Notifications…"** button that calls
+   `PRManager.requestNotificationAuthorization()` (request → refresh) — the one state
+   System Settings can't fix, since there's nothing to toggle until the app has asked.
+   That matters because notification grants are keyed by **code signature**, not just
+   bundle ID, and the launch-time `requestAuthorization` in `start()` fires while this
+   menu-bar accessory is INACTIVE, so its prompt is often never presented — leaving the
+   signed release stuck `.notDetermined` even while System Settings shows a provisional
+   "Allow" row. Requesting from the Settings window (app active → prompt shows, or an
+   already-granted state resolves without one) clears it. `.denied` / `.silent` instead
+   get "Open System Settings…". `requestAuthorization()` is `async` and no longer
+   discards `granted`.
 2. **A `PRTransition` must exist.** `PRTransition` has only FOUR cases
    (`newPR`, `readyForReview`, `ciStatusChanged`, `newReviewOrComment`), so only the
    `PREvent`s reachable from `NotificationService.resolveTransition` can ever fire.

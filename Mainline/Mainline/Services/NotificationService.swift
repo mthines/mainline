@@ -39,7 +39,7 @@ enum NotificationAuthorizationState: Equatable {
         case .denied:
             return "macOS is blocking Mainline's notifications. No banner will appear until you allow them in System Settings, no matter how the events below are configured."
         case .notDetermined:
-            return "Mainline hasn't been granted permission to send notifications yet. Allow them in System Settings to start receiving banners."
+            return "Mainline hasn't asked macOS for permission to send notifications yet. Click Enable Notifications to grant it."
         case .unknown:
             return nil
         }
