@@ -585,6 +585,16 @@ struct MenuBarView: View {
                 // Return: keep the filter, hand focus back to the deck for J/K + pin.
                 searchFieldFocused = false
             }
+            .onMoveCommand { direction in
+                // Down drops focus into the results so the deck's row shortcuts
+                // (pin, snooze, …) act on the first result. Up from the first row
+                // is handled inside the deck (it bumps `searchFocusToken` to come
+                // back here). Left/Right are left to the field for cursor movement —
+                // in a single-line field `onMoveCommand` only fires for Up/Down.
+                if direction == .down {
+                    searchFieldFocused = false
+                }
+            }
             .onExitCommand {
                 // Esc while the field is focused: close search entirely.
                 manager.closeSearch()

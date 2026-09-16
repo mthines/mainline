@@ -328,6 +328,14 @@ guard), un-cached, silent on failure.
   "No matching PRs" state). A number in a repo you track nowhere still needs the full URL —
   which the empty state nudges toward.
 
+**Arrow focus handoff.** The search field sits directly above the flat results, so the two
+navigate as one column: pressing **Down** in the field hands focus to the deck (via the
+field's `.onMoveCommand` → `searchFieldFocused = false`) so the row shortcuts (pin, snooze, …)
+act on the first result, and pressing **Up** (or the configured nav-up key) on the FIRST row
+returns focus to the field (`handleKeyDown` bumps `manager.searchFocusToken`, which `MenuBarView`
+observes to refocus). Down is arrow-only on purpose — a bare `j` must still type into the query;
+in a single-line field `.onMoveCommand` fires only for Up/Down, so Left/Right keep editing the text.
+
 **Lifecycle.** Return hands focus back to the deck (filter kept) so J/K + pin work on the
 results; Esc / ✕ / "Done" call `closeSearch()` (which also clears `searchFetchedPRs`). Closing
 the popover itself also exits search: `KeyCaptureView`'s `onDismiss` (fired on window

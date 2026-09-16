@@ -1406,6 +1406,13 @@ struct TriageDeckView: View {
             return nil
         }
         if shortcutMatches(.navigateUp, event: event) || (chars == "\u{F700}" && noRelevantMods) {
+            // In search, moving up from the first row returns focus to the search
+            // field (it sits directly above the results). Bumping the token makes
+            // MenuBarView refocus the field; the Down arrow there brings you back.
+            if searchMode, selectedIndex == 0 {
+                manager.searchFocusToken &+= 1
+                return nil
+            }
             moveUp()
             return nil
         }
