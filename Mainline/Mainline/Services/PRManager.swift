@@ -527,16 +527,67 @@ final class PRManager: ObservableObject {
                 // objectWillChange (and a needless re-render) every poll.
                 guard settings.isPinned(pr.nodeId),
                       !prs.contains(where: { $0.nodeId == pr.nodeId }) else { continue }
-                if let idx = pinnedFetchedPRs.firstIndex(where: { $0.nodeId == pr.nodeId }) {
-                    if pinnedFetchedPRs[idx] != pr { pinnedFetchedPRs[idx] = pr }
+                // Enrich with the Vercel preview URL — a live pin gets this from the
+                // poller, but an on-demand-fetched one never flows through
+                // `PRPoller.enrichVercelPreviews`, so without this it shows no preview
+                // badge and `E` does nothing.
+                let enriched = await pinnedPreviewEnriched(pr, token: token)
+                if let idx = pinnedFetchedPRs.firstIndex(where: { $0.nodeId == enriched.nodeId }) {
+                    if pinnedFetchedPRs[idx] != enriched { pinnedFetchedPRs[idx] = enriched }
                 } else {
-                    pinnedFetchedPRs.append(pr)
+                    pinnedFetchedPRs.append(enriched)
                 }
             } catch {
                 // Transient error (network / auth / rate limit) — NOT negative-cached,
                 // and the last-known snapshot is kept, so the next poll retries and the
                 // pin stays visible meanwhile.
             }
+        }
+    }
+
+    /// Enriches a freshly-fetched pinned snapshot with its Vercel preview URL so an
+    /// on-demand-fetched pin shows the same preview badge / `E` action as a live one.
+    /// Mirrors `PRPoller.enrichVercelPreviews`: the same feature gate + match-rule
+    /// guards, and the same `vercelPreviewCheckedAt`-keyed carry-forward — a preview
+    /// only changes when a new commit bumps `updatedAt`, so an unchanged pin reuses
+    /// the cached value and makes no comment fetch. Returns `pr` unchanged when the
+    /// feature is off, both match rules are cleared, or the fetch fails (retried next
+    /// poll), so preview enrichment never blocks or drops a pin.
+    private func pinnedPreviewEnriched(_ pr: PRSnapshot, token: String) async -> PRSnapshot {
+        guard settings.vercelPreviewEnabled else { return pr }
+        let domains = settings.vercelPreviewDomains
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let linkLabels = settings.previewLinkLabels
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !domains.isEmpty || !linkLabels.isEmpty else { return pr }
+
+        // Carry forward: reuse the cached preview while `updatedAt` is unchanged, so
+        // a steady poll makes zero extra REST calls (same key the poller uses).
+        if let cached = pinnedFetchedPRs.first(where: { $0.nodeId == pr.nodeId }),
+           cached.vercelPreviewCheckedAt == pr.updatedAt {
+            var out = pr
+            out.vercelPreviewUrl = cached.vercelPreviewUrl
+            out.vercelPreviewCheckedAt = cached.vercelPreviewCheckedAt
+            return out
+        }
+
+        do {
+            let url = try await client.fetchPreviewURL(
+                repoFullName: pr.repoFullName,
+                number: pr.number,
+                domains: domains,
+                authors: settings.previewCommentAuthors,
+                linkLabels: linkLabels,
+                token: token
+            )
+            var out = pr
+            out.vercelPreviewUrl = url
+            out.vercelPreviewCheckedAt = pr.updatedAt
+            return out
+        } catch {
+            // Non-critical (auth / rate-limit / 5xx / decoding) — leave unchecked so
+            // the next poll retries; the pin still shows, just without a preview badge.
+            return pr
         }
     }
 
