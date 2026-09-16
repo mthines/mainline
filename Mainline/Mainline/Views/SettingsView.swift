@@ -390,8 +390,19 @@ struct SettingsView: View {
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Open System Settings…") {
-                    NotificationService.openSystemNotificationSettings()
+                // `.notDetermined` is the one state System Settings can't fix —
+                // there's nothing to toggle until the app has asked. Ask here,
+                // where the app is active (this window is key) so the system
+                // prompt reliably appears. Every other warned state (`denied` /
+                // `silent`) is a System Settings toggle, so send them there.
+                if manager.notificationAuthorization == .notDetermined {
+                    Button("Enable Notifications…") {
+                        Task { await manager.requestNotificationAuthorization() }
+                    }
+                } else {
+                    Button("Open System Settings…") {
+                        NotificationService.openSystemNotificationSettings()
+                    }
                 }
             }
         }

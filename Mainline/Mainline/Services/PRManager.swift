@@ -1278,4 +1278,20 @@ final class PRManager: ObservableObject {
     func refreshNotificationAuthorization() async {
         notificationAuthorization = await notifications.authorizationState()
     }
+
+    /// Asks macOS for notification permission, then re-reads the resulting state.
+    ///
+    /// This is the correct action for a `.notDetermined` app — the only state
+    /// System Settings cannot resolve, because there is nothing to toggle until
+    /// the app has actually asked. The launch-time `requestAuthorization` in
+    /// `start()` fires while this menu-bar accessory is inactive, so the system
+    /// prompt is often not presented and the app is left `.notDetermined`. Driven
+    /// from a button in Settings → Notifications, the app IS active (its window is
+    /// key), so the prompt reliably appears; and if a grant already exists that
+    /// this process simply hadn't observed, the request resolves to `.authorized`
+    /// without a prompt. Either way the warning clears once the state refreshes.
+    func requestNotificationAuthorization() async {
+        await notifications.requestAuthorization()
+        await refreshNotificationAuthorization()
+    }
 }
