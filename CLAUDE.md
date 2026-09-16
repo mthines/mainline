@@ -340,6 +340,11 @@ the field is focused** that intercepts keyCode 125 (Down), consumes it (returns 
 cursor stays put), and defers `searchFieldFocused = false` one runloop tick. It touches only
 the Down key — typing (incl. a bare `j` into the query), ←/→ cursor, Up, Return and Esc all
 pass through — and is torn down on blur / search-close / disappear (`removeSearchDownMonitor`).
+While the field holds focus, NO row shows the keyboard-focus highlight: `MenuBarView` passes
+`searchFieldFocused` into `TriageDeckView`, whose `showsKeyboardFocus` (`!(searchMode &&
+searchFieldFocused)`) gates BOTH the visual (`deckRow`) and the `DeckRowKey` memo, so the top
+result isn't highlighted until Down actually moves focus into the list (and it hides again on
+the Up-from-first-row handoff back to the field).
 
 **Lifecycle.** Return hands focus back to the deck (filter kept) so J/K + pin work on the
 results; Esc / ✕ / "Done" call `closeSearch()` (which also clears `searchFetchedPRs`). Closing

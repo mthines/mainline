@@ -215,6 +215,12 @@ struct TriageDeckView: View {
     /// actionability grouping, no Postponed/Done/Muted sections) so you can scan,
     /// J/K, and pin a specific PR. Overrides `inboxMode`.
     var searchMode: Bool = false
+    /// Whether the search field currently holds keyboard focus. While it does, no row
+    /// shows the keyboard-focus highlight — otherwise the first result looks selected
+    /// the instant search opens, before the user has pressed Down to enter the list.
+    /// The highlight appears once Down blurs the field (and hides again when Up on the
+    /// first row returns focus to it).
+    var searchFieldFocused: Bool = false
     @ObservedObject var manager: PRManager
     @ObservedObject var settings: MainlineSettings
 
@@ -764,11 +770,19 @@ struct TriageDeckView: View {
     /// inputs that affect a row's appearance. SwiftUI then skips re-rendering rows
     /// whose key is unchanged, so moving the highlight (J/K or hover) re-renders
     /// only the two affected rows instead of the entire non-lazy VStack.
+    /// Whether keyboard-focus highlights should render at all right now. Suppressed
+    /// while the search field holds focus, so the top result isn't highlighted before
+    /// the user presses Down to enter the list. Both the visual (`deckRow`) and the
+    /// memoization key (`DeckRowKey`) fold it in, so a focus change re-renders the row.
+    private var showsKeyboardFocus: Bool {
+        !(searchMode && searchFieldFocused)
+    }
+
     private func memoizedDeckRow(pr: PRSnapshot, index: Int) -> some View {
         EquatableRow(key: DeckRowKey(
             pr: pr,
             index: index,
-            isFocused: index == selectedIndex,
+            isFocused: index == selectedIndex && showsKeyboardFocus,
             isSelected: selectedPRs.contains(pr.nodeId),
             isPinned: settings.pinnedNodeIds.contains(pr.nodeId),
             isUnread: manager.unreadPRIds.contains(pr.nodeId),
@@ -844,7 +858,7 @@ struct TriageDeckView: View {
     }
 
     private func deckRow(pr: PRSnapshot, index: Int) -> some View {
-        let isFocused = index == selectedIndex
+        let isFocused = index == selectedIndex && showsKeyboardFocus
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
         // The trailing "Later"/"Merge" cluster reveals on the SELECTED row. Hover and

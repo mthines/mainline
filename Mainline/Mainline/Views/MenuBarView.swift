@@ -728,6 +728,7 @@ struct MenuBarView: View {
                 mutedPRs: (settings.selectedTab == .inbox && !manager.searchActive) ? manager.inboxMutedPRs : [],
                 inboxMode: settings.selectedTab == .inbox && !manager.searchActive,
                 searchMode: manager.searchActive,
+                searchFieldFocused: searchFieldFocused,
                 manager: manager,
                 settings: settings
             )
