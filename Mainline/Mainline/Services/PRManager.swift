@@ -377,8 +377,9 @@ final class PRManager: ObservableObject {
     /// on (default). Keeps the Pinned section a list of still-relevant work rather
     /// than a graveyard of finished PRs. A closed-unmerged PR is left pinned on
     /// purpose. No-op when the setting is off. Unpins directly via `settings` (not
-    /// `PRManager.setPinned`) to avoid re-entrant fetch scheduling; the caller's
-    /// surrounding `refreshPinnedFetches` prunes any now-stale fetched entry.
+    /// `PRManager.setPinned`) to avoid re-entrant fetch scheduling; a subsequent
+    /// `refreshPinnedFetches` — scheduled on the same poll by the `store.$snapshots`
+    /// sink — prunes any now-stale fetched entry, at every call site.
     private func applyUnpinOnMerge(_ list: [PRSnapshot]) {
         guard settings.unpinOnMerge else { return }
         for pr in list where pr.merged && settings.isPinned(pr.nodeId) {
