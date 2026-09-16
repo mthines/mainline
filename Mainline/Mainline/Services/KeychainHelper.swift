@@ -235,4 +235,52 @@ enum KeychainHelper {
             }
         }
     }
+
+    // MARK: - Cache self-checks (DEBUG)
+
+    #if DEBUG
+    /// Exercises the `TokenCache` cacheable-vs-retry decision — the cache's whole
+    /// correctness — against a stubbed loader, so the real Keychain is never
+    /// touched. `token(loader:)` takes an injectable loader precisely so this is
+    /// possible. Mirrors the pure-logic self-checks elsewhere (`InboxMuteEngine`,
+    /// `PRSearchFilter`, …); invoked once at launch from `applicationDidFinishLaunching`.
+    /// Async because the actor is, so it runs in its own detached task — assertions
+    /// still trip a DEBUG build without a full XCTest target.
+    static func runCacheSelfChecks() {
+        Task {
+            // A `.failed` load must NOT be cached: the next read retries and can
+            // succeed. This is the blocking regression the cache shipped with.
+            let retry = TokenCache()
+            let first = await retry.token { .failed }
+            assert(first == nil, "a failed load returns nil")
+            let second = await retry.token { .found("tok") }
+            assert(second == "tok", "after a failed load, the next read retries and succeeds")
+
+            // `.absent` IS definitive and cached: a later loader is never consulted.
+            let absent = TokenCache()
+            _ = await absent.token { .absent }
+            let afterAbsent = await absent.token { .found("unread") }
+            assert(afterAbsent == nil, "absent is cached; the loader is not re-consulted")
+
+            // `.found` is cached too.
+            let found = TokenCache()
+            _ = await found.token { .found("cached") }
+            let afterFound = await found.token { .found("unread") }
+            assert(afterFound == "cached", "found is cached; the loader is not re-consulted")
+
+            // `store` seeds the cache and short-circuits the loader.
+            let seeded = TokenCache()
+            await seeded.store("seeded")
+            let afterStore = await seeded.token { .found("unread") }
+            assert(afterStore == "seeded", "store seeds the cache; the loader is not consulted")
+
+            // `invalidate` forces the next read to reload.
+            let invalidated = TokenCache()
+            _ = await invalidated.token { .found("old") }
+            await invalidated.invalidate()
+            let afterInvalidate = await invalidated.token { .found("new") }
+            assert(afterInvalidate == "new", "invalidate forces a reload")
+        }
+    }
+    #endif
 }
