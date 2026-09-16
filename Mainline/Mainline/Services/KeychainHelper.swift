@@ -11,6 +11,27 @@ enum KeychainHelper {
 
     // MARK: - In-memory token cache
 
+    /// Outcome of a single Keychain read, kept distinct so the cache can tell a
+    /// *definitive* answer (the token, or a confirmed absence) apart from a
+    /// *transient failure* (a denied ACL prompt, `errSecInteractionNotAllowed`,
+    /// …). Only the first two are safe to cache; a failure must be retried.
+    private enum TokenLoadResult {
+        /// A token was read successfully.
+        case found(String)
+        /// The item does not exist (`errSecItemNotFound`), or exists but is
+        /// unreadable — a deterministic "no usable token", safe to cache as nil.
+        case absent
+        /// The read failed for a transient reason (ACL denied, interaction not
+        /// allowed, …). NOT cached — the next caller retries.
+        case failed
+
+        /// The token to hand back to callers; nil for both `.absent` and `.failed`.
+        var token: String? {
+            if case .found(let token) = self { return token }
+            return nil
+        }
+    }
+
     /// Serialises access to the cached GitHub token so the Keychain is read **once
     /// per launch**, not once per caller.
     ///
@@ -28,20 +49,45 @@ enum KeychainHelper {
     private actor TokenCache {
         private var loaded = false
         private var value: String?
-        private var inFlight: Task<String?, Never>?
+        private var inFlight: Task<TokenLoadResult, Never>?
+        /// Bumped by every `store`/`invalidate`. A load captures it before the
+        /// `await` and only commits its result if it is unchanged afterwards, so a
+        /// write that lands *during* the load is authoritative and is never
+        /// clobbered by the resuming (now-stale) read — actors are re-entrant
+        /// across `await`, so this guard is load-bearing, not defensive.
+        private var generation = 0
 
         /// Returns the cached token, loading it once via `loader` on a miss and
         /// coalescing concurrent misses onto a single load.
-        func token(loader: @Sendable @escaping () async -> String?) async -> String? {
+        ///
+        /// A `.failed` load is deliberately NOT cached: before this cache existed
+        /// every `loadToken()` re-read the Keychain, so a denied ACL prompt healed
+        /// on the next ~30s poll. Pinning `loaded` on a failure would strand every
+        /// caller signed-out until relaunch — a regression in exactly the scenario
+        /// this cache exists to smooth. So only `.found`/`.absent` set `loaded`.
+        func token(loader: @Sendable @escaping () async -> TokenLoadResult) async -> String? {
             if loaded { return value }
-            if let inFlight { return await inFlight.value }
+            if let inFlight { return await inFlight.value.token }
+            let gen = generation
             let task = Task { await loader() }
             inFlight = task
             let result = await task.value
-            loaded = true
-            value = result
-            inFlight = nil
-            return result
+            // Only commit if no store()/invalidate() ran during the load.
+            if generation == gen {
+                inFlight = nil
+                switch result {
+                case .found(let token):
+                    loaded = true
+                    value = token
+                case .absent:
+                    loaded = true
+                    value = nil
+                case .failed:
+                    // Leave `loaded` false so the next caller retries.
+                    break
+                }
+            }
+            return result.token
         }
 
         /// Seeds the cache with a known value (e.g. just after saving a new token),
@@ -50,6 +96,7 @@ enum KeychainHelper {
             loaded = true
             value = newValue
             inFlight = nil
+            generation += 1
         }
 
         /// Forgets the cached value so the next read reloads from the Keychain.
@@ -57,6 +104,7 @@ enum KeychainHelper {
             loaded = false
             value = nil
             inFlight = nil
+            generation += 1
         }
     }
 
@@ -117,8 +165,10 @@ enum KeychainHelper {
 
     // MARK: - Load (async — never blocks MainActor)
 
-    /// Loads a secret asynchronously from the Keychain. Returns nil if none stored.
-    private static func load(account: String) async -> String? {
+    /// Loads a secret asynchronously from the Keychain, distinguishing a
+    /// definitive answer (`.found` / `.absent`) from a transient failure
+    /// (`.failed`) so the cache knows which results are safe to keep.
+    private static func load(account: String) async -> TokenLoadResult {
         await withCheckedContinuation { continuation in
             Task.detached(priority: .userInitiated) {
                 let query: [CFString: Any] = [
@@ -132,12 +182,23 @@ enum KeychainHelper {
                 var result: AnyObject?
                 let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-                if status == errSecSuccess,
-                   let data = result as? Data,
-                   let token = String(data: data, encoding: .utf8) {
-                    continuation.resume(returning: token)
-                } else {
-                    continuation.resume(returning: nil)
+                switch status {
+                case errSecSuccess:
+                    if let data = result as? Data,
+                       let token = String(data: data, encoding: .utf8) {
+                        continuation.resume(returning: .found(token))
+                    } else {
+                        // Present but unreadable — a corrupt entry, not a transient
+                        // error. Cache as absent so we don't re-read (and risk
+                        // re-prompting) on every call.
+                        continuation.resume(returning: .absent)
+                    }
+                case errSecItemNotFound:
+                    continuation.resume(returning: .absent)
+                default:
+                    // errSecInteractionNotAllowed, a denied/failed ACL prompt, etc.
+                    // Transient: don't let the cache pin this as "no token".
+                    continuation.resume(returning: .failed)
                 }
             }
         }
