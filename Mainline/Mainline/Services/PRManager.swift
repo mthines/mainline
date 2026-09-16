@@ -532,6 +532,13 @@ final class PRManager: ObservableObject {
                 // `PRPoller.enrichVercelPreviews`, so without this it shows no preview
                 // badge and `E` does nothing.
                 let enriched = await pinnedPreviewEnriched(pr, token: token)
+                // Re-check under CURRENT state after the enrichment suspension: the user
+                // may have unpinned, or the PR reappeared live, while the preview was
+                // fetching. Without this a concurrent `removeAll` (from a re-entrant
+                // refresh or a `togglePin`) could drop the entry and this in-flight body
+                // would re-append a now-unpinned snapshot until the next poll's prune.
+                guard settings.isPinned(enriched.nodeId),
+                      !prs.contains(where: { $0.nodeId == enriched.nodeId }) else { continue }
                 if let idx = pinnedFetchedPRs.firstIndex(where: { $0.nodeId == enriched.nodeId }) {
                     if pinnedFetchedPRs[idx] != enriched { pinnedFetchedPRs[idx] = enriched }
                 } else {
