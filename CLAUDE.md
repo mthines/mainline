@@ -329,12 +329,17 @@ guard), un-cached, silent on failure.
   which the empty state nudges toward.
 
 **Arrow focus handoff.** The search field sits directly above the flat results, so the two
-navigate as one column: pressing **Down** in the field hands focus to the deck (via the
-field's `.onMoveCommand` → `searchFieldFocused = false`) so the row shortcuts (pin, snooze, …)
-act on the first result, and pressing **Up** (or the configured nav-up key) on the FIRST row
-returns focus to the field (`handleKeyDown` bumps `manager.searchFocusToken`, which `MenuBarView`
-observes to refocus). Down is arrow-only on purpose — a bare `j` must still type into the query;
-in a single-line field `.onMoveCommand` fires only for Up/Down, so Left/Right keep editing the text.
+navigate as one column: pressing **Down** in the field hands focus to the deck (→
+`searchFieldFocused = false`) so the row shortcuts (pin, snooze, …) act on the first result,
+and pressing **Up** (or the configured nav-up key) on the FIRST row returns focus to the field
+(`handleKeyDown` bumps `manager.searchFocusToken`, which `MenuBarView` observes to refocus).
+Down can NOT be caught with `.onMoveCommand` — a single-line `NSTextField` treats Down as
+"move cursor to line-end" and consumes it, so SwiftUI never sees the command. Instead
+`MenuBarView` installs a local `NSEvent` key monitor (`installSearchDownMonitor`) **only while
+the field is focused** that intercepts keyCode 125 (Down), consumes it (returns nil, so the
+cursor stays put), and defers `searchFieldFocused = false` one runloop tick. It touches only
+the Down key — typing (incl. a bare `j` into the query), ←/→ cursor, Up, Return and Esc all
+pass through — and is torn down on blur / search-close / disappear (`removeSearchDownMonitor`).
 
 **Lifecycle.** Return hands focus back to the deck (filter kept) so J/K + pin work on the
 results; Esc / ✕ / "Done" call `closeSearch()` (which also clears `searchFetchedPRs`). Closing
