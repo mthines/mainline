@@ -265,18 +265,25 @@ number (`3` finds `300`/`321`/`32`), anything else is a case-insensitive substri
 title/repo/author/branch/`#number`. `PRSearchFilter.runSelfChecks()` (#if DEBUG, wired in
 `MainlineApp`) asserts the parser + matcher (incl. the fuzzy-number substring cases).
 
-**On-demand URL fetch.** A pasted PR URL may point at a PR that isn't in the current tab's
-loaded set (e.g. a repo you don't watch), so no local PR matches. `MenuBarView`'s
-`.onChange(of: searchQuery)` calls `PRManager.resolveSearchTarget(for:)`, which — ONLY for a
-`.url` query with no local/prior match — fetches that one PR via
-`GitHubClient.fetchSinglePR(owner:repo:number:tab:token:)` and appends it to
-`PRManager.searchFetchedPRs`; `MenuBarView.searchResults` merges those into the results
-(deduped by nodeId). The fetch reuses the shared `GitHubClient.prNodeFields` selection (also
-used by `searchQueryDocument`) via `singlePRQueryDocument`, so the result decodes through the
-same `GraphQLNode` → `makeSnapshot` path; it is idempotent per URL (`searchFetchInFlight`
-guard), un-cached, and silent on failure. A BARE number can't be fetched — it has no repo — so
-bare numbers stay a fuzzy filter over the loaded set, and the empty state nudges the user to
-paste the full URL when a bare-number query finds nothing.
+**On-demand fetch.** A search target may point at a PR that isn't in the current tab's loaded
+set (a repo you don't watch, a bot PR with no reviewer requested), so no local PR matches.
+`MenuBarView`'s `.onChange(of: searchQuery)` calls `PRManager.resolveSearchTarget(for:)`, which
+dispatches on the parsed query and appends any hit to `PRManager.searchFetchedPRs`;
+`MenuBarView.searchResults` merges those into the results (deduped by nodeId). Both paths fetch
+via `GitHubClient.fetchSinglePR(owner:repo:number:tab:token:)`, which reuses the shared
+`prNodeFields` selection via `singlePRQueryDocument` so the result decodes through the same
+`GraphQLNode` → `makeSnapshot` path; idempotent per `owner/repo#number` (`searchFetchInFlight`
+guard), un-cached, silent on failure.
+
+- **`.url`** (`resolveURLTarget`) — one lookup against the pasted repo + number.
+- **`.number`** (`resolveNumberTarget`) — a bare number carries no repo, so it FANS OUT: it
+  fetches that number from `candidateReposForNumberSearch()` (the distinct repos across ALL
+  loaded PRs, most-frequent first, capped at 6), so "jump to a PR by number" resolves in the
+  repos you actually track (e.g. your busiest one) without pasting a URL. Debounced 350 ms
+  (`Task.sleep` + a `searchQuery == rawQuery` recheck) so a number typed digit-by-digit only
+  fans out once you pause, and it only fires when nothing local/prior already matches (the
+  "No matching PRs" state). A number in a repo you track nowhere still needs the full URL —
+  which the empty state nudges toward.
 
 **Lifecycle.** Return hands focus back to the deck (filter kept) so J/K + pin work on the
 results; Esc / ✕ / "Done" call `closeSearch()` (which also clears `searchFetchedPRs`). Closing

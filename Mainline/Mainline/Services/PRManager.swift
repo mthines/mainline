@@ -146,8 +146,18 @@ final class PRManager: ObservableObject {
     /// (search simply shows no result). Idempotent per URL and safe to call on every
     /// keystroke.
     func resolveSearchTarget(for rawQuery: String) async {
-        guard case let .url(repoFullName, number) = PRSearchFilter.parse(rawQuery) else { return }
+        switch PRSearchFilter.parse(rawQuery) {
+        case let .url(repoFullName, number):
+            await resolveURLTarget(repoFullName: repoFullName, number: number, rawQuery: rawQuery)
+        case let .number(digits):
+            await resolveNumberTarget(digits: digits, rawQuery: rawQuery)
+        case .text, .empty:
+            return   // free text can't be fetched — it has no repo+number to resolve
+        }
+    }
 
+    /// Fetches the single PR a pasted URL names, when no loaded/prior PR matches.
+    private func resolveURLTarget(repoFullName: String, number: Int, rawQuery: String) async {
         // Already resolvable from the local set or a prior fetch? Nothing to do.
         if searchBasePRs.contains(where: { PRSearchFilter.matches($0, query: rawQuery) }) { return }
         if searchFetchedPRs.contains(where: { PRSearchFilter.matches($0, query: rawQuery) }) { return }
@@ -175,6 +185,70 @@ final class PRManager: ObservableObject {
         } catch {
             // Silent — an on-demand miss just shows no result.
         }
+    }
+
+    /// Resolves a BARE number (`19210`) that no loaded PR matches by trying that
+    /// number against the repos you actually track — most-common first, capped — so
+    /// "jump to a PR by number" works even when the PR isn't in your feeds. A bare
+    /// number carries no repo, so this is a best-effort fan-out, not a single lookup;
+    /// a number in a repo you track nowhere still needs the full URL. Debounced so a
+    /// number typed digit-by-digit only fans out once the user pauses.
+    private func resolveNumberTarget(digits: String, rawQuery: String) async {
+        guard let number = Int(digits) else { return }   // out of Int range → can't fetch
+
+        // Debounce: let the query settle. If more was typed, a later call handles it.
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        guard searchActive, searchQuery == rawQuery else { return }
+
+        // Only fan out when nothing local (or already-fetched) matches — i.e. the
+        // "No matching PRs" state. The fuzzy filter already surfaces loaded PRs whose
+        // number contains these digits.
+        if searchBasePRs.contains(where: { PRSearchFilter.matches($0, query: rawQuery) }) { return }
+        if searchFetchedPRs.contains(where: { PRSearchFilter.matches($0, query: rawQuery) }) { return }
+
+        guard let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
+
+        for repo in candidateReposForNumberSearch() {
+            // Bail as soon as the query moves on — don't keep fanning out a stale number.
+            guard searchActive, searchQuery == rawQuery else { return }
+
+            let key = "\(repo.fullName.lowercased())#\(number)"
+            if searchFetchInFlight.contains(key) { continue }
+            if searchFetchedPRs.contains(where: {
+                $0.number == number && $0.repoFullName.caseInsensitiveCompare(repo.fullName) == .orderedSame
+            }) { continue }
+
+            searchFetchInFlight.insert(key)
+            do {
+                if let pr = try await client.fetchSinglePR(
+                    owner: repo.owner, repo: repo.name, number: number,
+                    tab: settings.selectedTab, token: token
+                ), searchActive, !searchFetchedPRs.contains(where: { $0.nodeId == pr.nodeId }) {
+                    searchFetchedPRs.append(pr)
+                }
+            } catch {
+                // Silent — a repo that doesn't have this number just contributes nothing.
+            }
+            searchFetchInFlight.remove(key)
+        }
+    }
+
+    /// Distinct repos across every loaded PR (all tabs), most-frequent first and
+    /// capped, as `(owner, name, fullName)` — the candidate set a bare-number search
+    /// fans out over. Frequency-ordered so your busiest repo (where a number you half-
+    /// remember most likely lives) is tried first.
+    private func candidateReposForNumberSearch(limit: Int = 6) -> [(owner: String, name: String, fullName: String)] {
+        var counts: [String: Int] = [:]
+        for pr in prs where !pr.repoFullName.isEmpty {
+            counts[pr.repoFullName, default: 0] += 1
+        }
+        return counts.sorted { $0.value > $1.value }
+            .prefix(limit)
+            .compactMap { entry in
+                let parts = entry.key.split(separator: "/").map(String.init)
+                guard parts.count == 2 else { return nil }
+                return (owner: parts[0], name: parts[1], fullName: entry.key)
+            }
     }
 
     /// The undo toast stack. Owned here (not in `TriageDeckView`) so the toast can
