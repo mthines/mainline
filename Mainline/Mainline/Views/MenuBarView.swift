@@ -20,6 +20,14 @@ struct MenuBarView: View {
     /// (open/re-focus) and cleared on Return (hand focus back to the deck) / close.
     @FocusState private var searchFieldFocused: Bool
 
+    /// Local key monitor, installed only while the search field is focused, that
+    /// intercepts the Down arrow before the field editor handles it. A single-line
+    /// `NSTextField` treats Down as "move cursor to end of line" and consumes it, so
+    /// SwiftUI's `.onMoveCommand` never sees it — the monitor is the only reliable way
+    /// to catch Down and hand focus to the results instead. Scoped to while-focused so
+    /// it touches nothing else, and it only ever acts on the Down key.
+    @State private var searchDownKeyMonitor: Any?
+
     init(manager: PRManager) {
         self.manager = manager
         self.settings = manager.settings
@@ -139,6 +147,12 @@ struct MenuBarView: View {
                 searchFieldFocused = false
             }
         }
+        // Install the Down-arrow monitor only while the field holds focus, so the
+        // key can hand off to the results instead of moving the cursor to line-end.
+        .onChange(of: searchFieldFocused) { focused in
+            if focused { installSearchDownMonitor() } else { removeSearchDownMonitor() }
+        }
+        .onDisappear { removeSearchDownMonitor() }
         // A pasted PR URL for a PR outside the current tab has no local match; fetch
         // it on demand so search can still resolve it. No-op for bare numbers / text.
         .onChange(of: manager.searchQuery) { query in
@@ -610,6 +624,30 @@ struct MenuBarView: View {
         .padding(.vertical, 6)
     }
 
+    /// Starts intercepting the Down arrow while the search field is focused, handing
+    /// focus to the results (the deck then has `selectedIndex == 0`, its first row)
+    /// instead of letting the field editor move the cursor to line-end. Consuming the
+    /// event (returning nil) is what suppresses that default. Only the Down key is
+    /// touched; every other key — typing, ←/→ cursor, Up, Return, Esc — passes through.
+    private func installSearchDownMonitor() {
+        guard searchDownKeyMonitor == nil else { return }
+        searchDownKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 125 else { return event }   // 125 = Down arrow
+            // Defer the focus change one runloop tick — mutating focus state inside
+            // event handling is unsafe — but consume the key now so the cursor stays put.
+            DispatchQueue.main.async { searchFieldFocused = false }
+            return nil
+        }
+    }
+
+    /// Removes the Down-arrow monitor (field lost focus, search closed, or view gone).
+    private func removeSearchDownMonitor() {
+        if let monitor = searchDownKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            searchDownKeyMonitor = nil
+        }
+    }
+
     // MARK: - Scope cycling
 
     private func cycleScopeForward() {
@@ -690,6 +728,7 @@ struct MenuBarView: View {
                 mutedPRs: (settings.selectedTab == .inbox && !manager.searchActive) ? manager.inboxMutedPRs : [],
                 inboxMode: settings.selectedTab == .inbox && !manager.searchActive,
                 searchMode: manager.searchActive,
+                searchFieldFocused: searchFieldFocused,
                 manager: manager,
                 settings: settings
             )

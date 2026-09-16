@@ -328,6 +328,24 @@ guard), un-cached, silent on failure.
   "No matching PRs" state). A number in a repo you track nowhere still needs the full URL —
   which the empty state nudges toward.
 
+**Arrow focus handoff.** The search field sits directly above the flat results, so the two
+navigate as one column: pressing **Down** in the field hands focus to the deck (→
+`searchFieldFocused = false`) so the row shortcuts (pin, snooze, …) act on the first result,
+and pressing **Up** (or the configured nav-up key) on the FIRST row returns focus to the field
+(`handleKeyDown` bumps `manager.searchFocusToken`, which `MenuBarView` observes to refocus).
+Down can NOT be caught with `.onMoveCommand` — a single-line `NSTextField` treats Down as
+"move cursor to line-end" and consumes it, so SwiftUI never sees the command. Instead
+`MenuBarView` installs a local `NSEvent` key monitor (`installSearchDownMonitor`) **only while
+the field is focused** that intercepts keyCode 125 (Down), consumes it (returns nil, so the
+cursor stays put), and defers `searchFieldFocused = false` one runloop tick. It touches only
+the Down key — typing (incl. a bare `j` into the query), ←/→ cursor, Up, Return and Esc all
+pass through — and is torn down on blur / search-close / disappear (`removeSearchDownMonitor`).
+While the field holds focus, NO row shows the keyboard-focus highlight: `MenuBarView` passes
+`searchFieldFocused` into `TriageDeckView`, whose `showsKeyboardFocus` (`!(searchMode &&
+searchFieldFocused)`) gates BOTH the visual (`deckRow`) and the `DeckRowKey` memo, so the top
+result isn't highlighted until Down actually moves focus into the list (and it hides again on
+the Up-from-first-row handoff back to the field).
+
 **Lifecycle.** Return hands focus back to the deck (filter kept) so J/K + pin work on the
 results; Esc / ✕ / "Done" call `closeSearch()` (which also clears `searchFetchedPRs`). Closing
 the popover itself also exits search: `KeyCaptureView`'s `onDismiss` (fired on window
