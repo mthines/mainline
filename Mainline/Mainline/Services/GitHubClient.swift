@@ -291,24 +291,52 @@ final class GitHubClient {
     /// query, not an outage, so a smaller page is far more likely to succeed than an
     /// identical retry. Every other error (401, 304, rate limit, cancellation)
     /// propagates unchanged on the first attempt — only `.serverError` retries.
-    func searchPRs(query: String, token: String, tab: ReviewTab) async throws -> (snapshots: [PRSnapshot], etag: String?) {
+    ///
+    /// `degraded` is true when the snapshots come from that reduced-page retry. It is
+    /// load-bearing, not diagnostic: a half-size page is a SUBSET of the tab, and
+    /// `PRStateStore.update` rebuilds its baseline from exactly the array it is
+    /// handed, so a caller that treats a degraded page as the whole tab silently
+    /// forgets every PR the smaller page cut off — and re-notifies for all of them as
+    /// `.newPR` on the next full-size poll. Callers must carry the missing PRs
+    /// forward instead (see `PRPoller.poll`).
+    ///
+    /// The first-attempt 5xx is COUNTED even when the retry rescues the poll
+    /// (`TelemetryService.recordPollServerErrorRecovered`). It used to vanish: the
+    /// poller only records an error when the whole poll throws, so a rescued attempt
+    /// left `mainline.poll.errors` at zero while a fifth of reviewer polls were
+    /// timing out. A failure the caller recovers from is still a failure that
+    /// happened, and it is the leading indicator for the degraded-page path.
+    func searchPRs(
+        query: String,
+        token: String,
+        tab: ReviewTab
+    ) async throws -> (snapshots: [PRSnapshot], etag: String?, degraded: Bool) {
         do {
-            return try await runSearch(
+            let (snapshots, etag) = try await runSearch(
                 query: query,
                 token: token,
                 tab: tab,
                 first: Self.searchPageSize,
                 etagPrefix: "graphql.search"
             )
-        } catch GitHubAPIError.serverError(_) {
+            return (snapshots, etag, false)
+        } catch GitHubAPIError.serverError(let code) {
             try await Task.sleep(nanoseconds: Self.searchRetryDelayNanos)
-            return try await runSearch(
+            let (snapshots, etag) = try await runSearch(
                 query: query,
                 token: token,
                 tab: tab,
                 first: Self.searchPageSizeDegraded,
                 etagPrefix: "graphql.search"
             )
+            // Only after the retry SUCCEEDS — if it throws too, the poller records a
+            // terminal failure for this cycle and counting here as well would
+            // double-count one poll as two errors.
+            TelemetryService.shared.recordPollServerErrorRecovered(
+                queryType: tab.telemetryQueryType,
+                statusCode: code
+            )
+            return (snapshots, etag, true)
         }
     }
 

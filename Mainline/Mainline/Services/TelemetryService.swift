@@ -82,6 +82,7 @@ final class TelemetryService {
     private var pollDurationHistogram: DoubleHistogramMeterSdk?
     private var pollEtagHitsCounter: LongCounterSdk?
     private var pollErrorsCounter: LongCounterSdk?
+    private var pollCarriedForwardCounter: LongCounterSdk?
     private var appLaunchCounter: LongCounterSdk?
     private var writeActionsCounter: LongCounterSdk?
     private var triageInteractionsCounter: LongCounterSdk?
@@ -213,6 +214,12 @@ final class TelemetryService {
         pollErrorsCounter = meter
             .counterBuilder(name: "mainline.poll.errors")
             .setDescription("Number of poll errors by category")
+            .setUnit("1")
+            .build()
+
+        pollCarriedForwardCounter = meter
+            .counterBuilder(name: "mainline.poll.carried_forward")
+            .setDescription("Number of PRs carried forward because a tab's fetch was incomplete")
             .setUnit("1")
             .build()
 
@@ -375,7 +382,19 @@ final class TelemetryService {
     }
 
     /// Called when a poll completes successfully.
-    func recordPollCompleted(queryType: String, resultCount: Int, duration: Double, etag304: Bool) {
+    ///
+    /// `degraded` marks a poll that only succeeded on the reduced-page retry after a
+    /// 5xx, so its result set is a SUBSET of the tab. It is a bounded boolean (no
+    /// PR-identifying data) and it is what makes the truncation legible: without it,
+    /// a degraded poll is indistinguishable from a healthy one except by eyeballing
+    /// `poll.result_count`, which is exactly how a silent re-notify loop hid.
+    func recordPollCompleted(
+        queryType: String,
+        resultCount: Int,
+        duration: Double,
+        etag304: Bool,
+        degraded: Bool = false
+    ) {
         guard MainlineSettings.shared.telemetryEnabled else { return }
         ensureSetup()
 
@@ -387,6 +406,7 @@ final class TelemetryService {
             let labels: [String: AttributeValue] = [
                 "poll.query_type": .string(queryType),
                 "poll.result": .string("success"),
+                "poll.degraded": .bool(degraded),
             ]
             pollDurationHistogram?.record(value: duration, attributes: labels)
         }
@@ -395,13 +415,31 @@ final class TelemetryService {
             span.setAttribute(key: "poll.result", value: .string(etag304 ? "etag_304" : "success"))
             span.setAttribute(key: "poll.result_count", value: .int(resultCount))
             span.setAttribute(key: "poll.duration_s", value: .double(duration))
+            span.setAttribute(key: "poll.degraded", value: .bool(degraded))
             span.status = .ok
             span.end()
         }
     }
 
     /// Called when a poll fails with a GitHubAPIError.
-    func recordPollFailed(queryType: String, error: GitHubAPIError, duration: Double) {
+    ///
+    /// `degraded` carries the same meaning as on `recordPollCompleted`, and is
+    /// written onto the SAME `mainline.poll.duration` histogram. Both call sites must
+    /// set it or the histogram ends up with a mixed label set — some series carrying
+    /// `poll.degraded`, some not — which makes `sum by (poll_degraded)` return an
+    /// empty-labelled bucket that reads as `false` but means "not recorded".
+    ///
+    /// `recovered` separates the two very different things this counter now sees: a
+    /// poll that gave up (`false`), and a 5xx the reduced-page retry rescued
+    /// (`true`, from `recordPollServerErrorRecovered`). Anything reading
+    /// `mainline.poll.errors` as "polls that failed" must filter
+    /// `poll.recovered="false"`.
+    func recordPollFailed(
+        queryType: String,
+        error: GitHubAPIError,
+        duration: Double,
+        degraded: Bool = false
+    ) {
         guard MainlineSettings.shared.telemetryEnabled else { return }
         ensureSetup()
 
@@ -409,19 +447,73 @@ final class TelemetryService {
         pollErrorsCounter?.add(value: 1, attribute: [
             "poll.query_type": .string(queryType),
             "error.type": .string(category),
+            "poll.recovered": .bool(false),
         ])
         pollDurationHistogram?.record(value: duration, attributes: [
             "poll.query_type": .string(queryType),
             "poll.result": .string("failure"),
+            "poll.degraded": .bool(degraded),
         ])
 
         if let span = activePollSpans.removeValue(forKey: queryType) {
             span.setAttribute(key: "poll.result", value: .string("failure"))
             span.setAttribute(key: "error.type", value: .string(category))
             span.setAttribute(key: "poll.duration_s", value: .double(duration))
+            span.setAttribute(key: "poll.degraded", value: .bool(degraded))
             span.status = .error(description: category)
             span.end()
         }
+    }
+
+    /// Called when a search 5xx'd on the full-size page and the reduced-page retry
+    /// then SUCCEEDED, so the poll as a whole did not fail.
+    ///
+    /// Without this the 5xx was invisible: `recordPollFailed` is never reached on a
+    /// rescued attempt, so the error rate against GitHub — the pressure that drives
+    /// the whole degraded-page failure mode — read as zero while ~18% of reviewer
+    /// polls were timing out.
+    ///
+    /// Reuses `mainline.poll.errors` rather than minting a near-duplicate series, and
+    /// separates the two cases with the bounded `poll.recovered` flag. It records no
+    /// duration and does NOT touch the poll span: the poll is still running, and
+    /// ending its span here would truncate it mid-flight. The span learns about this
+    /// attempt through `poll.degraded` when the poll completes.
+    ///
+    /// Deliberately NOT logged at `warn`. At ~270 occurrences a day this is an
+    /// expected, handled, self-recovering condition, and a log line per occurrence is
+    /// the manufactured noise that desensitizes whoever watches the real error rate.
+    func recordPollServerErrorRecovered(queryType: String, statusCode: Int) {
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+
+        pollErrorsCounter?.add(value: 1, attribute: [
+            "poll.query_type": .string(queryType),
+            "error.type": .string(categorizeGitHubError(.serverError(statusCode))),
+            "poll.recovered": .bool(true),
+        ])
+    }
+
+    /// Called once per poll cycle, per reason, with the number of PRs that were
+    /// carried forward from the previous baseline because a tab's fetch came back
+    /// incomplete.
+    ///
+    /// This is the fix's own regression signal. Every PR counted here is one that
+    /// WOULD have been dropped from the diff baseline and re-fired as a `.newPR`
+    /// notification on the next complete poll. A non-zero value is healthy — it is
+    /// the guard doing its job. The regression to watch for is this counter going to
+    /// zero while `poll.degraded="true"` keeps arriving: that means degraded pages
+    /// are still happening but nothing is protecting the baseline any more.
+    ///
+    /// `reason` is bounded to `"degraded_page"` / `"no_data"`; the count is a plain
+    /// cardinality, never a PR id, title, or repo name.
+    func recordPRsCarriedForward(count: Int, reason: String) {
+        guard count > 0 else { return }
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+
+        pollCarriedForwardCounter?.add(value: count, attribute: [
+            "poll.carry_forward_reason": .string(reason),
+        ])
     }
 
     // MARK: - Write Actions
