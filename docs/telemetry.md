@@ -76,14 +76,14 @@ telemetry silently does nothing (correct for dev builds without the token).
 | Span name          | When started              | Key attributes                                           |
 | ------------------ | ------------------------- | -------------------------------------------------------- |
 | `mainline session` | On `configure()`          | `session.app_version`                                    |
-| `mainline poll`    | `recordPollStarted()`     | `poll.query_type`, `poll.result`, `poll.result_count`, `poll.duration_s` |
+| `mainline poll`    | `recordPollStarted()`     | `poll.query_type`, `poll.result`, `poll.result_count`, `poll.duration_s`, `poll.degraded` |
 
 ### Metrics
 
 | Metric name                        | Type      | Attributes                                               |
 | ---------------------------------- | --------- | -------------------------------------------------------- |
 | `mainline.app.launch`              | counter   | —                                                        |
-| `mainline.poll.duration`           | histogram | `poll.query_type`, `poll.result`                         |
+| `mainline.poll.duration`           | histogram | `poll.query_type`, `poll.result`, `poll.degraded`        |
 | `mainline.poll.etag_hits`          | counter   | `poll.query_type`                                        |
 | `mainline.poll.errors`             | counter   | `poll.query_type`, `error.type`                          |
 | `mainline.write_actions`           | counter   | `write.action`, `write.result`, `write.merge_method`     |
@@ -132,6 +132,7 @@ All attributes use **bounded, low-cardinality values** — never raw user data.
 | -------------------- | ------------------------------------------------------------------------------------------------ |
 | `poll.query_type`    | `"author"`, `"reviewer"` (derived from query string identity, not content)                       |
 | `poll.result`        | `"success"`, `"etag_304"`, `"failure"`, `"abandoned"`, `"app_shutdown"`                          |
+| `poll.degraded`      | `true` / `false` — `true` when the poll only succeeded on the reduced-page retry after a 5xx, so its result set is a SUBSET of the tab |
 | `error.type`         | `"unauthorized"`, `"rate_limited"`, `"server_error"`, `"cancelled"`, `"decoding"`, `"network_error"`, `"action_failed"`, `"not_modified"`, `"unknown"` |
 | `write.action`       | `"approve"`, `"merge"`, `"request_changes"`                                                      |
 | `write.result`       | `"success"`, `"failure"`                                                                         |

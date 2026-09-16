@@ -62,6 +62,39 @@ final class PRPoller {
         await poll(token: token)
     }
 
+    // MARK: - Carry-forward (pure)
+
+    /// Re-adds the previously known snapshots of every tab whose fetch was
+    /// incomplete this cycle and that the fetch did not return.
+    ///
+    /// `PRStateStore.update` rebuilds its dict from exactly the array it is handed,
+    /// and `PRDiffEngine` emits `.newPR` for any nodeId absent from that baseline.
+    /// So a PR dropped here does not merely vanish from the panel for one cycle — it
+    /// comes back as a brand-new PR on the next complete poll, re-firing its
+    /// notification and re-lighting its unread dot. Carrying it forward VERBATIM is
+    /// what keeps that from happening: an unchanged snapshot diffs to no transition.
+    ///
+    /// Pure, `static` and `nonisolated` so `PollCarryForwardChecks` can assert it
+    /// from `applicationDidFinishLaunching` — which is not `@MainActor` here — without
+    /// a poll loop, a store or the network.
+    nonisolated static func carryingForward(
+        fetched: [PRSnapshot],
+        previous: [String: PRSnapshot],
+        incompleteTabs: Set<ReviewTab>
+    ) -> [PRSnapshot] {
+        guard !incompleteTabs.isEmpty else { return fetched }
+
+        var result = fetched
+        let fetchedIds = Set(fetched.map(\.nodeId))
+        // Sorted for determinism: the store is a dictionary, and an unordered
+        // carry-forward would make the merged array's order vary between runs.
+        for snapshot in previous.values.sorted(by: { $0.nodeId < $1.nodeId })
+        where !fetchedIds.contains(snapshot.nodeId) && !snapshot.tabs.isDisjoint(with: incompleteTabs) {
+            result.append(snapshot)
+        }
+        return result
+    }
+
     // MARK: - Single poll
 
     private func poll(token: String) async {
@@ -80,11 +113,14 @@ final class PRPoller {
 
         var allSnapshots: [PRSnapshot] = []
 
-        // Tabs whose fetch produced no fresh data this cycle (304, or a 5xx that
-        // survived the client-side retry). `PRStateStore.update` rebuilds its dict
-        // from exactly the array it is handed, so anything missing is dropped — the
-        // stale tabs' last known snapshots are carried forward below instead.
-        var staleTabs: Set<ReviewTab> = []
+        // Tabs whose fetch did NOT produce a complete result set this cycle:
+        //   * no fresh data at all — a 304, or a 5xx that survived the client retry;
+        //   * a PARTIAL page — the post-5xx retry succeeded at the reduced page size
+        //     (`GitHubClient.searchPageSizeDegraded`), so it returned a SUBSET.
+        // `PRStateStore.update` rebuilds its dict from exactly the array it is
+        // handed, so anything missing is dropped — these tabs' last known snapshots
+        // are carried forward below instead.
+        var incompleteTabs: Set<ReviewTab> = []
 
         for (tab, query) in queries {
             let queryType = tab == .created ? "author" : "reviewer"
@@ -92,14 +128,22 @@ final class PRPoller {
             TelemetryService.shared.recordPollStarted(queryType: queryType)
 
             do {
-                let (snapshots, _) = try await client.searchPRs(query: query, token: token, tab: tab)
+                let (snapshots, _, degraded) = try await client.searchPRs(query: query, token: token, tab: tab)
                 let duration = Date().timeIntervalSince(pollStart)
                 TelemetryService.shared.recordPollCompleted(
                     queryType: queryType,
                     resultCount: snapshots.count,
                     duration: duration,
-                    etag304: false
+                    etag304: false,
+                    degraded: degraded
                 )
+                // A degraded page succeeded, but at half the page size — it is a
+                // SUBSET of this tab, not the tab. Treat it as incomplete so the PRs
+                // it cut off are carried forward from the store rather than dropped
+                // from the diff baseline: dropping them makes the very next full-size
+                // poll re-diff each one as `.newPR`, which re-fires its notification
+                // and re-lights its unread dot on a PR the user has already seen.
+                if degraded { incompleteTabs.insert(tab) }
                 allSnapshots.append(contentsOf: snapshots)
             } catch GitHubAPIError.notModified {
                 // 304 — keep existing state, no notification
@@ -110,7 +154,7 @@ final class PRPoller {
                     duration: duration,
                     etag304: true
                 )
-                staleTabs.insert(tab)
+                incompleteTabs.insert(tab)
                 continue
             } catch GitHubAPIError.cancelled {
                 // Popover closed mid-request; SwiftUI cancelled the `.task`.
@@ -140,7 +184,7 @@ final class PRPoller {
                 // forward unchanged after the loop, so nothing disappears.
                 let duration = Date().timeIntervalSince(pollStart)
                 TelemetryService.shared.recordPollFailed(queryType: queryType, error: .serverError(code), duration: duration)
-                staleTabs.insert(tab)
+                incompleteTabs.insert(tab)
                 continue
             } catch GitHubAPIError.rateLimited(let seconds) {
                 let duration = Date().timeIntervalSince(pollStart)
@@ -165,18 +209,14 @@ final class PRPoller {
             }
         }
 
-        // Carry forward the last known snapshots for any tab that returned no fresh
-        // data, so a single failed/unchanged query never empties that tab's list.
-        // Only PRs the successful queries did NOT return are re-added, and they are
-        // re-added verbatim — an unchanged snapshot diffs to no transition, so this
-        // preserves the list without firing a notification.
-        if !staleTabs.isEmpty {
-            let fetchedIds = Set(allSnapshots.map(\.nodeId))
-            for snapshot in store.snapshots.values
-            where !fetchedIds.contains(snapshot.nodeId) && !snapshot.tabs.isDisjoint(with: staleTabs) {
-                allSnapshots.append(snapshot)
-            }
-        }
+        // Carry forward the last known snapshots for any tab whose result set was
+        // incomplete this cycle, so a failed, unchanged or half-size query never
+        // empties — or silently truncates — that tab's list.
+        allSnapshots = Self.carryingForward(
+            fetched: allSnapshots,
+            previous: store.snapshots,
+            incompleteTabs: incompleteTabs
+        )
 
         // De-duplicate by nodeId (same PR can appear in both queries),
         // unioning the tab membership so a PR can belong to both tabs.
@@ -348,3 +388,69 @@ final class PRPoller {
 extension Notification.Name {
     static let mainlineQuietTransitions = Notification.Name("MainlineQuietTransitions")
 }
+
+// MARK: - Carry-forward self-checks (DEBUG)
+
+#if DEBUG
+/// Assertions for `PRPoller.carryingForward`, the pure half of the poll merge.
+/// Mirrors `NotificationRoutingChecks` — invoked once at launch so a regression
+/// trips an assertion in a debug build without a full XCTest target.
+///
+/// The case that matters is the third one: a tab that returned a PARTIAL page must
+/// not shrink the diff baseline, because every PR dropped from it re-diffs as
+/// `.newPR` on the next complete poll.
+enum PollCarryForwardChecks {
+    private static func pr(_ nodeId: String, tabs: Set<ReviewTab>) -> PRSnapshot {
+        PRSnapshot(
+            nodeId: nodeId, number: 1, title: "t", htmlUrl: "u", repoFullName: "o/r",
+            isDraft: false, state: "open", ciStatus: .success, reviewState: .none,
+            commentCount: 0, updatedAt: "", author: "someone",
+            requestedReviewers: [], requestedTeams: [], tabs: tabs
+        )
+    }
+
+    private static func store(_ snapshots: [PRSnapshot]) -> [String: PRSnapshot] {
+        Dictionary(uniqueKeysWithValues: snapshots.map { ($0.nodeId, $0) })
+    }
+
+    static func run() {
+        let a = pr("a", tabs: [.forMe])
+        let b = pr("b", tabs: [.forMe])
+        let c = pr("c", tabs: [.created])
+
+        // Nothing incomplete → the fetched array is returned untouched, so a PR that
+        // genuinely left the search result set is still dropped.
+        assert(PRPoller.carryingForward(
+            fetched: [a], previous: store([a, b]), incompleteTabs: []
+        ).map(\.nodeId) == ["a"], "complete poll drops PRs that left the set")
+
+        // A tab that returned nothing (304 / 5xx) keeps its own PRs...
+        assert(Set(PRPoller.carryingForward(
+            fetched: [c], previous: store([a, b, c]), incompleteTabs: [.forMe]
+        ).map(\.nodeId)) == ["a", "b", "c"], "empty tab carries its PRs forward")
+
+        // ...and a HALF-SIZE page does too: `a` came back, `b` was cut off by the
+        // reduced page size, and dropping `b` here is what re-fires it as `.newPR`.
+        assert(Set(PRPoller.carryingForward(
+            fetched: [a, c], previous: store([a, b, c]), incompleteTabs: [.forMe]
+        ).map(\.nodeId)) == ["a", "b", "c"], "degraded page carries the cut-off PRs forward")
+
+        // A carried-forward PR is re-added VERBATIM — a mutated copy would diff to a
+        // transition and notify for a PR nothing actually happened to.
+        let carried = PRPoller.carryingForward(
+            fetched: [], previous: store([b]), incompleteTabs: [.forMe]
+        )
+        assert(carried.count == 1 && carried[0] == b, "carried-forward snapshot is unchanged")
+
+        // Another tab's incompleteness never resurrects this tab's PRs.
+        assert(PRPoller.carryingForward(
+            fetched: [c], previous: store([a, b, c]), incompleteTabs: [.created]
+        ).map(\.nodeId) == ["c"], "carry-forward is scoped to the incomplete tabs")
+
+        // Order is deterministic: fetched first, then carried-forward by nodeId.
+        assert(PRPoller.carryingForward(
+            fetched: [c], previous: store([b, a, c]), incompleteTabs: [.forMe]
+        ).map(\.nodeId) == ["c", "a", "b"], "carry-forward order is deterministic")
+    }
+}
+#endif

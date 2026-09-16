@@ -375,7 +375,19 @@ final class TelemetryService {
     }
 
     /// Called when a poll completes successfully.
-    func recordPollCompleted(queryType: String, resultCount: Int, duration: Double, etag304: Bool) {
+    ///
+    /// `degraded` marks a poll that only succeeded on the reduced-page retry after a
+    /// 5xx, so its result set is a SUBSET of the tab. It is a bounded boolean (no
+    /// PR-identifying data) and it is what makes the truncation legible: without it,
+    /// a degraded poll is indistinguishable from a healthy one except by eyeballing
+    /// `poll.result_count`, which is exactly how a silent re-notify loop hid.
+    func recordPollCompleted(
+        queryType: String,
+        resultCount: Int,
+        duration: Double,
+        etag304: Bool,
+        degraded: Bool = false
+    ) {
         guard MainlineSettings.shared.telemetryEnabled else { return }
         ensureSetup()
 
@@ -387,6 +399,7 @@ final class TelemetryService {
             let labels: [String: AttributeValue] = [
                 "poll.query_type": .string(queryType),
                 "poll.result": .string("success"),
+                "poll.degraded": .bool(degraded),
             ]
             pollDurationHistogram?.record(value: duration, attributes: labels)
         }
@@ -395,6 +408,7 @@ final class TelemetryService {
             span.setAttribute(key: "poll.result", value: .string(etag304 ? "etag_304" : "success"))
             span.setAttribute(key: "poll.result_count", value: .int(resultCount))
             span.setAttribute(key: "poll.duration_s", value: .double(duration))
+            span.setAttribute(key: "poll.degraded", value: .bool(degraded))
             span.status = .ok
             span.end()
         }

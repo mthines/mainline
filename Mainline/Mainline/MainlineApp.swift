@@ -84,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         NotificationRoutingChecks.run()
         PreviewDetectionChecks.run()
         PRSearchFilter.runSelfChecks()
+        PollCarryForwardChecks.run()
         #endif
 
         // Listen for open-settings requests from MenuBarView
