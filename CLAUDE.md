@@ -292,6 +292,11 @@ missing ones) is what keeps a fetched pin's state — CI, reviews, mergeability 
 live PR's; without it a pin that has dropped out of the live queries freezes at its first-fetch
 snapshot and never refreshes on subsequent polls. A pin still in the live queries refreshes for
 free through the normal poll, so only the non-live pins cost an extra `node(id:)` call each poll.
+Each freshly-fetched pin is then run through `pinnedPreviewEnriched(_:token:)`, which sets its
+`vercelPreviewUrl` exactly as `PRPoller.enrichVercelPreviews` does for live PRs (same feature gate
++ match-rule guards, same `vercelPreviewCheckedAt`-keyed carry-forward so a steady poll makes no
+extra REST call) — without it an on-demand-fetched pin never flows through the poller's enrichment
+and so shows no preview badge and `E` does nothing.
 Results merge into every population through the `prsIncludingPinned` source. Guards:
 `pinnedFetchInFlight` (no double-fetch), `pinnedUnfetchable` (negative-cache so an unfetchable pin
 isn't refetched each poll; cleared when unpinned). Because `fetchPRByNodeId` returns `nil` for BOTH
@@ -363,7 +368,7 @@ the popover itself also exits search: `KeyCaptureView`'s `onDismiss` (fired on w
 on the normal grouped deck.
 
 ### Preview deployment detection
-Each PR can carry a `vercelPreviewUrl` extracted from a PR issue comment (REST `GitHubClient.fetchPreviewURL`, pure `extractPreviewURL(from:domains:linkLabels:)`). The row shows a `PreviewBadge` when present, and `E` (deck or peek, default binding — user-configurable) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition).
+Each PR can carry a `vercelPreviewUrl` extracted from a PR issue comment (REST `GitHubClient.fetchPreviewURL`, pure `extractPreviewURL(from:domains:linkLabels:)`). The row shows a `PreviewBadge` when present, and `E` (deck or peek, default binding — user-configurable) opens it via `TriageDeckView.openPreview` (silent no-op when absent). Enrichment is **lazy + cached** in `PRPoller.enrichVercelPreviews`: the URL is keyed on `PRSnapshot.vercelPreviewCheckedAt` (the `updatedAt` it was checked at), carried forward while `updatedAt` is unchanged, and re-fetched only when a new commit bumps `updatedAt` — so a steady poll makes ~zero extra REST calls. Applied via `PRStateStore.applyVercelPreviews` (patches + persists, never re-diffs — a preview is not a notifiable transition). A pinned PR that has dropped out of the live queries never reaches this pass (it lives in `PRManager.pinnedFetchedPRs`, not `PRStateStore`), so it is enriched by the parallel `PRManager.pinnedPreviewEnriched(_:token:)` at fetch time — same gate, same carry-forward key — keeping the two paths' preview behavior identical.
 
 Detection is **not Vercel-specific** — a repo that rolls its own preview deploy in GitHub Actions posts under `github-actions[bot]`, not `vercel[bot]`, and the old hard-coded author filter dropped those comments before any URL match ran. Three user-editable settings now shape it (Settings → GitHub → Preview Deployments):
 
