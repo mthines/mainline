@@ -284,14 +284,24 @@ subsection at the top of its role/tab group (see **Pinning** above). **On-demand
 also fall out of the live For me / Created queries entirely (nothing to float). `PRManager`
 keeps a `pinnedFetchedPRs` cache reconciled by `refreshPinnedFetches()` (run on every poll via
 the `store.$snapshots` sink, and on `togglePin` / `setPinned`): it prunes entries that are
-unpinned or reappeared live, then fetches each still-missing pinned nodeId via
-`GitHubClient.fetchPRByNodeId(nodeId:token:)` (GraphQL `node(id:)` reusing `prNodeFields` →
-`makeSnapshot`; tab membership derived from role — author → Created, else For me). Results merge
-into every population through the `prsIncludingPinned` source. Guards: `pinnedFetchInFlight`
-(no double-fetch), `pinnedUnfetchable` (a definitive not-found is negative-cached so a
-deleted/inaccessible pin isn't refetched each poll; cleared when unpinned), and transient
-errors are NOT negative-cached (next poll retries). Silent on failure — an unreachable pin just
-won't surface.
+unpinned or reappeared live, then **(re-)fetches EVERY pinned nodeId that isn't live — including
+ones already cached** — via `GitHubClient.fetchPRByNodeId(nodeId:token:)` (GraphQL `node(id:)`
+reusing `prNodeFields` → `makeSnapshot`; tab membership derived from role — author → Created,
+else For me), **upserting the fresh snapshot in place**. Re-fetching (not just fetching the
+missing ones) is what keeps a fetched pin's state — CI, reviews, mergeability — as current as a
+live PR's; without it a pin that has dropped out of the live queries freezes at its first-fetch
+snapshot and never refreshes on subsequent polls. A pin still in the live queries refreshes for
+free through the normal poll, so only the non-live pins cost an extra `node(id:)` call each poll.
+Results merge into every population through the `prsIncludingPinned` source. Guards:
+`pinnedFetchInFlight` (no double-fetch), `pinnedUnfetchable` (negative-cache so an unfetchable pin
+isn't refetched each poll; cleared when unpinned). Because `fetchPRByNodeId` returns `nil` for BOTH
+a genuinely deleted node AND a transient non-FORBIDDEN GraphQL error at HTTP 200 — indistinguishable
+to the caller — a `nil` only negative-caches when the pin was **never** successfully fetched (a
+first fetch that failed); for an **already-cached** pin a `nil` (like a thrown transient error)
+keeps the last-known snapshot and retries next poll, so a GraphQL blip can't permanently hide a
+still-valid pin (the "pins are always visible" invariant). The upsert is guarded by `!=` so an
+unchanged pin doesn't fire `objectWillChange` every poll. Silent on failure — an unreachable
+never-cached pin just won't surface.
 
 **Search.** The `search` shortcut (default `F`) sets `PRManager.searchActive`, which makes
 `MenuBarView` render a search `TextField` and switch the deck into `searchMode`: a single FLAT

@@ -463,8 +463,9 @@ final class PRManager: ObservableObject {
 
     /// PINNED PRs fetched on demand because they are no longer in the live `prs`
     /// set (dropped out of the For me / Created queries). Merged into every tab
-    /// population via `prsIncludingPinned` so a pin is always visible. Rebuilt by
-    /// `refreshPinnedFetches`.
+    /// population via `prsIncludingPinned` so a pin is always visible. Rebuilt AND
+    /// re-fetched by `refreshPinnedFetches` on every poll, so their state (CI,
+    /// reviews, mergeability) stays as fresh as a live PR's.
     @Published private(set) var pinnedFetchedPRs: [PRSnapshot] = []
 
     /// Node ids with an in-flight pin fetch, so overlapping refreshes don't double-fetch.
@@ -476,9 +477,12 @@ final class PRManager: ObservableObject {
     private var pinnedUnfetchable: Set<String> = []
 
     /// Keeps `pinnedFetchedPRs` in sync with the pin set and the live `prs`:
-    /// prunes entries that are no longer pinned or have reappeared live, then fetches
-    /// any pinned id missing from BOTH. Safe to call on every poll and on pin toggles;
-    /// idempotent and silent on failure (a pin that can't be fetched just won't show).
+    /// prunes entries that are no longer pinned or have reappeared live, then
+    /// (re-)fetches EVERY pinned id that isn't live — including ones already cached —
+    /// so a pin that lives only in the fetched cache has its state refreshed on each
+    /// poll rather than freezing at first fetch. Safe to call on every poll and on
+    /// pin toggles; idempotent and silent on failure (a pin that can't be fetched
+    /// just won't show; a transient failure keeps the last-known snapshot).
     func refreshPinnedFetches() async {
         let pinned = Set(settings.pinnedNodeIds)
         let liveIds = Set(prs.map { $0.nodeId })
@@ -488,34 +492,50 @@ final class PRManager: ObservableObject {
         pinnedFetchedPRs.removeAll { !pinned.contains($0.nodeId) || liveIds.contains($0.nodeId) }
         pinnedUnfetchable.formIntersection(pinned)
 
-        // Which pinned ids are absent from live prs AND the fetched cache, not
-        // already in flight, and not known-unreachable?
-        let have = liveIds.union(pinnedFetchedPRs.map { $0.nodeId })
-        let missing = pinned.subtracting(have).subtracting(pinnedFetchInFlight).subtracting(pinnedUnfetchable)
-        guard !missing.isEmpty else { return }
+        // Every pinned id that isn't live — whether or not it is already cached — is
+        // (re-)fetched so its state stays current, skipping ids in flight or
+        // known-unreachable. A live pin refreshes for free via the normal poll.
+        let toFetch = pinned.subtracting(liveIds).subtracting(pinnedFetchInFlight).subtracting(pinnedUnfetchable)
+        guard !toFetch.isEmpty else { return }
 
         guard let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
 
-        for id in missing {
+        for id in toFetch {
             pinnedFetchInFlight.insert(id)
             defer { pinnedFetchInFlight.remove(id) }
             do {
                 guard let pr = try await client.fetchPRByNodeId(nodeId: id, token: token) else {
-                    // Definitive "no such PR" — negative-cache so we don't refetch each poll.
-                    pinnedUnfetchable.insert(id)
+                    // `fetchPRByNodeId` returns nil for BOTH a genuinely deleted node
+                    // AND a transient non-FORBIDDEN GraphQL error at HTTP 200 — the two
+                    // are indistinguishable here. Only negative-cache when the pin was
+                    // never successfully fetched (a first fetch that failed, the sole
+                    // case that reached nil before this method re-fetched cached pins).
+                    // For an ALREADY-cached pin, treat nil like a transient error: keep
+                    // the last-known snapshot and retry next poll, so a GraphQL blip
+                    // can't permanently hide a still-valid pinned PR.
+                    if !pinnedFetchedPRs.contains(where: { $0.nodeId == id }) {
+                        pinnedUnfetchable.insert(id)
+                    }
                     continue
                 }
                 // A pin that has since merged auto-unpins (when enabled) instead of
                 // being cached — the guard below then drops it (no longer pinned).
                 applyUnpinOnMerge([pr])
-                // Re-check under current state: still pinned, still not live, not already cached.
+                // Re-check under current state: still pinned, still not live. Upsert the
+                // fresh snapshot so an already-cached pin refreshes in place — but only
+                // when it actually changed, so an unchanged pin doesn't fire
+                // objectWillChange (and a needless re-render) every poll.
                 guard settings.isPinned(pr.nodeId),
-                      !prs.contains(where: { $0.nodeId == pr.nodeId }),
-                      !pinnedFetchedPRs.contains(where: { $0.nodeId == pr.nodeId }) else { continue }
-                pinnedFetchedPRs.append(pr)
+                      !prs.contains(where: { $0.nodeId == pr.nodeId }) else { continue }
+                if let idx = pinnedFetchedPRs.firstIndex(where: { $0.nodeId == pr.nodeId }) {
+                    if pinnedFetchedPRs[idx] != pr { pinnedFetchedPRs[idx] = pr }
+                } else {
+                    pinnedFetchedPRs.append(pr)
+                }
             } catch {
                 // Transient error (network / auth / rate limit) — NOT negative-cached,
-                // so the next poll retries. The pin simply won't surface this cycle.
+                // and the last-known snapshot is kept, so the next poll retries and the
+                // pin stays visible meanwhile.
             }
         }
     }
