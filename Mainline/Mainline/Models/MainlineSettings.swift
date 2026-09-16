@@ -543,6 +543,7 @@ final class MainlineSettings: ObservableObject {
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
         static let showDrafts           = "showDrafts"
         static let splitDrafts          = "splitDrafts"
+        static let unpinOnMerge         = "unpinOnMerge"
         static let forMeReviewFilter    = "forMeReviewFilter"
         static let compactRows          = "compactRows"
         static let needsHumanExpanded   = "needsHumanExpanded"
@@ -797,6 +798,15 @@ final class MainlineSettings: ObservableObject {
     /// (show/hide); this only controls grouping of drafts that are already shown.
     @Published var splitDrafts: Bool {
         didSet { defaults.set(splitDrafts, forKey: Keys.splitDrafts) }
+    }
+
+    /// Automatically unpin a PR once it is merged, so the Pinned section stays a
+    /// list of things that still need attention rather than accumulating finished
+    /// work. Default ON. Applies only to MERGED PRs (a closed-unmerged PR keeps its
+    /// pin — the user may still want it in view). `PRManager` enforces this on every
+    /// poll via `applyUnpinOnMerge`.
+    @Published var unpinOnMerge: Bool {
+        didSet { defaults.set(unpinOnMerge, forKey: Keys.unpinOnMerge) }
     }
 
     /// Sub-filter for the "For me" tab. Default `.all` (show direct + team).
@@ -1305,6 +1315,10 @@ final class MainlineSettings: ObservableObject {
             : defaults.bool(forKey: Keys.showDrafts)
         // Split drafts into their own section — default OFF (mixed inline)
         splitDrafts = defaults.bool(forKey: Keys.splitDrafts)
+        // Auto-unpin merged PRs — default ON
+        unpinOnMerge = defaults.object(forKey: Keys.unpinOnMerge) == nil
+            ? true
+            : defaults.bool(forKey: Keys.unpinOnMerge)
 
         // For-me review sub-filter — default All (show direct + team)
         forMeReviewFilter = defaults.string(forKey: Keys.forMeReviewFilter)

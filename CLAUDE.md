@@ -223,6 +223,14 @@ then `triageOrder`) remains the comparator for the FLAT search results and the M
 `DeckRowKey` carries `isPinned` so a pin toggle re-renders (and re-partitions) the affected rows.
 Verb: `togglePin` (default `P`) + a Pin/Unpin row context item.
 
+**Auto-unpin on merge.** With `settings.unpinOnMerge` (default ON), a pinned PR is unpinned
+automatically once it MERGES, so the Pinned section stays a list of live work rather than a
+graveyard of finished PRs. `PRManager.applyUnpinOnMerge(_:)` scans for pinned + `merged` snapshots
+and unpins them via `settings` (direct, to avoid re-entrant fetch scheduling); it runs from the
+Done-set sink (where a just-merged PR surfaces), the live-`prs` sink, and the on-demand pin fetch
+(a fetched pin that has merged is unpinned instead of cached). A closed-but-unmerged PR keeps its
+pin deliberately. Toggle in Settings → Appearance → Pinning.
+
 **Pins are always visible.** A pin means "keep this in front of me," so it overrides the
 noise filters — but NOT snooze (an explicit "later" wins). `PRManager.effectiveMuted` returns
 `false` for a pinned PR (overriding both mute rules AND a manual mute override), so a pinned PR
@@ -332,6 +340,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `telemetryEnabled` | Bool | false |
 | `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` — 17 `ShortcutBinding { key, modifiers }` entries; all bare except undo=⌘Z (`modifiers = NSEvent.ModifierFlags.command.rawValue`). Includes `markReady` (default `t`, bare — draft→ready write action; **moved off `f`**), `copyBranch` (default `c`, bare), `togglePin` (default `p`, bare — pin/unpin), and `search` (default `f`, bare — open search). Decoded with custom `Codable` that handles both the new object shape and the v1.25.0 legacy bare-string shape; undo bare-string → `.command` migration preserves ⌘Z; on the upgrade that introduces `search` (its key absent in stored JSON), a `markReady` still bound to bare `f` is relocated to `t` so `f` is free for search; absent fields fall back to factory defaults. |
 | `pinnedNodeIds` | [String] | `[]` — nodeIds the user has pinned. A pinned PR appears in a dedicated **Pinned** subsection at the top of its role/tab group (a `.pinned` display-only `ActionGroup`, collapsible, expanded by default) with a pin glyph, and is ALWAYS visible: it overrides mute, the scope chip, and the Drafts toggle (but not snooze), and is fetched on demand (`node(id:)`) when it has dropped out of the live queries. Membership read via `settings.pinnedNodeIds`; toggled by the `togglePin` shortcut / context menu. |
+| `unpinOnMerge` | Bool | `true` — when on, a PR auto-unpins once it has MERGED (not merely closed). Enforced by `PRManager.applyUnpinOnMerge`, run from the Done-set sink, the live-`prs` sink, and the on-demand pin fetch. Toggle in Settings → Appearance → Pinning. |
 | `mutePatterns` | [String] | `["chore(deps)*", "build(deps)*"]` |
 | `muteBotAuthors` | Bool | true |
 | `botAllowList` | [String] | `[]` |

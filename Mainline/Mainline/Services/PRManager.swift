@@ -373,6 +373,20 @@ final class PRManager: ObservableObject {
         Task { await refreshPinnedFetches() }
     }
 
+    /// Auto-unpins any PR in `list` that has MERGED, when `settings.unpinOnMerge` is
+    /// on (default). Keeps the Pinned section a list of still-relevant work rather
+    /// than a graveyard of finished PRs. A closed-unmerged PR is left pinned on
+    /// purpose. No-op when the setting is off. Unpins directly via `settings` (not
+    /// `PRManager.setPinned`) to avoid re-entrant fetch scheduling; a subsequent
+    /// `refreshPinnedFetches` — scheduled on the same poll by the `store.$snapshots`
+    /// sink — prunes any now-stale fetched entry, at every call site.
+    private func applyUnpinOnMerge(_ list: [PRSnapshot]) {
+        guard settings.unpinOnMerge else { return }
+        for pr in list where pr.merged && settings.isPinned(pr.nodeId) {
+            settings.setPinned(false, for: pr.nodeId)
+        }
+    }
+
     /// PINNED PRs fetched on demand because they are no longer in the live `prs`
     /// set (dropped out of the For me / Created queries). Merged into every tab
     /// population via `prsIncludingPinned` so a pin is always visible. Rebuilt by
@@ -417,6 +431,9 @@ final class PRManager: ObservableObject {
                     pinnedUnfetchable.insert(id)
                     continue
                 }
+                // A pin that has since merged auto-unpins (when enabled) instead of
+                // being cached — the guard below then drops it (no longer pinned).
+                applyUnpinOnMerge([pr])
                 // Re-check under current state: still pinned, still not live, not already cached.
                 guard settings.isPinned(pr.nodeId),
                       !prs.contains(where: { $0.nodeId == pr.nodeId }),
@@ -774,6 +791,8 @@ final class PRManager: ObservableObject {
         // reaches the diff engine, notifications, or any badge/attention count.
         poller.onDonePRs = { [weak self] done in
             self?.donePRs = done
+            // The Done set is where a just-merged PR surfaces — auto-unpin merged pins.
+            self?.applyUnpinOnMerge(done)
         }
 
         // Mirror store updates to prs
@@ -808,6 +827,8 @@ final class PRManager: ObservableObject {
             .map { dict in Array(dict.values) }
             .sink { [weak self] prs in
                 self?.scopeStore.rebuild(from: prs)
+                // Catch a merged PR still lingering in the live set, then reconcile pins.
+                self?.applyUnpinOnMerge(prs)
                 Task { await self?.refreshPinnedFetches() }
             }
             .store(in: &cancellables)
