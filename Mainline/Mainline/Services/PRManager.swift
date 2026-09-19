@@ -466,6 +466,12 @@ final class PRManager: ObservableObject {
     /// population via `prsIncludingPinned` so a pin is always visible. Rebuilt AND
     /// re-fetched by `refreshPinnedFetches` on every poll, so their state (CI,
     /// reviews, mergeability) stays as fresh as a live PR's.
+    ///
+    /// Fetched for EVERY pin, including ones the selected org chip currently hides
+    /// (`settings.pinsIgnoreOrgFilter` off). The chip is a view-level filter that can
+    /// change between polls, and the chip COUNTS derive from the scope-independent
+    /// base — so gating the fetch on it would both empty the deck for a poll after
+    /// switching chips and under-count the org whose pins are hidden.
     @Published private(set) var pinnedFetchedPRs: [PRSnapshot] = []
 
     /// Node ids with an in-flight pin fetch, so overlapping refreshes don't double-fetch.
@@ -627,11 +633,25 @@ final class PRManager: ObservableObject {
         return prs + pinnedFetchedPRs.filter { seen.insert($0.nodeId).inserted }
     }
 
-    /// Applies the currently-selected scope (nil = All) to an Inbox PR list. A
-    /// pinned PR is kept regardless of the selected scope — a pin is always visible.
+    /// Applies the currently-selected scope (nil = All) to an Inbox PR list.
     private func applyingSelectedScope(_ list: [PRSnapshot]) -> [PRSnapshot] {
         guard let scope = scopeStore.selectedScope else { return list }
-        return list.filter { isPinned($0) || Self.pr($0, matches: scope) }
+        return list.filter { survivesScope($0, scope: scope) }
+    }
+
+    /// Whether a PR survives the selected scope chip. The SINGLE place the
+    /// pin-versus-scope rule is decided, shared by the Inbox pipeline
+    /// (`applyingSelectedScope`) and the For-me / Created pipeline (`tabFiltered`)
+    /// so the two can never disagree.
+    ///
+    /// A pinned PR bypasses the chip ONLY when `settings.pinsIgnoreOrgFilter` is on.
+    /// That setting is OFF by default, so pins are org-scoped: with `mthines`
+    /// selected, a pinned `dash0hq` PR is hidden like any other out-of-org PR, and
+    /// the chip's count matches what the deck renders. A pin still overrides mute
+    /// and the Drafts toggle either way (see `effectiveMuted` / `inboxUnionPRs`).
+    private func survivesScope(_ pr: PRSnapshot, scope: PRScope) -> Bool {
+        if settings.pinsIgnoreOrgFilter, isPinned(pr) { return true }
+        return Self.pr(pr, matches: scope)
     }
 
     // MARK: - Current view (drives badge + visible list)
@@ -690,9 +710,10 @@ final class PRManager: ObservableObject {
         //    out of the live queries still shows on its tab.
         var result = prsIncludingPinned.filter { $0.tabs.contains(settings.selectedTab) }
 
-        // 2. Scope (optional). A pinned PR is always kept — a pin is always visible.
+        // 2. Scope (optional). A pinned PR bypasses it only when
+        //    `settings.pinsIgnoreOrgFilter` is on — see `survivesScope`.
         if applyScope, let scope = scopeStore.selectedScope {
-            result = result.filter { isPinned($0) || Self.pr($0, matches: scope) }
+            result = result.filter { survivesScope($0, scope: scope) }
         }
 
         // 3. Drafts. A pinned draft is always kept.
