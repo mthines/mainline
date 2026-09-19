@@ -375,24 +375,129 @@ struct TriageDeckView: View {
     /// top of the group instead of merely floating inside another subsection — so
     /// collapsing e.g. "Waiting" no longer hides a pinned PR. Excludes the display-
     /// only Postponed/Done/Muted groups (their membership is assembled elsewhere).
+    ///
+    /// Stack-aware: every member of a detected stack is placed under the group of the
+    /// stack's BOTTOM PR (stacks merge bottom-up, so the bottom is the one you act on
+    /// first), and `orderWithStacks` keeps the members contiguous and bottom→top at the
+    /// bottom's sort position — so a stack renders as a single unit rather than scattered
+    /// across Ready-to-merge / Waiting.
     private func sectionsWithPinned(from list: [PRSnapshot]) -> [(group: ActionGroup, prs: [PRSnapshot])] {
-        let pinnedRows = list.filter { isPinned($0) }.sorted(by: PRSnapshot.triageOrder)
-        let rest = list.filter { !isPinned($0) }
+        // Build the stack index ONCE per section pass and thread it into the per-PR
+        // helpers below — they run for every PR, so reading the recomputed `stackIndex`
+        // property inside them would rebuild it O(N) times per render.
+        let idx = stackIndex
+        let pinnedRows = orderWithStacks(list.filter { isPinnedForPartition($0, idx) }, idx)
+        let rest = list.filter { !isPinnedForPartition($0, idx) }
 
         var result: [(group: ActionGroup, prs: [PRSnapshot])] = []
         if !pinnedRows.isEmpty {
             result.append((.pinned, pinnedRows))
         }
 
-        let grouped = Dictionary(grouping: rest, by: { groupFor($0) })
+        let grouped = Dictionary(grouping: rest, by: { effectiveGroupFor($0, idx) })
         result += ActionGroup.allCases
             .filter { $0 != .pinned && $0 != .postponed && $0 != .done && $0 != .muted }
             .sorted { $0.sortIndex < $1.sortIndex }
             .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
                 guard let prs = grouped[group], !prs.isEmpty else { return nil }
-                return (group, prs.sorted(by: PRSnapshot.triageOrder))
+                return (group, orderWithStacks(prs, idx))
             }
         return result
+    }
+
+    // MARK: - Stacked PRs
+
+    /// The stacks detected across the deck's current PR list. Recomputed per access, so
+    /// callers that touch it per row MUST build it once and thread the result in (see
+    /// `sectionsWithPinned` / `orderedPRs`), not read this property inside a per-PR loop.
+    private var stackIndex: StackEngine.Index {
+        StackEngine.index(prs)
+    }
+
+    /// The group a PR is placed under, made stack-aware: a member of a stack inherits
+    /// the group of its stack's BOTTOM PR so the whole stack lands in one section.
+    private func effectiveGroupFor(_ pr: PRSnapshot, _ idx: StackEngine.Index) -> ActionGroup {
+        if let stack = idx.stack(containing: pr.nodeId) {
+            return groupFor(stack.bottom)
+        }
+        return groupFor(pr)
+    }
+
+    /// Whether a PR belongs in the Pinned subsection. Stack-aware: a stack pins as a
+    /// UNIT — if ANY member is pinned, every member floats to Pinned together, so a
+    /// partly-pinned stack (e.g. a new child of a pinned stack) is never split across
+    /// the Pinned and actionability sections (which would render absent members inside
+    /// the card). The pin GLYPH still reflects each PR's own real pin state.
+    private func isPinnedForPartition(_ pr: PRSnapshot, _ idx: StackEngine.Index) -> Bool {
+        if isPinned(pr) { return true }
+        guard let stack = idx.stack(containing: pr.nodeId) else { return false }
+        return stack.members.contains { isPinned($0) }
+    }
+
+    /// Orders a group's PRs so that each stack's members stay contiguous, in
+    /// bottom→top order, positioned at the stack bottom's normal triage slot. Non-
+    /// stacked PRs keep their triage position. Keeps the flat section array (and hence
+    /// `orderedPRs`) matching the on-screen stack-card layout.
+    private func orderWithStacks(_ list: [PRSnapshot], _ idx: StackEngine.Index) -> [PRSnapshot] {
+        let present = Set(list.map(\.nodeId))
+        var emitted = Set<String>()
+        var units: [(rep: PRSnapshot, members: [PRSnapshot])] = []
+        for pr in list.sorted(by: PRSnapshot.triageOrder) {
+            if let stack = idx.stack(containing: pr.nodeId) {
+                guard !emitted.contains(stack.id) else { continue }
+                emitted.insert(stack.id)
+                let members = stack.members.filter { present.contains($0.nodeId) }
+                if let bottom = members.first { units.append((rep: bottom, members: members)) }
+            } else {
+                units.append((rep: pr, members: [pr]))
+            }
+        }
+        units.sort { PRSnapshot.triageOrder($0.rep, $1.rep) }
+        return units.flatMap { $0.members }
+    }
+
+    /// One section's keyboard stops, honoring stack collapse. A standalone PR is
+    /// always a stop. For a stack rendered in THIS section: every present member is a
+    /// stop when expanded; when collapsed, only the section's rendered representative
+    /// — the bottom if present here, otherwise the first present member (mirroring
+    /// `stackCard`/`deckItems`' own `rep` fallback) — so a stack split across two
+    /// sections (e.g. a cross-role inbox stack whose base sits in the other role's
+    /// section) still contributes exactly one stop per rendered row. Filtering per
+    /// section rather than over the flattened list is what keeps the keyboard index
+    /// space aligned with the on-screen layout: a section-blind `stack.bottom` check
+    /// dropped a member row that renders here but whose base lives elsewhere, so the
+    /// row displayed yet had no J/K stop (and, via `orderedIndexByNodeId`, collapsed
+    /// to index 0).
+    private func keyboardStops(inSection prs: [PRSnapshot], _ idx: StackEngine.Index) -> [PRSnapshot] {
+        let present = Set(prs.map(\.nodeId))
+        return prs.filter { pr in
+            guard let stack = idx.stack(containing: pr.nodeId) else { return true }
+            if isStackExpanded(stack.id) { return true }
+            let rep = present.contains(stack.bottom.nodeId)
+                ? stack.bottom.nodeId
+                : stack.members.first { present.contains($0.nodeId) }?.nodeId
+            return pr.nodeId == rep
+        }
+    }
+
+    /// Stack cards are expanded by default. Collapse state is persisted in the shared
+    /// `collapsedSectionsRaw` store under a `"stack:<id>"` key (which never decodes to
+    /// an `ActionGroup`, so the typed `collapsedSections` accessor ignores it).
+    private func isStackExpanded(_ stackId: String) -> Bool {
+        !settings.collapsedSectionsRaw.contains("stack:" + stackId)
+    }
+
+    private func stackExpansionBinding(for stackId: String) -> Binding<Bool> {
+        let key = "stack:" + stackId
+        return Binding(
+            get: { !settings.collapsedSectionsRaw.contains(key) },
+            set: { expanded in
+                var raw = settings.collapsedSectionsRaw
+                if expanded { raw.removeAll { $0 == key } }
+                else if !raw.contains(key) { raw.append(key) }
+                settings.collapsedSectionsRaw = raw
+            }
+        )
     }
 
     /// The keyboard index space that J/K navigation walks. Flattens the focusable
@@ -406,15 +511,21 @@ struct TriageDeckView: View {
             // Flat results — pinned first, then triage order.
             return sortedForDisplay(prs)
         }
+        let idx = stackIndex
         if inboxMode {
             // Inbox: keyboard index space is role-sections + (expanded) muted rows.
-            var list = inboxOrderedPRs
+            // Filter each section independently so a collapsed stack keeps its
+            // per-section representative (see `keyboardStops`); the Muted group never
+            // stacks in display, so its rows pass through as-is.
+            var list = inboxSections.flatMap { section in
+                section.actionSections.flatMap { keyboardStops(inSection: $0.prs, idx) }
+            }
             if settings.collapsedSections.contains(.muted) {
                 list += sortedForDisplay(mutedPRs)
             }
             return list
         }
-        var list = actionabilitySections.flatMap { $0.prs }
+        var list = actionabilitySections.flatMap { keyboardStops(inSection: $0.prs, idx) }
         // Include Postponed rows in the keyboard/hover focus space ONLY while that
         // section is expanded (it is collapsed by default). Expanded ⇔ the section
         // is present in `collapsedSections` — `expansionBinding` inverts the default
@@ -485,13 +596,6 @@ struct TriageDeckView: View {
             }
         }
         return result
-    }
-
-    /// All PRs in the Inbox view in display order (for keyboard index space).
-    private var inboxOrderedPRs: [PRSnapshot] {
-        inboxSections.flatMap { section in
-            section.actionSections.flatMap { $0.prs }
-        }
     }
 
     /// The Inbox list: role sections, then the shared Muted group.
@@ -732,10 +836,157 @@ struct TriageDeckView: View {
     /// row via `flatIndex`). Deck rows are memoized via `memoizedDeckRow`.
     private func sectionRows(group: ActionGroup, prs sectionPRs: [PRSnapshot]) -> some View {
         let indexMap = orderedIndexByNodeId
-        return ForEach(sectionPRs, id: \.nodeId) { pr in
-            rowFor(group: group, pr: pr, index: indexMap[pr.nodeId] ?? 0)
+        let stacks = stackIndex
+        return ForEach(deckItems(for: group, prs: sectionPRs, stacks: stacks)) { item in
+            switch item {
+            case .row(let pr):
+                rowFor(group: group, pr: pr, index: indexMap[pr.nodeId] ?? 0)
+                Divider().padding(.leading, metrics.dividerInset())
+            case .stack(let stack, let visible):
+                stackCard(stack, visibleMembers: visible, indexMap: indexMap)
+            }
+        }
+    }
+
+    /// One entry in a section's rendered layout: either a standalone PR row or a
+    /// stack card wrapping the stack's members present in this section (≥ 2).
+    private enum DeckItem: Identifiable {
+        case row(PRSnapshot)
+        case stack(StackEngine.Stack, visible: [PRSnapshot])
+        var id: String {
+            switch self {
+            case .row(let pr):        return "r:" + pr.nodeId
+            case .stack(let s, _):    return "s:" + s.id
+            }
+        }
+    }
+
+    /// Collapses a section's flat PR list into render items, folding each stack's
+    /// contiguous members into a single `.stack` card. Display-only groups
+    /// (Postponed / Done / Muted) never stack. A stack with only one member present
+    /// in this section (split by a filter) degrades to a normal row.
+    private func deckItems(for group: ActionGroup, prs: [PRSnapshot], stacks: StackEngine.Index) -> [DeckItem] {
+        guard group != .postponed, group != .done, group != .muted else {
+            return prs.map { .row($0) }
+        }
+        let present = Set(prs.map(\.nodeId))
+        var items: [DeckItem] = []
+        var emitted = Set<String>()
+        for pr in prs {
+            guard let stack = stacks.stack(containing: pr.nodeId) else {
+                items.append(.row(pr))
+                continue
+            }
+            guard !emitted.contains(stack.id) else { continue }
+            emitted.insert(stack.id)
+            let visibleMembers = stack.members.filter { present.contains($0.nodeId) }
+            if visibleMembers.count >= 2 {
+                items.append(.stack(stack, visible: visibleMembers))
+            } else if let only = visibleMembers.first {
+                items.append(.row(only))
+            }
+        }
+        return items
+    }
+
+    // MARK: - Stack card
+
+    private static let stackSpineWidth: CGFloat = 16
+
+    /// A collapsible stack card.
+    ///
+    /// COLLAPSED: renders as a single, normal-height PR row for the stack's base PR
+    /// (the one you merge first, and the one whose actionability placed the stack in
+    /// this section), marked with a stack glyph + count and a disclosure chevron —
+    /// so a collapsed stack occupies and reads like one ordinary item.
+    ///
+    /// EXPANDED: a compact header + each member rendered bottom→top (base at the top
+    /// of the card) behind a connector spine.
+    @ViewBuilder
+    private func stackCard(_ stack: StackEngine.Stack, visibleMembers: [PRSnapshot], indexMap: [String: Int]) -> some View {
+        let expansion = stackExpansionBinding(for: stack.id)
+        if expansion.wrappedValue {
+            stackHeader(stack, expansion: expansion)
+            // Iterate only the members present in THIS section; the position chip and
+            // spine use each member's true index in the full stack, so a (rare) split
+            // stack still labels 1/N correctly and never renders an absent member.
+            ForEach(visibleMembers, id: \.nodeId) { pr in
+                let position = stack.members.firstIndex { $0.nodeId == pr.nodeId } ?? 0
+                HStack(spacing: 0) {
+                    stackSpine(position: position, count: stack.count)
+                    memoizedDeckRow(pr: pr, index: indexMap[pr.nodeId] ?? 0,
+                                    stackBadge: "\(position + 1)/\(stack.count)")
+                }
+                Divider().padding(.leading, metrics.dividerInset() + Self.stackSpineWidth)
+            }
+        } else {
+            // Collapsed: a normal, fully-aligned row for the base PR (same leading
+            // edge as every sibling), marked as a stack and acting as a disclosure —
+            // tapping it expands rather than opening the PR. Fall back to the first
+            // present member if the base itself isn't in this section.
+            let rep = visibleMembers.first { $0.nodeId == stack.bottom.nodeId }
+                ?? visibleMembers.first ?? stack.bottom
+            deckRow(pr: rep, index: indexMap[rep.nodeId] ?? 0,
+                    stackCount: stack.count,
+                    onRowTap: { expansion.wrappedValue.toggle() })
             Divider().padding(.leading, metrics.dividerInset())
         }
+    }
+
+    @ViewBuilder
+    private func stackHeader(_ stack: StackEngine.Stack, expansion: Binding<Bool>) -> some View {
+        Button {
+            expansion.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 10)
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("Stack")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                Text("\(stack.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Text("#\(stack.bottom.number) → #\(stack.top.number)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, RowMetrics.horizontalPadding)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Collapse stack — merges bottom-up (base at top)")
+    }
+
+    /// The connector spine drawn to the left of each stack member: a vertical line
+    /// (open at the top of the first member and bottom of the last) with a node dot.
+    @ViewBuilder
+    private func stackSpine(position: Int, count: Int) -> some View {
+        let isFirst = position == 0
+        let isLast = position == count - 1
+        let line = Color.secondary.opacity(0.35)
+        ZStack {
+            VStack(spacing: 0) {
+                Rectangle().fill(isFirst ? Color.clear : line).frame(width: 1.5)
+                Rectangle().fill(isLast ? Color.clear : line).frame(width: 1.5)
+            }
+            Circle()
+                .fill(Color.secondary.opacity(0.55))
+                .frame(width: 6, height: 6)
+        }
+        .frame(width: Self.stackSpineWidth)
+        .frame(maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -778,7 +1029,7 @@ struct TriageDeckView: View {
         !(searchMode && searchFieldFocused)
     }
 
-    private func memoizedDeckRow(pr: PRSnapshot, index: Int) -> some View {
+    private func memoizedDeckRow(pr: PRSnapshot, index: Int, stackBadge: String = "", stackCount: Int = 0) -> some View {
         EquatableRow(key: DeckRowKey(
             pr: pr,
             index: index,
@@ -791,9 +1042,11 @@ struct TriageDeckView: View {
             writeActionsEnabled: settings.writeActionsEnabled,
             previewEnabled: settings.vercelPreviewEnabled,
             showPeek: showPeek,
-            compact: settings.compactRows
+            compact: settings.compactRows,
+            stackBadge: stackBadge,
+            stackCount: stackCount
         )) {
-            deckRow(pr: pr, index: index)
+            deckRow(pr: pr, index: index, stackBadge: stackBadge, stackCount: stackCount)
         }
         .equatable()
     }
@@ -857,7 +1110,8 @@ struct TriageDeckView: View {
         )
     }
 
-    private func deckRow(pr: PRSnapshot, index: Int) -> some View {
+    private func deckRow(pr: PRSnapshot, index: Int, stackBadge: String = "", stackCount: Int = 0,
+                         onRowTap: (() -> Void)? = nil) -> some View {
         let isFocused = index == selectedIndex && showsKeyboardFocus
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
@@ -867,7 +1121,9 @@ struct TriageDeckView: View {
         let isHovered = isFocused
         let m = metrics
         return Button {
-            handleRowClick(pr: pr, index: index)
+            // A collapsed stack's representative row is a disclosure control: tapping
+            // it reveals the stack rather than opening the base PR.
+            if let onRowTap { onRowTap() } else { handleRowClick(pr: pr, index: index) }
         } label: {
             HStack(alignment: .top, spacing: m.rowHStackSpacing) {
                 // Shared leading structure: [unread-dot slot][status-icon slot].
@@ -877,10 +1133,16 @@ struct TriageDeckView: View {
                     metrics: m,
                     isUnread: manager.unreadPRIds.contains(pr.nodeId)
                 ) {
-                    // Drafts show a muted grey draft glyph in the status-icon slot
-                    // instead of the CI-status icon, reinforcing the Draft badge +
-                    // dimmed row. Non-draft PRs keep the CI icon exactly as-is.
-                    if isDraft {
+                    // A collapsed stack's representative row uses the status-icon slot
+                    // as its disclosure control — a chevron in place of the CI icon —
+                    // so the row reads as "a stack to expand" at the leading edge.
+                    // Drafts otherwise show a muted grey draft glyph; non-draft PRs
+                    // keep the CI icon exactly as-is.
+                    if stackCount > 0 {
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Collapsed stack — expand")
+                    } else if isDraft {
                         draftIcon
                     } else {
                         ciIcon(for: pr.ciStatus)
@@ -902,6 +1164,29 @@ struct TriageDeckView: View {
                             .multilineTextAlignment(.leading)
                     }
                     HStack(spacing: 4) {
+                        if stackCount > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "square.stack.3d.up.fill")
+                                Text("\(stackCount)")
+                            }
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
+                            .accessibilityLabel("Stack of \(stackCount) — expand to see all")
+                        }
+                        if !stackBadge.isEmpty {
+                            Text(stackBadge)
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
+                                .accessibilityLabel("Stack position \(stackBadge)")
+                        }
                         Text(verbatim: pr.author.isEmpty
                              ? "\(pr.repoFullName) #\(pr.number)"
                              : "\(pr.repoFullName) #\(pr.number) · \(pr.author)")
@@ -1382,8 +1667,17 @@ struct TriageDeckView: View {
 
         // Return opens the selected PR in the browser — regardless of whether the
         // peek card is open (focusedPR stays in sync with the card as you step).
+        // Exception: on a COLLAPSED stack's representative row, Return expands the
+        // stack (matching the click-to-disclose behavior) rather than opening the base.
         if event.keyCode == 36 {   // Return
-            if let pr = focusedPR { handleTriageAction(.openInBrowser, on: pr) }
+            if let pr = focusedPR {
+                if let stack = stackIndex.stack(containing: pr.nodeId),
+                   !isStackExpanded(stack.id) {
+                    stackExpansionBinding(for: stack.id).wrappedValue = true
+                } else {
+                    handleTriageAction(.openInBrowser, on: pr)
+                }
+            }
             return nil
         }
 
@@ -1641,10 +1935,23 @@ struct TriageDeckView: View {
         case .copyBranch:
             copyBranch(pr)
         case .togglePin:
+            // Stack-aware: pinning any member pins the WHOLE stack so they stay
+            // together and float to Pinned as one unit (and unpin together).
+            let members = stackMembers(of: pr)
+            // Capture each member's prior pin state so undo restores it exactly — a
+            // member that was already pinned before this action (e.g. a freshly-polled
+            // child of an already-pinned stack) must stay pinned on undo, not be cleared.
+            let priorPinned = Dictionary(uniqueKeysWithValues: members.map { ($0.nodeId, isPinned($0)) })
             let nowPinned = manager.togglePin(pr)
+            for member in members where member.nodeId != pr.nodeId {
+                manager.setPinned(nowPinned, for: member)
+            }
             TelemetryService.shared.recordTriageInteraction(nowPinned ? "pin" : "unpin")
-            pushUndo(label: nowPinned ? "Pinned: \(pr.title)" : "Unpinned: \(pr.title)", pr: pr) {
-                manager.setPinned(!nowPinned, for: pr)
+            let label: String = members.count > 1
+                ? (nowPinned ? "Pinned stack (\(members.count))" : "Unpinned stack (\(members.count))")
+                : (nowPinned ? "Pinned: \(pr.title)" : "Unpinned: \(pr.title)")
+            pushUndo(label: label, pr: pr) {
+                for member in members { manager.setPinned(priorPinned[member.nodeId] ?? false, for: member) }
             }
         case .toggleMute:
             let prevOverride = manager.inboxMuteOverride(for: pr)
@@ -1723,17 +2030,46 @@ struct TriageDeckView: View {
     /// collapsed "Postponed" section. Pushes an undoable toast that resumes it.
     private func postpone(_ pr: PRSnapshot, for duration: SnoozeDuration) {
         TelemetryService.shared.recordTriageInteraction("snooze")
-        Task { await manager.performAction(.snooze(pr, until: Date().addingTimeInterval(duration.interval))) }
-        pushUndo(label: "Postponed \(pr.title) · \(duration.title)", pr: pr) {
-            Task { await manager.performAction(.unsnooze(pr)) }
+        // Stack-aware: postponing any member postpones the WHOLE stack — an upper PR
+        // can't move forward until the ones below it do, so they park together.
+        let members = stackMembers(of: pr)
+        // Capture each member's prior wake time so undo restores it exactly: a member
+        // already snoozed before this action returns to its own wake time, not woken.
+        let priorWake = Dictionary(uniqueKeysWithValues: members.compactMap { member in
+            manager.snoozeStore.wakeTime(nodeId: member.nodeId).map { (member.nodeId, $0) }
+        })
+        let until = Date().addingTimeInterval(duration.interval)
+        for member in members {
+            Task { await manager.performAction(.snooze(member, until: until)) }
+        }
+        let label: String = members.count > 1
+            ? "Postponed stack (\(members.count)) · \(duration.title)"
+            : "Postponed \(pr.title) · \(duration.title)"
+        pushUndo(label: label, pr: pr) {
+            for member in members {
+                if let wake = priorWake[member.nodeId] {
+                    Task { await manager.performAction(.snooze(member, until: wake)) }
+                } else {
+                    Task { await manager.performAction(.unsnooze(member)) }
+                }
+            }
         }
     }
 
     /// Resumes (unsnoozes) a postponed PR — it returns to its normal group
-    /// immediately.
+    /// immediately. Stack-aware: resuming any member resumes the whole stack.
     private func resume(_ pr: PRSnapshot) {
         TelemetryService.shared.recordTriageInteraction("unsnooze")
-        Task { await manager.performAction(.unsnooze(pr)) }
+        for member in stackMembers(of: pr) {
+            Task { await manager.performAction(.unsnooze(member)) }
+        }
+    }
+
+    /// The full member set of the stack this PR belongs to, or just `[pr]` when it is
+    /// standalone. Group actions (pin, postpone) act on the whole stack so members
+    /// move together.
+    private func stackMembers(of pr: PRSnapshot) -> [PRSnapshot] {
+        stackIndex.stack(containing: pr.nodeId)?.members ?? [pr]
     }
 
     // MARK: - Confirmation copy
@@ -1941,6 +2277,12 @@ private struct DeckRowKey: Equatable {
     let previewEnabled: Bool
     let showPeek: Bool
     let compact: Bool
+    /// The "N/M" stack-position label, or "" when the row isn't a stack member. Part
+    /// of the key so a row re-renders when its stack position changes.
+    let stackBadge: String
+    /// > 0 when this row is the collapsed representative of a stack of that size —
+    /// draws the stack glyph + count chip. Part of the key so it re-renders on change.
+    let stackCount: Int
 }
 
 /// Memoizing wrapper: re-evaluates `content()` only when `key` changes. Paired

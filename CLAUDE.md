@@ -51,6 +51,7 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRSearchFilter.swift     ← Pure search matcher (number / PR-URL / free-text); `matches(_:query:)` + `runSelfChecks()` #if DEBUG
 │   ├── InboxMuteEngine.swift    ← Pure glob matcher + four mute-rule predicates (pattern/botAuthor/label/outsideFocus); InboxMuteConfig + per-org OrgFocusConfig value structs; muteVerdict takes the PR's `org`; runSelfChecks() #if DEBUG
 │   ├── ScopeStore.swift         ← @MainActor derives org/repo scopes from PR list; drives badge
+│   ├── StackEngine.swift        ← Pure stacked-PR detection: chains where `B.baseRefName == A.headRefName` (same repo) become a `Stack` (bottom→top); `detect(_:)` + `Index` (`stack(containing:)` / `isStacked` / `position(of:)`); `StackEngineChecks.run()` #if DEBUG
 │   ├── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
 │   ├── GlobalHotKey.swift       ← Carbon global hotkey + MenuBarPopoverOpener
 │   └── TelemetryService.swift   ← Opt-in OTel singleton (no-op when disabled)
@@ -214,7 +215,7 @@ Impure shell (I/O or state): `PRStateStore`, `SnoozeStore` — own persistence.
 There is **no XCTest target**. The testing surface is `#if DEBUG` self-check
 functions on pure types, all invoked from `AppDelegate.applicationDidFinishLaunching`:
 `InboxMuteEngine.runSelfChecks()`, `PRSearchFilter.runSelfChecks()`, `PRClassificationChecks.run()`,
-`AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`. Add new pure logic's
+`AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`, `StackEngineChecks.run()`. Add new pure logic's
 assertions to one of these (or a sibling enum in the same file) rather than introducing a
 test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:)`,
 `NotificationService.classify(...)` — is what makes it assertable at all.
@@ -242,6 +243,45 @@ System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `Glo
 ### Inbox / review focus
 
 The **Inbox tab** (`ReviewTab.inbox`) is a client-side derived union of the forMe + created queries. `PRManager` deduplicates by `nodeId`, then passes each snapshot through `InboxMuteEngine.muteVerdict(...)` — nil = active (shown in role sections), non-nil = muted (collapsed Muted group at the bottom). Four mute rules apply in priority order: (1) glob patterns on title+branch via `InboxMuteConfig.mutePatterns`, (2) bot-author detection (`muteBotAuthors`) with per-bot exemptions via `botAllowList`, (3) label matching (`muteLabels`), (4) **per-org** focus allow-list (`InboxMuteConfig.focusByOrg`, built from `settings.reviewFocusByOrg: [String: OrgFocusConfig]`). Rule 4 looks up ONLY the PR's own org (case-insensitive) via `InboxMuteEngine.focusConfig(for:in:)`: an org with no entry — or an empty one — has no focus rule, so all its PRs stay active, and a focus rule scoped to one org never mutes PRs in another (this replaced an earlier global-focus model where an org-local team slug like `ai` silently muted unrelated orgs' PRs). Rule 4 is also skipped for `.yourPRs` role — your own PRs are never muted by focus. The pre-per-org global keys (`reviewFocusAuthors`/`reviewFocusTeams`) are left on disk but NOT migrated into an all-orgs rule (that global apply-everywhere behavior was the bug); focus starts empty and is re-declared per org. GraphQL now fetches `author { __typename login }` (for bot detection via `__typename == "Bot"`) and `labels(first: 10) { nodes { name } }`. New `PRSnapshot` fields (`labels`, `authorIsBot`) decode with `decodeIfPresent` so old persisted snapshots are backward-compatible; neither field triggers a diff-engine transition (excluded by omission from `PRDiffEngine`).
+
+### Stacked PRs
+
+A **stack** is a chain of open PRs where each PR's base branch is another open PR's head
+branch, **in the same repo** — `B.baseRefName == A.headRefName` means B is stacked on A.
+Detection is the pure `StackEngine` (`Services/StackEngine.swift`): `detect(_:)` returns
+`[Stack]` (members ordered **bottom → top**, base-most first — the merge order) and `index(_:)`
+wraps them in a `StackEngine.Index` for O(1) per-row lookups (`stack(containing:)`, `isStacked`,
+`position(of:)`). Rules: only OPEN PRs link (a
+merged/closed base is not a live link — GitHub retargets the child, so it becomes its own
+root); branches are keyed per repo (`repoFullName` + ref) so fork branch-name collisions don't
+cross-link; a stack needs ≥ 2 members; detection only sees the PRs it is handed, so a chain
+split by a filter/unwatched repo degrades gracefully. `baseRefName` was added to
+`GitHubClient.prNodeFields`, `GraphQLNode`, and `PRSnapshot` for this (decodes with a `""`
+default; NOT compared in `PRDiffEngine` — a rebase is not a notifiable transition).
+`StackEngineChecks.run()` (#if DEBUG) asserts ordering, cross-repo isolation, merged-base
+break, forks, and the lookup helpers.
+
+**Rendering (`TriageDeckView`).** A stack renders as ONE collapsible **card** placed by its
+**bottom** PR's actionability group (stacks merge bottom-up, so the base is the actionable one).
+`effectiveGroupFor(_:)` routes every member to the bottom's `groupFor` group, and
+`orderWithStacks(_:)` keeps members contiguous + bottom→top at the bottom's triage slot — so
+`sectionsWithPinned`, `orderedPRs`, and the on-screen layout never diverge.
+- **Collapsed** (default expanded, state persisted under a `"stack:<id>"` key in
+  `collapsedSectionsRaw`, which never decodes to an `ActionGroup`): a normal, fully-aligned
+  `deckRow` for the base PR, with a `chevron.right` in the **status-icon slot** (in place of the
+  CI icon) and a `⛚ N` count chip in the subline. It acts as a disclosure — the row's tap
+  (`deckRow(onRowTap:)`) and Return expand the stack rather than opening the base — and is a
+  SINGLE J/K stop (`isKeyboardVisible` keeps only the base while collapsed).
+- **Expanded**: a compact `Stack (N) · #x → #y` header + each member as a `deckRow` behind a
+  connector spine (`stackSpine`, indent `stackSpineWidth`), tagged with a `1/N` position chip
+  (`deckRow(stackBadge:)`); every member is its own J/K stop.
+`deckItems(for:prs:stacks:)` folds a section's flat list into `.row` / `.stack` render items;
+Postponed/Done/Muted never stack. Styling is grey/secondary throughout (no accent color).
+
+**Group actions.** A stack moves as a unit: `TriageDeckView.stackMembers(of:)` expands any
+member to the whole stack, so **pin** pins/unpins all members together (they float to Pinned as
+one unit) and **postpone/resume** (`S` / Later) parks/wakes all members together. Both wrap the
+whole-stack change in a single `pushUndo`.
 
 ### Pinning & in-app search
 
@@ -405,7 +445,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `etag_<url>` | String | — |
 | `writeActionsEnabled` | Bool | false |
 | `mergeMethodPreference` | String | `auto` |
-| `collapsedSectionsRaw` | [String] | [] |
+| `collapsedSectionsRaw` | [String] | [] — `ActionGroup` rawValues for collapsed sections, plus `"inbox:<role>:<group>"` (per-role Inbox sections) and `"stack:<id>"` (a collapsed stack card, id = bottom PR nodeId) keys; the non-`ActionGroup` keys are ignored by the typed `collapsedSections` accessor |
 | `snoozeMapData` | Data (JSON) | {} |
 | `attentionPolicy` | [String: String] (`PREvent.rawValue` → `AttentionLevel.rawValue`) | `{}` — an ABSENT key falls back to `PREvent.defaults`, where `reviewRequested` and `reviewRequestedTeam` are `.notify` / `.quiet` respectively |
 | `attentionPolicyMigrationVersion` | Int | `0` (absent) — last-applied `PREvent.policyMigrationVersion`; v1 clears a persisted `reviewRequested: quiet` |
