@@ -51,7 +51,7 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRSearchFilter.swift     ← Pure search matcher (number / PR-URL / free-text); `matches(_:query:)` + `runSelfChecks()` #if DEBUG
 │   ├── InboxMuteEngine.swift    ← Pure glob matcher + four mute-rule predicates (pattern/botAuthor/label/outsideFocus); InboxMuteConfig + per-org OrgFocusConfig value structs; muteVerdict takes the PR's `org`; runSelfChecks() #if DEBUG
 │   ├── ScopeStore.swift         ← @MainActor derives org/repo scopes from PR list; drives badge
-│   ├── StackEngine.swift        ← Pure stacked-PR detection: chains where `B.baseRefName == A.headRefName` (same repo) become a `Stack` (bottom→top); `detect(_:)` + `Index` (position / baseNode / blockedByOpenBase lookups); `StackEngineChecks.run()` #if DEBUG
+│   ├── StackEngine.swift        ← Pure stacked-PR detection: chains where `B.baseRefName == A.headRefName` (same repo) become a `Stack` (bottom→top); `detect(_:)` + `Index` (`stack(containing:)` / `isStacked` / `position(of:)`); `StackEngineChecks.run()` #if DEBUG
 │   ├── SnoozeStore.swift        ← @MainActor snooze wrapper over MainlineSettings
 │   ├── GlobalHotKey.swift       ← Carbon global hotkey + MenuBarPopoverOpener
 │   └── TelemetryService.swift   ← Opt-in OTel singleton (no-op when disabled)
