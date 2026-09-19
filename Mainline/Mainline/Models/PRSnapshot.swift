@@ -281,6 +281,13 @@ struct PRSnapshot: Codable, Equatable {
     /// The head branch name (e.g. "feat/my-feature"). Used for sensitive-branch heuristics.
     var headRefName: String
 
+    /// The base branch this PR targets (e.g. "main", or another PR's head branch
+    /// when this PR is stacked). Empty when not fetched. Load-bearing for stack
+    /// detection: a PR is a child in a stack when its `baseRefName` equals another
+    /// open PR's `headRefName` in the same repo (see `StackEngine`). NOT compared in
+    /// `PRDiffEngine` — a rebase that changes the base is not a notifiable transition.
+    var baseRefName: String
+
     /// Lines added in this PR (from GraphQL additions field).
     var linesAdded: Int
 
@@ -374,6 +381,7 @@ struct PRSnapshot: Codable, Equatable {
         tabs: Set<ReviewTab> = [],
         mergeable: Bool? = nil,
         headRefName: String = "",
+        baseRefName: String = "",
         linesAdded: Int = 0,
         linesDeleted: Int = 0,
         sensitivePathFlags: [String]? = nil,
@@ -410,6 +418,7 @@ struct PRSnapshot: Codable, Equatable {
         self.tabs = tabs
         self.mergeable = mergeable
         self.headRefName = headRefName
+        self.baseRefName = baseRefName
         self.linesAdded = linesAdded
         self.linesDeleted = linesDeleted
         self.sensitivePathFlags = sensitivePathFlags
@@ -431,7 +440,7 @@ struct PRSnapshot: Codable, Equatable {
         case merged, closed, reviewDecision, ciStatus, reviewState
         case commentCount, reviewCount, lastCommentIsBot, lastReviewIsBot
         case updatedAt, author, requestedReviewers, requestedTeams, tabs
-        case mergeable, headRefName, linesAdded, linesDeleted
+        case mergeable, headRefName, baseRefName, linesAdded, linesDeleted
         case sensitivePathFlags, unresolvedThreadCount
         case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
         case vercelPreviewUrl, vercelPreviewCheckedAt
@@ -463,6 +472,7 @@ struct PRSnapshot: Codable, Equatable {
         tabs                  = try c.decodeIfPresent(Set<ReviewTab>.self, forKey: .tabs) ?? []
         mergeable             = try c.decodeIfPresent(Bool.self,       forKey: .mergeable)
         headRefName           = try c.decodeIfPresent(String.self,     forKey: .headRefName) ?? ""
+        baseRefName           = try c.decodeIfPresent(String.self,     forKey: .baseRefName) ?? ""
         linesAdded            = try c.decodeIfPresent(Int.self,        forKey: .linesAdded) ?? 0
         linesDeleted          = try c.decodeIfPresent(Int.self,        forKey: .linesDeleted) ?? 0
         sensitivePathFlags    = try c.decodeIfPresent([String].self,   forKey: .sensitivePathFlags)

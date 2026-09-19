@@ -121,6 +121,7 @@ private struct GraphQLNode: Decodable {
     // Triage Cockpit additions
     let mergeable: String?       // MERGEABLE | CONFLICTING | UNKNOWN
     let headRefName: String?
+    let baseRefName: String?
     let additions: Int?
     let deletions: Int?
     let reviewRequests: GraphQLReviewRequests?
@@ -685,6 +686,7 @@ final class GitHubClient {
             tabs:               [tab],
             mergeable:          mergeableBool,
             headRefName:        node.headRefName ?? "",
+            baseRefName:        node.baseRefName ?? "",
             linesAdded:         node.additions ?? 0,
             linesDeleted:       node.deletions ?? 0,
             unresolvedThreadCount: unresolvedThreadCount,
@@ -728,6 +730,7 @@ final class GitHubClient {
         updatedAt
         mergeable
         headRefName
+        baseRefName
         additions
         deletions
         author { __typename login }

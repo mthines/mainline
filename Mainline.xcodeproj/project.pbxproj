@@ -24,6 +24,7 @@
 		PC0000000000000000000010 /* SensitivePathMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000013 /* SensitivePathMatcher.swift */; };
 		PC0000000000000000000011 /* TriageClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000014 /* TriageClassifier.swift */; };
 		PC0000000000000000000013 /* SnoozeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000016 /* SnoozeStore.swift */; };
+		PC000000000000000000009A /* StackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000009A /* StackEngine.swift */; };
 		PC0000000000000000000014 /* MenuBarIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000017 /* MenuBarIconView.swift */; };
 		PC0000000000000000000016 /* TriageDeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000019 /* TriageDeckView.swift */; };
 		PC0000000000000000000017 /* PRPeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000001A /* PRPeekView.swift */; };
@@ -69,6 +70,7 @@
 		PF0000000000000000000013 /* SensitivePathMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitivePathMatcher.swift; sourceTree = "<group>"; };
 		PF0000000000000000000014 /* TriageClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriageClassifier.swift; sourceTree = "<group>"; };
 		PF0000000000000000000016 /* SnoozeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnoozeStore.swift; sourceTree = "<group>"; };
+		PF000000000000000000009A /* StackEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackEngine.swift; sourceTree = "<group>"; };
 		PF0000000000000000000017 /* MenuBarIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarIconView.swift; sourceTree = "<group>"; };
 		PF0000000000000000000019 /* TriageDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriageDeckView.swift; sourceTree = "<group>"; };
 		PF000000000000000000001A /* PRPeekView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRPeekView.swift; sourceTree = "<group>"; };
@@ -149,6 +151,7 @@
 				PF0000000000000000000013 /* SensitivePathMatcher.swift */,
 				PF0000000000000000000014 /* TriageClassifier.swift */,
 				PF0000000000000000000016 /* SnoozeStore.swift */,
+				PF000000000000000000009A /* StackEngine.swift */,
 				PF000000000000000000001F /* ScopeStore.swift */,
 				PF0000000000000000000099 /* GlobalHotKey.swift */,
 				OT00000000000000000000A1 /* TelemetryService.swift */,
@@ -282,6 +285,7 @@
 				PC0000000000000000000010 /* SensitivePathMatcher.swift in Sources */,
 				PC0000000000000000000011 /* TriageClassifier.swift in Sources */,
 				PC0000000000000000000013 /* SnoozeStore.swift in Sources */,
+				PC000000000000000000009A /* StackEngine.swift in Sources */,
 				PC0000000000000000000014 /* MenuBarIconView.swift in Sources */,
 				PC0000000000000000000016 /* TriageDeckView.swift in Sources */,
 				PC0000000000000000000017 /* PRPeekView.swift in Sources */,
