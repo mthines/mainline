@@ -382,37 +382,42 @@ struct TriageDeckView: View {
     /// bottom's sort position — so a stack renders as a single unit rather than scattered
     /// across Ready-to-merge / Waiting.
     private func sectionsWithPinned(from list: [PRSnapshot]) -> [(group: ActionGroup, prs: [PRSnapshot])] {
-        let pinnedRows = orderWithStacks(list.filter { isPinnedForPartition($0) })
-        let rest = list.filter { !isPinnedForPartition($0) }
+        // Build the stack index ONCE per section pass and thread it into the per-PR
+        // helpers below — they run for every PR, so reading the recomputed `stackIndex`
+        // property inside them would rebuild it O(N) times per render.
+        let idx = stackIndex
+        let pinnedRows = orderWithStacks(list.filter { isPinnedForPartition($0, idx) }, idx)
+        let rest = list.filter { !isPinnedForPartition($0, idx) }
 
         var result: [(group: ActionGroup, prs: [PRSnapshot])] = []
         if !pinnedRows.isEmpty {
             result.append((.pinned, pinnedRows))
         }
 
-        let grouped = Dictionary(grouping: rest, by: { effectiveGroupFor($0) })
+        let grouped = Dictionary(grouping: rest, by: { effectiveGroupFor($0, idx) })
         result += ActionGroup.allCases
             .filter { $0 != .pinned && $0 != .postponed && $0 != .done && $0 != .muted }
             .sorted { $0.sortIndex < $1.sortIndex }
             .compactMap { group -> (group: ActionGroup, prs: [PRSnapshot])? in
                 guard let prs = grouped[group], !prs.isEmpty else { return nil }
-                return (group, orderWithStacks(prs))
+                return (group, orderWithStacks(prs, idx))
             }
         return result
     }
 
     // MARK: - Stacked PRs
 
-    /// The stacks detected across the deck's current PR list. Recomputed per access;
-    /// callers that touch it per row thread the result in instead (see `sectionRows`).
+    /// The stacks detected across the deck's current PR list. Recomputed per access, so
+    /// callers that touch it per row MUST build it once and thread the result in (see
+    /// `sectionsWithPinned` / `orderedPRs`), not read this property inside a per-PR loop.
     private var stackIndex: StackEngine.Index {
         StackEngine.index(prs)
     }
 
     /// The group a PR is placed under, made stack-aware: a member of a stack inherits
     /// the group of its stack's BOTTOM PR so the whole stack lands in one section.
-    private func effectiveGroupFor(_ pr: PRSnapshot) -> ActionGroup {
-        if let stack = stackIndex.stack(containing: pr.nodeId) {
+    private func effectiveGroupFor(_ pr: PRSnapshot, _ idx: StackEngine.Index) -> ActionGroup {
+        if let stack = idx.stack(containing: pr.nodeId) {
             return groupFor(stack.bottom)
         }
         return groupFor(pr)
@@ -423,9 +428,9 @@ struct TriageDeckView: View {
     /// partly-pinned stack (e.g. a new child of a pinned stack) is never split across
     /// the Pinned and actionability sections (which would render absent members inside
     /// the card). The pin GLYPH still reflects each PR's own real pin state.
-    private func isPinnedForPartition(_ pr: PRSnapshot) -> Bool {
+    private func isPinnedForPartition(_ pr: PRSnapshot, _ idx: StackEngine.Index) -> Bool {
         if isPinned(pr) { return true }
-        guard let stack = stackIndex.stack(containing: pr.nodeId) else { return false }
+        guard let stack = idx.stack(containing: pr.nodeId) else { return false }
         return stack.members.contains { isPinned($0) }
     }
 
@@ -433,8 +438,7 @@ struct TriageDeckView: View {
     /// bottom→top order, positioned at the stack bottom's normal triage slot. Non-
     /// stacked PRs keep their triage position. Keeps the flat section array (and hence
     /// `orderedPRs`) matching the on-screen stack-card layout.
-    private func orderWithStacks(_ list: [PRSnapshot]) -> [PRSnapshot] {
-        let idx = stackIndex
+    private func orderWithStacks(_ list: [PRSnapshot], _ idx: StackEngine.Index) -> [PRSnapshot] {
         let present = Set(list.map(\.nodeId))
         var emitted = Set<String>()
         var units: [(rep: PRSnapshot, members: [PRSnapshot])] = []
@@ -456,8 +460,8 @@ struct TriageDeckView: View {
     /// SINGLE stop — its base PR (the collapsed representative row) — so J/K treats it
     /// as one item; its other members are hidden and skipped. An expanded stack keeps
     /// every member as its own stop. Standalone PRs are always stops.
-    private func isKeyboardVisible(_ pr: PRSnapshot) -> Bool {
-        guard let stack = stackIndex.stack(containing: pr.nodeId) else { return true }
+    private func isKeyboardVisible(_ pr: PRSnapshot, _ idx: StackEngine.Index) -> Bool {
+        guard let stack = idx.stack(containing: pr.nodeId) else { return true }
         if isStackExpanded(stack.id) { return true }
         return stack.bottom.nodeId == pr.nodeId
     }
@@ -493,15 +497,16 @@ struct TriageDeckView: View {
             // Flat results — pinned first, then triage order.
             return sortedForDisplay(prs)
         }
+        let idx = stackIndex
         if inboxMode {
             // Inbox: keyboard index space is role-sections + (expanded) muted rows.
             var list = inboxOrderedPRs
             if settings.collapsedSections.contains(.muted) {
                 list += sortedForDisplay(mutedPRs)
             }
-            return list.filter { isKeyboardVisible($0) }
+            return list.filter { isKeyboardVisible($0, idx) }
         }
-        var list = actionabilitySections.flatMap { $0.prs }.filter { isKeyboardVisible($0) }
+        var list = actionabilitySections.flatMap { $0.prs }.filter { isKeyboardVisible($0, idx) }
         // Include Postponed rows in the keyboard/hover focus space ONLY while that
         // section is expanded (it is collapsed by default). Expanded ⇔ the section
         // is present in `collapsedSections` — `expansionBinding` inverts the default
