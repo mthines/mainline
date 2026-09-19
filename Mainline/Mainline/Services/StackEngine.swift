@@ -40,7 +40,6 @@ enum StackEngine {
         /// The tip PR — the one that merges last.
         var top: PRSnapshot { members[members.count - 1] }
 
-        var nodeIds: [String] { members.map(\.nodeId) }
         var count: Int { members.count }
     }
 
@@ -74,8 +73,6 @@ enum StackEngine {
             self.positionByNode = posByNode
         }
 
-        static let empty = Index(stacks: [])
-
         /// Whether this PR is part of a detected stack.
         func isStacked(_ nodeId: String) -> Bool { stackIdByNode[nodeId] != nil }
 
@@ -92,24 +89,6 @@ enum StackEngine {
                   let stack = stackById[sid],
                   let zero = positionByNode[nodeId] else { return nil }
             return (zero + 1, stack.count)
-        }
-
-        /// The nodeId directly below this one in its stack (its base PR), or nil if it
-        /// is the bottom / standalone.
-        func baseNode(of nodeId: String) -> String? {
-            guard let sid = stackIdByNode[nodeId],
-                  let stack = stackById[sid],
-                  let zero = positionByNode[nodeId], zero > 0 else { return nil }
-            return stack.members[zero - 1].nodeId
-        }
-
-        /// Whether this PR is blocked purely because the PR directly below it in the
-        /// stack is still open (can't merge until the base merges). True for every
-        /// non-bottom stack member (all stack members are open by construction).
-        /// The bottom member — and any standalone PR — is never blocked by an open base.
-        func blockedByOpenBase(_ nodeId: String) -> Bool {
-            guard let zero = positionByNode[nodeId] else { return false }
-            return zero > 0
         }
     }
 
@@ -232,7 +211,7 @@ enum StackEngineChecks {
 
         let stacks = StackEngine.detect([c, solo, a, b]) // deliberately shuffled
         assert(stacks.count == 1, "one stack detected among shuffled input")
-        assert(stacks[0].nodeIds == ["a", "b", "c"], "ordered bottom → top regardless of input order")
+        assert(stacks[0].members.map(\.nodeId) == ["a", "b", "c"], "ordered bottom → top regardless of input order")
         assert(stacks[0].bottom.nodeId == "a" && stacks[0].top.nodeId == "c", "bottom/top resolved")
         assert(stacks[0].id == "a", "stack id is the bottom's nodeId")
 
@@ -241,9 +220,6 @@ enum StackEngineChecks {
         assert(idx.position(of: "a")?.index == 1 && idx.position(of: "c")?.index == 3, "1-based position")
         assert(idx.position(of: "b")?.count == 3, "count is stack size")
         assert(idx.position(of: "solo") == nil, "standalone has no position")
-        assert(idx.baseNode(of: "c") == "b" && idx.baseNode(of: "a") == nil, "base node lookup")
-        assert(!idx.blockedByOpenBase("a"), "bottom is never blocked by an open base")
-        assert(idx.blockedByOpenBase("b") && idx.blockedByOpenBase("c"), "non-bottom is blocked by open base")
 
         // Same branch names in a DIFFERENT repo must not link across repos.
         let x = make("x", number: 1, repo: "o/other", head: "feat/a", base: "main")

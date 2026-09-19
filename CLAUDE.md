@@ -250,8 +250,8 @@ A **stack** is a chain of open PRs where each PR's base branch is another open P
 branch, **in the same repo** — `B.baseRefName == A.headRefName` means B is stacked on A.
 Detection is the pure `StackEngine` (`Services/StackEngine.swift`): `detect(_:)` returns
 `[Stack]` (members ordered **bottom → top**, base-most first — the merge order) and `index(_:)`
-wraps them in a `StackEngine.Index` for O(1) per-row lookups (`isStacked`, `stack(containing:)`,
-`position(of:)`, `baseNode(of:)`, `blockedByOpenBase(_:)`). Rules: only OPEN PRs link (a
+wraps them in a `StackEngine.Index` for O(1) per-row lookups (`stack(containing:)`, `isStacked`,
+`position(of:)`). Rules: only OPEN PRs link (a
 merged/closed base is not a live link — GitHub retargets the child, so it becomes its own
 root); branches are keyed per repo (`repoFullName` + ref) so fork branch-name collisions don't
 cross-link; a stack needs ≥ 2 members; detection only sees the PRs it is handed, so a chain
