@@ -382,8 +382,8 @@ struct TriageDeckView: View {
     /// bottom's sort position — so a stack renders as a single unit rather than scattered
     /// across Ready-to-merge / Waiting.
     private func sectionsWithPinned(from list: [PRSnapshot]) -> [(group: ActionGroup, prs: [PRSnapshot])] {
-        let pinnedRows = orderWithStacks(list.filter { isPinned($0) })
-        let rest = list.filter { !isPinned($0) }
+        let pinnedRows = orderWithStacks(list.filter { isPinnedForPartition($0) })
+        let rest = list.filter { !isPinnedForPartition($0) }
 
         var result: [(group: ActionGroup, prs: [PRSnapshot])] = []
         if !pinnedRows.isEmpty {
@@ -416,6 +416,17 @@ struct TriageDeckView: View {
             return groupFor(stack.bottom)
         }
         return groupFor(pr)
+    }
+
+    /// Whether a PR belongs in the Pinned subsection. Stack-aware: a stack pins as a
+    /// UNIT — if ANY member is pinned, every member floats to Pinned together, so a
+    /// partly-pinned stack (e.g. a new child of a pinned stack) is never split across
+    /// the Pinned and actionability sections (which would render absent members inside
+    /// the card). The pin GLYPH still reflects each PR's own real pin state.
+    private func isPinnedForPartition(_ pr: PRSnapshot) -> Bool {
+        if isPinned(pr) { return true }
+        guard let stack = stackIndex.stack(containing: pr.nodeId) else { return false }
+        return stack.members.contains { isPinned($0) }
     }
 
     /// Orders a group's PRs so that each stack's members stay contiguous, in
@@ -814,21 +825,21 @@ struct TriageDeckView: View {
             case .row(let pr):
                 rowFor(group: group, pr: pr, index: indexMap[pr.nodeId] ?? 0)
                 Divider().padding(.leading, metrics.dividerInset())
-            case .stack(let stack):
-                stackCard(stack, indexMap: indexMap)
+            case .stack(let stack, let visible):
+                stackCard(stack, visibleMembers: visible, indexMap: indexMap)
             }
         }
     }
 
     /// One entry in a section's rendered layout: either a standalone PR row or a
-    /// stack card wrapping ≥ 2 members.
+    /// stack card wrapping the stack's members present in this section (≥ 2).
     private enum DeckItem: Identifiable {
         case row(PRSnapshot)
-        case stack(StackEngine.Stack)
+        case stack(StackEngine.Stack, visible: [PRSnapshot])
         var id: String {
             switch self {
-            case .row(let pr):   return "r:" + pr.nodeId
-            case .stack(let s):  return "s:" + s.id
+            case .row(let pr):        return "r:" + pr.nodeId
+            case .stack(let s, _):    return "s:" + s.id
             }
         }
     }
@@ -853,7 +864,7 @@ struct TriageDeckView: View {
             emitted.insert(stack.id)
             let visibleMembers = stack.members.filter { present.contains($0.nodeId) }
             if visibleMembers.count >= 2 {
-                items.append(.stack(stack))
+                items.append(.stack(stack, visible: visibleMembers))
             } else if let only = visibleMembers.first {
                 items.append(.row(only))
             }
@@ -875,13 +886,15 @@ struct TriageDeckView: View {
     /// EXPANDED: a compact header + each member rendered bottom→top (base at the top
     /// of the card) behind a connector spine.
     @ViewBuilder
-    private func stackCard(_ stack: StackEngine.Stack, indexMap: [String: Int]) -> some View {
+    private func stackCard(_ stack: StackEngine.Stack, visibleMembers: [PRSnapshot], indexMap: [String: Int]) -> some View {
         let expansion = stackExpansionBinding(for: stack.id)
         if expansion.wrappedValue {
             stackHeader(stack, expansion: expansion)
-            ForEach(Array(stack.members.enumerated()), id: \.element.nodeId) { pair in
-                let position = pair.offset
-                let pr = pair.element
+            // Iterate only the members present in THIS section; the position chip and
+            // spine use each member's true index in the full stack, so a (rare) split
+            // stack still labels 1/N correctly and never renders an absent member.
+            ForEach(visibleMembers, id: \.nodeId) { pr in
+                let position = stack.members.firstIndex { $0.nodeId == pr.nodeId } ?? 0
                 HStack(spacing: 0) {
                     stackSpine(position: position, count: stack.count)
                     memoizedDeckRow(pr: pr, index: indexMap[pr.nodeId] ?? 0,
@@ -892,8 +905,11 @@ struct TriageDeckView: View {
         } else {
             // Collapsed: a normal, fully-aligned row for the base PR (same leading
             // edge as every sibling), marked as a stack and acting as a disclosure —
-            // tapping it expands rather than opening the PR.
-            deckRow(pr: stack.bottom, index: indexMap[stack.bottom.nodeId] ?? 0,
+            // tapping it expands rather than opening the PR. Fall back to the first
+            // present member if the base itself isn't in this section.
+            let rep = visibleMembers.first { $0.nodeId == stack.bottom.nodeId }
+                ?? visibleMembers.first ?? stack.bottom
+            deckRow(pr: rep, index: indexMap[rep.nodeId] ?? 0,
                     stackCount: stack.count,
                     onRowTap: { expansion.wrappedValue.toggle() })
             Divider().padding(.leading, metrics.dividerInset())
