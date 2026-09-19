@@ -314,13 +314,27 @@ Done-set sink (where a just-merged PR surfaces), the live-`prs` sink, and the on
 (a fetched pin that has merged is unpinned instead of cached). A closed-but-unmerged PR keeps its
 pin deliberately. Toggle in Settings → Appearance → Pinning.
 
-**Pins are always visible.** A pin means "keep this in front of me," so it overrides the
-noise filters — but NOT snooze (an explicit "later" wins). `PRManager.effectiveMuted` returns
+**Pins are always visible — within the selected org.** A pin means "keep this in front of me,"
+so it overrides the noise filters — but NOT snooze (an explicit "later" wins), and by default
+NOT the org chip either. `PRManager.effectiveMuted` returns
 `false` for a pinned PR (overriding both mute rules AND a manual mute override), so a pinned PR
-pops OUT of the collapsed Muted group into its natural role/actionability section; the scope
-chip (`applyingSelectedScope`, `tabFiltered`) and the Drafts toggle (`inboxUnionPRs`,
-`tabFiltered`) likewise keep a pinned PR regardless. It then surfaces in the dedicated Pinned
-subsection at the top of its role/tab group (see **Pinning** above). **On-demand fetch:** a pinned PR can
+pops OUT of the collapsed Muted group into its natural role/actionability section; the Drafts
+toggle (`inboxUnionPRs`, `tabFiltered`) likewise keeps a pinned PR regardless. It then surfaces
+in the dedicated Pinned subsection at the top of its role/tab group (see **Pinning** above).
+
+The **scope chip is the one filter a pin does not override by default**. Both scope pipelines —
+`applyingSelectedScope` (Inbox) and `tabFiltered` (For me / Created) — route through the single
+`PRManager.survivesScope(_:scope:)` predicate, which keeps an out-of-org pin only when
+`settings.pinsIgnoreOrgFilter` is ON (default OFF). Org-scoped is the default because the
+opposite reads as a bug: selecting `mthines` while four pinned `dash0hq` PRs sat at the top of
+the deck made the Pinned section the one block that ignored the chip, and left the chip's count
+("mthines 5") disagreeing with the rows on screen — the chip counts come from the
+scope-INDEPENDENT base (`scopeSelectorBasePRs`), so each pin counts under its own org either way.
+Only the scope chip is affected; mute, Drafts, search (`searchBasePRs` ignores the chip on
+purpose) and the on-demand pin fetch are unchanged. `refreshPinnedFetches` deliberately still
+fetches pins the chip currently hides — the chip can change between polls, and gating the fetch
+on it would blank the deck for a poll after switching chips and under-count the hidden org.
+**On-demand fetch:** a pinned PR can
 also fall out of the live For me / Created queries entirely (nothing to float). `PRManager`
 keeps a `pinnedFetchedPRs` cache reconciled by `refreshPinnedFetches()` (run on every poll via
 the `store.$snapshots` sink, and on `togglePin` / `setPinned`): it prunes entries that are
@@ -462,8 +476,9 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `previewLinkLabels` | [String] | `["preview"]` — case-insensitive substring match on a markdown link label |
 | `telemetryEnabled` | Bool | false |
 | `shortcutBindings` | Data (JSON) | `InAppShortcutBindings.defaults` — 17 `ShortcutBinding { key, modifiers }` entries; all bare except undo=⌘Z (`modifiers = NSEvent.ModifierFlags.command.rawValue`). Includes `markReady` (default `t`, bare — draft→ready write action; **moved off `f`**), `copyBranch` (default `c`, bare), `togglePin` (default `p`, bare — pin/unpin), and `search` (default `f`, bare — open search). Decoded with custom `Codable` that handles both the new object shape and the v1.25.0 legacy bare-string shape; undo bare-string → `.command` migration preserves ⌘Z; on the upgrade that introduces `search` (its key absent in stored JSON), a `markReady` still bound to bare `f` is relocated to `t` so `f` is free for search; absent fields fall back to factory defaults. |
-| `pinnedNodeIds` | [String] | `[]` — nodeIds the user has pinned. A pinned PR appears in a dedicated **Pinned** subsection at the top of its role/tab group (a `.pinned` display-only `ActionGroup`, collapsible, expanded by default) with a pin glyph, and is ALWAYS visible: it overrides mute, the scope chip, and the Drafts toggle (but not snooze), and is fetched on demand (`node(id:)`) when it has dropped out of the live queries. Membership read via `settings.pinnedNodeIds`; toggled by the `togglePin` shortcut / context menu. |
+| `pinnedNodeIds` | [String] | `[]` — nodeIds the user has pinned. A pinned PR appears in a dedicated **Pinned** subsection at the top of its role/tab group (a `.pinned` display-only `ActionGroup`, collapsible, expanded by default) with a pin glyph, and overrides mute and the Drafts toggle (but not snooze, and not the org chip unless `pinsIgnoreOrgFilter` is on), and is fetched on demand (`node(id:)`) when it has dropped out of the live queries. Membership read via `settings.pinnedNodeIds`; toggled by the `togglePin` shortcut / context menu. |
 | `unpinOnMerge` | Bool | `true` — when on, a PR auto-unpins once it has MERGED (not merely closed). Enforced by `PRManager.applyUnpinOnMerge`, run from the Done-set sink, the live-`prs` sink, and the on-demand pin fetch. Toggle in Settings → Appearance → Pinning. |
+| `pinsIgnoreOrgFilter` | Bool | `false` — when OFF (default) pins are ORG-SCOPED: the Pinned subsection follows the org chip like every other section, so selecting `mthines` hides a pinned `dash0hq` PR. When ON, a pin overrides the chip and shows under every org (the pre-1.72 behaviour). Enforced by the single `PRManager.survivesScope(_:scope:)` predicate shared by `applyingSelectedScope` and `tabFiltered`. Scope only — mute, Drafts, snooze, search and the on-demand pin fetch are unaffected. Toggle in Settings → Appearance → Pinning. |
 | `mutePatterns` | [String] | `["chore(deps)*", "build(deps)*"]` |
 | `muteBotAuthors` | Bool | true |
 | `botAllowList` | [String] | `[]` |

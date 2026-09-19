@@ -560,6 +560,13 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Show pinned PRs under every org filter", isOn: tracked(\.pinsIgnoreOrgFilter, name: "pinsIgnoreOrgFilter"))
+            Label("Off (default): pins follow the org chip, so selecting an org shows only that org's pins. On: a pinned PR stays in the Pinned section whichever org is selected. Either way a pin still beats the mute rules and the Drafts toggle, and search ignores the chip entirely.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
 
         Section("Drafts") {

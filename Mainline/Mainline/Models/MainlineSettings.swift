@@ -544,6 +544,7 @@ final class MainlineSettings: ObservableObject {
         static let showDrafts           = "showDrafts"
         static let splitDrafts          = "splitDrafts"
         static let unpinOnMerge         = "unpinOnMerge"
+        static let pinsIgnoreOrgFilter  = "pinsIgnoreOrgFilter"
         static let forMeReviewFilter    = "forMeReviewFilter"
         static let compactRows          = "compactRows"
         static let needsHumanExpanded   = "needsHumanExpanded"
@@ -807,6 +808,19 @@ final class MainlineSettings: ObservableObject {
     /// poll via `applyUnpinOnMerge`.
     @Published var unpinOnMerge: Bool {
         didSet { defaults.set(unpinOnMerge, forKey: Keys.unpinOnMerge) }
+    }
+
+    /// Whether a pinned PR stays visible while an ORG chip is selected that its own
+    /// org doesn't match. Default OFF — pins are org-scoped, so selecting `mthines`
+    /// shows only `mthines` pins and the Pinned subsection follows the chip like
+    /// every other section. Turn it ON to restore the previous behaviour, where a
+    /// pin overrode the chip and every pinned PR showed under every org.
+    ///
+    /// Scope only. A pin still overrides the mute rules and the Drafts toggle
+    /// regardless of this setting, and still never overrides snooze. Search is
+    /// unaffected — it deliberately ignores the chip entirely.
+    @Published var pinsIgnoreOrgFilter: Bool {
+        didSet { defaults.set(pinsIgnoreOrgFilter, forKey: Keys.pinsIgnoreOrgFilter) }
     }
 
     /// Sub-filter for the "For me" tab. Default `.all` (show direct + team).
@@ -1319,6 +1333,8 @@ final class MainlineSettings: ObservableObject {
         unpinOnMerge = defaults.object(forKey: Keys.unpinOnMerge) == nil
             ? true
             : defaults.bool(forKey: Keys.unpinOnMerge)
+        // Pins bypass the org chip — default OFF (pins are org-scoped)
+        pinsIgnoreOrgFilter = defaults.bool(forKey: Keys.pinsIgnoreOrgFilter)
 
         // For-me review sub-filter — default All (show direct + team)
         forMeReviewFilter = defaults.string(forKey: Keys.forMeReviewFilter)
