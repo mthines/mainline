@@ -456,14 +456,28 @@ struct TriageDeckView: View {
         return units.flatMap { $0.members }
     }
 
-    /// Whether a PR is a keyboard stop right now. A collapsed stack collapses to a
-    /// SINGLE stop — its base PR (the collapsed representative row) — so J/K treats it
-    /// as one item; its other members are hidden and skipped. An expanded stack keeps
-    /// every member as its own stop. Standalone PRs are always stops.
-    private func isKeyboardVisible(_ pr: PRSnapshot, _ idx: StackEngine.Index) -> Bool {
-        guard let stack = idx.stack(containing: pr.nodeId) else { return true }
-        if isStackExpanded(stack.id) { return true }
-        return stack.bottom.nodeId == pr.nodeId
+    /// One section's keyboard stops, honoring stack collapse. A standalone PR is
+    /// always a stop. For a stack rendered in THIS section: every present member is a
+    /// stop when expanded; when collapsed, only the section's rendered representative
+    /// — the bottom if present here, otherwise the first present member (mirroring
+    /// `stackCard`/`deckItems`' own `rep` fallback) — so a stack split across two
+    /// sections (e.g. a cross-role inbox stack whose base sits in the other role's
+    /// section) still contributes exactly one stop per rendered row. Filtering per
+    /// section rather than over the flattened list is what keeps the keyboard index
+    /// space aligned with the on-screen layout: a section-blind `stack.bottom` check
+    /// dropped a member row that renders here but whose base lives elsewhere, so the
+    /// row displayed yet had no J/K stop (and, via `orderedIndexByNodeId`, collapsed
+    /// to index 0).
+    private func keyboardStops(inSection prs: [PRSnapshot], _ idx: StackEngine.Index) -> [PRSnapshot] {
+        let present = Set(prs.map(\.nodeId))
+        return prs.filter { pr in
+            guard let stack = idx.stack(containing: pr.nodeId) else { return true }
+            if isStackExpanded(stack.id) { return true }
+            let rep = present.contains(stack.bottom.nodeId)
+                ? stack.bottom.nodeId
+                : stack.members.first { present.contains($0.nodeId) }?.nodeId
+            return pr.nodeId == rep
+        }
     }
 
     /// Stack cards are expanded by default. Collapse state is persisted in the shared
@@ -500,13 +514,18 @@ struct TriageDeckView: View {
         let idx = stackIndex
         if inboxMode {
             // Inbox: keyboard index space is role-sections + (expanded) muted rows.
-            var list = inboxOrderedPRs
+            // Filter each section independently so a collapsed stack keeps its
+            // per-section representative (see `keyboardStops`); the Muted group never
+            // stacks in display, so its rows pass through as-is.
+            var list = inboxSections.flatMap { section in
+                section.actionSections.flatMap { keyboardStops(inSection: $0.prs, idx) }
+            }
             if settings.collapsedSections.contains(.muted) {
                 list += sortedForDisplay(mutedPRs)
             }
-            return list.filter { isKeyboardVisible($0, idx) }
+            return list
         }
-        var list = actionabilitySections.flatMap { $0.prs }.filter { isKeyboardVisible($0, idx) }
+        var list = actionabilitySections.flatMap { keyboardStops(inSection: $0.prs, idx) }
         // Include Postponed rows in the keyboard/hover focus space ONLY while that
         // section is expanded (it is collapsed by default). Expanded ⇔ the section
         // is present in `collapsedSections` — `expansionBinding` inverts the default
@@ -577,13 +596,6 @@ struct TriageDeckView: View {
             }
         }
         return result
-    }
-
-    /// All PRs in the Inbox view in display order (for keyboard index space).
-    private var inboxOrderedPRs: [PRSnapshot] {
-        inboxSections.flatMap { section in
-            section.actionSections.flatMap { $0.prs }
-        }
     }
 
     /// The Inbox list: role sections, then the shared Muted group.
