@@ -1926,6 +1926,10 @@ struct TriageDeckView: View {
             // Stack-aware: pinning any member pins the WHOLE stack so they stay
             // together and float to Pinned as one unit (and unpin together).
             let members = stackMembers(of: pr)
+            // Capture each member's prior pin state so undo restores it exactly — a
+            // member that was already pinned before this action (e.g. a freshly-polled
+            // child of an already-pinned stack) must stay pinned on undo, not be cleared.
+            let priorPinned = Dictionary(uniqueKeysWithValues: members.map { ($0.nodeId, isPinned($0)) })
             let nowPinned = manager.togglePin(pr)
             for member in members where member.nodeId != pr.nodeId {
                 manager.setPinned(nowPinned, for: member)
@@ -1935,7 +1939,7 @@ struct TriageDeckView: View {
                 ? (nowPinned ? "Pinned stack (\(members.count))" : "Unpinned stack (\(members.count))")
                 : (nowPinned ? "Pinned: \(pr.title)" : "Unpinned: \(pr.title)")
             pushUndo(label: label, pr: pr) {
-                for member in members { manager.setPinned(!nowPinned, for: member) }
+                for member in members { manager.setPinned(priorPinned[member.nodeId] ?? false, for: member) }
             }
         case .toggleMute:
             let prevOverride = manager.inboxMuteOverride(for: pr)
@@ -2017,6 +2021,11 @@ struct TriageDeckView: View {
         // Stack-aware: postponing any member postpones the WHOLE stack — an upper PR
         // can't move forward until the ones below it do, so they park together.
         let members = stackMembers(of: pr)
+        // Capture each member's prior wake time so undo restores it exactly: a member
+        // already snoozed before this action returns to its own wake time, not woken.
+        let priorWake = Dictionary(uniqueKeysWithValues: members.compactMap { member in
+            manager.snoozeStore.wakeTime(nodeId: member.nodeId).map { (member.nodeId, $0) }
+        })
         let until = Date().addingTimeInterval(duration.interval)
         for member in members {
             Task { await manager.performAction(.snooze(member, until: until)) }
@@ -2025,7 +2034,13 @@ struct TriageDeckView: View {
             ? "Postponed stack (\(members.count)) · \(duration.title)"
             : "Postponed \(pr.title) · \(duration.title)"
         pushUndo(label: label, pr: pr) {
-            for member in members { Task { await manager.performAction(.unsnooze(member)) } }
+            for member in members {
+                if let wake = priorWake[member.nodeId] {
+                    Task { await manager.performAction(.snooze(member, until: wake)) }
+                } else {
+                    Task { await manager.performAction(.unsnooze(member)) }
+                }
+            }
         }
     }
 
