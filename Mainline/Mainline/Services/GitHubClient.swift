@@ -328,7 +328,8 @@ final class GitHubClient {
     func searchPRs(
         query: String,
         token: String,
-        tab: ReviewTab
+        tab: ReviewTab,
+        telemetryQueryType: String
     ) async throws -> (snapshots: [PRSnapshot], etag: String?, degraded: Bool) {
         do {
             let (snapshots, etag) = try await runSearch(
@@ -352,7 +353,7 @@ final class GitHubClient {
             // terminal failure for this cycle and counting here as well would
             // double-count one poll as two errors.
             TelemetryService.shared.recordPollServerErrorRecovered(
-                queryType: tab.telemetryQueryType,
+                queryType: telemetryQueryType,
                 statusCode: code
             )
             return (snapshots, etag, true)
