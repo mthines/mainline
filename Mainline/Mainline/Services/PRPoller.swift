@@ -36,6 +36,10 @@ final class PRPoller {
 
     private var pollingTask: Task<Void, Never>?
 
+    /// Bots whose committed-PR query last completed (see `seedingBots`). In-memory
+    /// only: nil until the first poll after launch.
+    private var knownCommittedBots: Set<String>?
+
     /// Human-readable status for the menu bar.
     @Published private(set) var statusMessage: String = "Not started"
 
@@ -176,6 +180,19 @@ final class PRPoller {
         return (["is:open", "is:pr", "sort:updated-desc"] + qualifiers).joined(separator: " ")
     }
 
+    /// The bounded `poll.query_type` telemetry label for the committed-PR bot query.
+    nonisolated static let committedQueryTelemetryType = "committed"
+
+    /// The newly added bots whose PRs this poll is SEEDING, not announcing: the
+    /// first complete bot-query poll after a bot is listed returns PRs that are
+    /// new to the store but long open, so `.newPR` for them is suppressed (no
+    /// banner, no unread dot). `known == nil` (first poll since launch) seeds
+    /// nothing — those PRs are already in the persisted store.
+    nonisolated static func seedingBots(current: Set<String>, known: Set<String>?) -> Set<String> {
+        guard let known else { return [] }
+        return current.subtracting(known)
+    }
+
     /// Whether a snapshot is one the committed-PR bot query returns (and keeps):
     /// authored by a configured bot AND carrying the viewer's commits.
     /// `botAuthors` holds `normalizedBotAuthor` forms.
@@ -201,11 +218,12 @@ final class PRPoller {
 
         // PRs bots opened on your behalf: GitHub search can't select "has my
         // commits", so fetch the configured bots' open PRs and keep only yours.
-        // Tagged with the tab its placement implies (yours → Created).
+        // Always tagged Created, whatever the placement: the tag must not depend on
+        // a setting, or flipping the placement re-tags every such PR into For me and
+        // `PRDiffEngine` fires `.readyForReview` for each ("entered For me").
         let committedBotAuthors = Set(settings.committedPRBotAuthors.map(Self.normalizedBotAuthor))
         if let committedQuery = Self.committedPRQuery(botAuthors: settings.committedPRBotAuthors) {
-            let tab: ReviewTab = settings.committedPRPlacement == .yourPRs ? .created : .forMe
-            queries.append((tab, committedQuery, true))
+            queries.append((.created, committedQuery, true))
         }
         // Set when the committed query's result is incomplete — carried forward by
         // source, never by tab (see `carryingForward`).
@@ -233,12 +251,15 @@ final class PRPoller {
                     incompleteTabs[tab] = reason
                 }
             }
-            let queryType = tab.telemetryQueryType
+            // Its own label, so the bot search doesn't skew the author series.
+            let queryType = isCommittedQuery ? Self.committedQueryTelemetryType : tab.telemetryQueryType
             let pollStart = Date()
             TelemetryService.shared.recordPollStarted(queryType: queryType)
 
             do {
-                let (snapshots, _, degraded) = try await client.searchPRs(query: query, token: token, tab: tab)
+                let (snapshots, _, degraded) = try await client.searchPRs(
+                    query: query, token: token, tab: tab, telemetryQueryType: queryType
+                )
                 let duration = Date().timeIntervalSince(pollStart)
                 TelemetryService.shared.recordPollCompleted(
                     queryType: queryType,
@@ -400,9 +421,26 @@ final class PRPoller {
         // snooze window (see `MainlineSettings.notifMutedNodeIds`). The PR still
         // updates in the list via the store snapshot; only attention is silenced.
         let muted = settings.notifMutedNodeIds
-        let transitions = muted.isEmpty
+        var transitions = muted.isEmpty
             ? allTransitions
             : allTransitions.filter { !muted.contains($0.prNodeId) }
+
+        // Adding a bot must not announce its already-open PRs as new. Only a
+        // complete bot query moves the known set, so a failed first attempt still
+        // seeds (rather than announces) on the next one.
+        if committedQueryTab == nil || incompleteCommittedQuery == nil {
+            let seeding = Self.seedingBots(current: committedBotAuthors, known: knownCommittedBots)
+            knownCommittedBots = committedBotAuthors
+            if !seeding.isEmpty {
+                let seeded = Set(unique
+                    .filter { Self.isCommittedBotPR($0, botAuthors: seeding) }
+                    .map(\.nodeId))
+                transitions.removeAll { transition in
+                    if case .newPR = transition { return seeded.contains(transition.prNodeId) }
+                    return false
+                }
+            }
+        }
 
         notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
 
@@ -620,6 +658,12 @@ enum PollCarryForwardChecks {
                "a both-tabs PR counts once, degraded wins over no_data")
 
         // MARK: Committed-PR bot query
+        assert(PRPoller.seedingBots(current: ["a"], known: nil).isEmpty,
+               "first poll since launch seeds nothing (the store is persisted)")
+        assert(PRPoller.seedingBots(current: ["a", "b"], known: ["a"]) == ["b"],
+               "a newly listed bot is seeded, not announced")
+        assert(PRPoller.seedingBots(current: ["a"], known: ["a", "b"]).isEmpty,
+               "removing a bot seeds nothing")
         assert(PRPoller.committedPRQuery(botAuthors: []) == nil, "no bots → no extra query")
         assert(PRPoller.committedPRQuery(botAuthors: [" ", ""]) == nil, "blank entries → no extra query")
         assert(PRPoller.committedPRQuery(botAuthors: ["dash0-dev[bot]", "app/Dash0-Dev", "renovate"])
