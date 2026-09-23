@@ -87,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         KeychainHelper.runCacheSelfChecks()
         PollCarryForwardChecks.run()
         StackEngineChecks.run()
+        PanelBackdropChecks.run()
         #endif
 
         // Listen for open-settings requests from MenuBarView

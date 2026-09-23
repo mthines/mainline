@@ -111,6 +111,7 @@ See the [keyboard reference](docs/keyboard.md) for the full list and how to rebi
 
 ### Configure and secure
 
+- **Panel opacity** — the panel uses the system's translucent material by default; if that's hard to read over a busy window or wallpaper, dial in a solid background in Settings → Appearance → Panel.
 - **Configurable polling** — default 30s interval; adjustable in Settings (30s – 3600s).
 - **Custom search queries** — default `is:open is:pr author:@me` and `is:open is:pr review-requested:@me`.
 - **Keychain storage** — your token is stored securely in the macOS Keychain; never in app preferences or on disk.
