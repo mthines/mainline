@@ -425,21 +425,22 @@ final class PRPoller {
             ? allTransitions
             : allTransitions.filter { !muted.contains($0.prNodeId) }
 
-        // Adding a bot must not announce its already-open PRs as new. Only a
-        // complete bot query moves the known set, so a failed first attempt still
-        // seeds (rather than announces) on the next one.
-        if committedQueryTab == nil || incompleteCommittedQuery == nil {
-            let seeding = Self.seedingBots(current: committedBotAuthors, known: knownCommittedBots)
-            knownCommittedBots = committedBotAuthors
-            if !seeding.isEmpty {
-                let seeded = Set(unique
-                    .filter { Self.isCommittedBotPR($0, botAuthors: seeding) }
-                    .map(\.nodeId))
-                transitions.removeAll { transition in
-                    if case .newPR = transition { return seeded.contains(transition.prNodeId) }
-                    return false
-                }
+        // Adding a bot must not announce its already-open PRs as new. Suppression
+        // runs on EVERY poll while a bot is still seeding — a degraded half page
+        // must not announce the half it did get — but only a complete bot query
+        // moves the known set, so seeding lasts until one full result has landed.
+        let seeding = Self.seedingBots(current: committedBotAuthors, known: knownCommittedBots)
+        if !seeding.isEmpty {
+            let seeded = Set(unique
+                .filter { Self.isCommittedBotPR($0, botAuthors: seeding) }
+                .map(\.nodeId))
+            transitions.removeAll { transition in
+                if case .newPR = transition { return seeded.contains(transition.prNodeId) }
+                return false
             }
+        }
+        if committedQueryTab == nil || incompleteCommittedQuery == nil {
+            knownCommittedBots = committedBotAuthors
         }
 
         notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
