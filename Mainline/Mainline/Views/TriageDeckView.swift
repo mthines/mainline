@@ -452,7 +452,18 @@ struct TriageDeckView: View {
                 units.append((rep: pr, members: [pr]))
             }
         }
-        units.sort { PRSnapshot.triageOrder($0.rep, $1.rep) }
+        // A PR you committed to, kept in the reviewer role by `.prioritizedReview`,
+        // floats to the top of its section; triage order applies within each half.
+        let myLogin = settings.githubUsername
+        let placement = settings.committedPRPlacement
+        func prioritized(_ unit: (rep: PRSnapshot, members: [PRSnapshot])) -> Bool {
+            unit.members.contains { $0.isPrioritizedCommit(myLogin: myLogin, committedPlacement: placement) }
+        }
+        units.sort { a, b in
+            let pa = prioritized(a), pb = prioritized(b)
+            if pa != pb { return pa }
+            return PRSnapshot.triageOrder(a.rep, b.rep)
+        }
         return units.flatMap { $0.members }
     }
 
@@ -547,7 +558,8 @@ struct TriageDeckView: View {
         pr.actionGroup(
             splitDrafts: settings.splitDrafts,
             myLogin: settings.githubUsername,
-            reviewReady: settings.reviewReadyConfig
+            reviewReady: settings.reviewReadyConfig,
+            committedPlacement: settings.committedPRPlacement
         )
     }
 
@@ -582,9 +594,8 @@ struct TriageDeckView: View {
     /// Two outer role sections in canonical order (Needs-your-review first),
     /// each populated with `prs` matching that role and sorted by actionability.
     private var inboxSections: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] {
-        let myLogin = settings.githubUsername
-        let needsReview = prs.filter { $0.inboxRole(myLogin: myLogin) == .needsYourReview }
-        let yourPRs = prs.filter { $0.inboxRole(myLogin: myLogin) == .yourPRs }
+        let needsReview = inboxRolePRs(for: .needsYourReview)
+        let yourPRs = inboxRolePRs(for: .yourPRs)
 
         var result: [(role: InboxRole, actionSections: [(group: ActionGroup, prs: [PRSnapshot])])] = []
         for (role, rolePRs) in [(InboxRole.yourPRs, yourPRs), (.needsYourReview, needsReview)] {
@@ -619,7 +630,8 @@ struct TriageDeckView: View {
 
     private func inboxRolePRs(for role: InboxRole) -> [PRSnapshot] {
         let myLogin = settings.githubUsername
-        return prs.filter { $0.inboxRole(myLogin: myLogin) == role }
+        let placement = settings.committedPRPlacement
+        return prs.filter { $0.inboxRole(myLogin: myLogin, committedPlacement: placement) == role }
     }
 
     @ViewBuilder

@@ -73,7 +73,33 @@ enum ReviewTab: String, Codable, Equatable, CaseIterable, Identifiable {
 /// Derived from `PRSnapshot.author` vs the authenticated user's login.
 enum InboxRole: String {
     case needsYourReview  // author != myLogin
-    case yourPRs          // author == myLogin
+    case yourPRs          // author == myLogin (or, by default, you committed to it)
+}
+
+// MARK: - CommittedPRPlacement
+
+/// Where a PR you did NOT open but DID commit to is placed (`viewerIsCommitter`).
+/// The common case is a bot/agent opening a PR on your behalf — GitHub lists the
+/// bot as the author, so an author-only role check files your own work under
+/// "Needs your review" (and the bot-author mute rule then hides it).
+/// Stored in `MainlineSettings.committedPRPlacement`; edited in Settings → Inbox.
+enum CommittedPRPlacement: String, CaseIterable, Identifiable {
+    /// Treated exactly like a PR you authored: "Your PRs" role + author buckets.
+    case yourPRs
+    /// Stays in the reviewer role, floated to the top of its section.
+    case prioritizedReview
+    /// No special treatment — grouped by author alone, subject to every mute rule.
+    case standard
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .yourPRs:           return "Your PRs"
+        case .prioritizedReview: return "Needs your review, prioritized"
+        case .standard:          return "By author only"
+        }
+    }
 }
 
 /// The six mutually-exclusive buckets a PR is grouped under, in display order.
@@ -354,6 +380,14 @@ struct PRSnapshot: Codable, Equatable {
     /// transition for your own attention state).
     var viewerHasApproved: Bool
 
+    /// Whether the authenticated viewer authored (or co-authored) at least one of
+    /// this PR's commits. Sourced from GraphQL `commits.authors`, matched against
+    /// the viewer's login at map time. Lets a PR a bot opened ON YOUR BEHALF (e.g.
+    /// an agent pushing your commits under `dash0-dev[bot]`) be treated as yours —
+    /// see `CommittedPRPlacement`. Decoded with `decodeIfPresent` + default `false`
+    /// for backward compat. NOT compared in PRDiffEngine.
+    var viewerIsCommitter: Bool
+
     /// Total lines changed in this PR.
     var totalLines: Int { linesAdded + linesDeleted }
 
@@ -393,7 +427,8 @@ struct PRSnapshot: Codable, Equatable {
         vercelPreviewCheckedAt: String? = nil,
         labels: [String] = [],
         authorIsBot: Bool = false,
-        viewerHasApproved: Bool = false
+        viewerHasApproved: Bool = false,
+        viewerIsCommitter: Bool = false
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -431,6 +466,7 @@ struct PRSnapshot: Codable, Equatable {
         self.labels = labels
         self.authorIsBot = authorIsBot
         self.viewerHasApproved = viewerHasApproved
+        self.viewerIsCommitter = viewerIsCommitter
     }
 
     // MARK: - Codable (explicit to support decodeIfPresent defaults for new fields)
@@ -444,7 +480,7 @@ struct PRSnapshot: Codable, Equatable {
         case sensitivePathFlags, unresolvedThreadCount
         case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
         case vercelPreviewUrl, vercelPreviewCheckedAt
-        case labels, authorIsBot, viewerHasApproved
+        case labels, authorIsBot, viewerHasApproved, viewerIsCommitter
     }
 
     init(from decoder: Decoder) throws {
@@ -486,6 +522,7 @@ struct PRSnapshot: Codable, Equatable {
         labels                = try c.decodeIfPresent([String].self,   forKey: .labels) ?? []
         authorIsBot           = try c.decodeIfPresent(Bool.self,       forKey: .authorIsBot) ?? false
         viewerHasApproved     = try c.decodeIfPresent(Bool.self,       forKey: .viewerHasApproved) ?? false
+        viewerIsCommitter     = try c.decodeIfPresent(Bool.self,       forKey: .viewerIsCommitter) ?? false
     }
 
     // MARK: - Bot detection
@@ -657,12 +694,17 @@ struct PRSnapshot: Codable, Equatable {
     ///   - myLogin: the authenticated user's login, used to pick the role.
     ///   - reviewReady: which signals gate the reviewer-role "Ready for review"
     ///     bucket (all default ON).
-    func actionGroup(splitDrafts: Bool, myLogin: String, reviewReady: ReviewReadyConfig) -> ActionGroup {
+    func actionGroup(
+        splitDrafts: Bool,
+        myLogin: String,
+        reviewReady: ReviewReadyConfig,
+        committedPlacement: CommittedPRPlacement
+    ) -> ActionGroup {
         if merged { return .merged }
         if closed { return .closed }
         if splitDrafts && isDraft { return .draft }
 
-        switch inboxRole(myLogin: myLogin) {
+        switch inboxRole(myLogin: myLogin, committedPlacement: committedPlacement) {
         case .yourPRs:
             if authorNeedsAttention { return .needsAttention }
             if reviewDecision == .approved && mergeable == true && ciStatus == .success {
@@ -678,9 +720,13 @@ struct PRSnapshot: Codable, Equatable {
     /// behind the menu-bar "needs attention" badge. Author role → blocked on you
     /// (`authorNeedsAttention`); reviewer role → ready for your review
     /// (`readyForMyReview`). Merged/closed PRs never count.
-    func needsMyTime(myLogin: String, reviewReady: ReviewReadyConfig) -> Bool {
+    func needsMyTime(
+        myLogin: String,
+        reviewReady: ReviewReadyConfig,
+        committedPlacement: CommittedPRPlacement
+    ) -> Bool {
         guard !merged, !closed else { return false }
-        switch inboxRole(myLogin: myLogin) {
+        switch inboxRole(myLogin: myLogin, committedPlacement: committedPlacement) {
         case .yourPRs:         return authorNeedsAttention
         case .needsYourReview: return readyForMyReview(reviewReady)
         }
@@ -728,9 +774,38 @@ struct PRSnapshot: Codable, Equatable {
     /// off this role, a non-canonical `githubUsername` case must not misfile your
     /// own PRs into the reviewer role. Shares `loginsMatch` with
     /// `reviewRequestSource` and `NotificationService.resolveTransition`.
-    func inboxRole(myLogin: String) -> InboxRole {
-        guard PRSnapshot.loginsMatch(author, myLogin) else { return .needsYourReview }
-        return .yourPRs
+    ///
+    /// With `committedPlacement == .yourPRs`, a PR you committed to but did not
+    /// open (`viewerIsCommitter`) is ALSO "Your PRs" — a bot opening your PR must
+    /// not demote it to the reviewer role.
+    func inboxRole(myLogin: String, committedPlacement: CommittedPRPlacement) -> InboxRole {
+        if PRSnapshot.loginsMatch(author, myLogin) { return .yourPRs }
+        if committedPlacement == .yourPRs && viewerIsCommitter { return .yourPRs }
+        return .needsYourReview
+    }
+
+    /// Whether the Inbox mute RULES are skipped for this PR: a PR you committed to
+    /// is your work, so it never lands in Muted — unless placement is `.standard`
+    /// (explicitly "no special treatment"). A manual mute override still applies;
+    /// that is enforced by the caller (`PRManager.effectiveMuted`).
+    func exemptFromMuteRules(committedPlacement: CommittedPRPlacement) -> Bool {
+        viewerIsCommitter && committedPlacement != .standard
+    }
+
+    /// Whether this PR is YOUR work for notification purposes: you opened it, or
+    /// you committed to it and placement isn't `.standard`. Drives the "New PR
+    /// opened by me" routing and CI banners in `NotificationService`.
+    func isViewersWork(myLogin: String, committedPlacement: CommittedPRPlacement) -> Bool {
+        PRSnapshot.loginsMatch(author, myLogin)
+            || exemptFromMuteRules(committedPlacement: committedPlacement)
+    }
+
+    /// Whether this PR floats to the top of its section: a PR you committed to,
+    /// kept in the reviewer role by `.prioritizedReview`.
+    func isPrioritizedCommit(myLogin: String, committedPlacement: CommittedPRPlacement) -> Bool {
+        committedPlacement == .prioritizedReview
+            && viewerIsCommitter
+            && inboxRole(myLogin: myLogin, committedPlacement: committedPlacement) == .needsYourReview
     }
 }
 
@@ -751,7 +826,8 @@ enum PRClassificationChecks {
         isDraft: Bool = false,
         viewerHasApproved: Bool = false,
         requestedReviewers: [String] = [],
-        requestedTeams: [String] = []
+        requestedTeams: [String] = [],
+        viewerIsCommitter: Bool = false
     ) -> PRSnapshot {
         PRSnapshot(
             nodeId: "n", number: 1, title: "t", htmlUrl: "u", repoFullName: "o/r",
@@ -760,7 +836,8 @@ enum PRClassificationChecks {
             updatedAt: "", author: author, requestedReviewers: requestedReviewers,
             requestedTeams: requestedTeams,
             mergeable: mergeable, unresolvedThreadCount: unresolvedThreadCount,
-            viewerHasApproved: viewerHasApproved
+            viewerHasApproved: viewerHasApproved,
+            viewerIsCommitter: viewerIsCommitter
         )
     }
 
@@ -769,7 +846,7 @@ enum PRClassificationChecks {
         let cfg = ReviewReadyConfig.defaults
 
         func group(_ pr: PRSnapshot) -> ActionGroup {
-            pr.actionGroup(splitDrafts: false, myLogin: me, reviewReady: cfg)
+            pr.actionGroup(splitDrafts: false, myLogin: me, reviewReady: cfg, committedPlacement: .yourPRs)
         }
 
         // Author role — merge conflict now routes to Needs attention.
@@ -801,7 +878,7 @@ enum PRClassificationChecks {
         var relaxed = ReviewReadyConfig.defaults
         relaxed.notReadyOnMyApproval = false
         assert(make(author: "someone", viewerHasApproved: true)
-            .actionGroup(splitDrafts: false, myLogin: me, reviewReady: relaxed) == .readyForReview,
+            .actionGroup(splitDrafts: false, myLogin: me, reviewReady: relaxed, committedPlacement: .yourPRs) == .readyForReview,
                "reviewer + approved-by-me gate OFF → readyForReview")
 
         // MARK: Viewer identity — GitHub logins are case-insensitive.
@@ -815,12 +892,38 @@ enum PRClassificationChecks {
 
         // A differently-cased stored login must still file your own PR under
         // "Your PRs" — this is the visible side-symptom of the notification bug.
-        assert(make(author: "mthines").inboxRole(myLogin: "MThines") == .yourPRs,
+        assert(make(author: "mthines").inboxRole(myLogin: "MThines", committedPlacement: .yourPRs) == .yourPRs,
                "case-mismatched author still resolves to the author role")
-        assert(make(author: "someone").inboxRole(myLogin: "MThines") == .needsYourReview,
+        assert(make(author: "someone").inboxRole(myLogin: "MThines", committedPlacement: .yourPRs) == .needsYourReview,
                "someone else's PR resolves to the reviewer role")
-        assert(make(author: "mthines").inboxRole(myLogin: "") == .needsYourReview,
+        assert(make(author: "mthines").inboxRole(myLogin: "", committedPlacement: .yourPRs) == .needsYourReview,
                "an unknown viewer never claims authorship")
+
+        // MARK: Committed-to PRs — a bot opening YOUR PR (viewerIsCommitter).
+        let botPR = make(author: "dash0-dev", reviewDecision: .reviewRequired, viewerIsCommitter: true)
+        assert(botPR.inboxRole(myLogin: me, committedPlacement: .yourPRs) == .yourPRs,
+               "committed-to PR is yours under .yourPRs")
+        assert(group(botPR) == .waiting,
+               "committed-to PR under .yourPRs uses the author buckets")
+        assert(botPR.inboxRole(myLogin: me, committedPlacement: .prioritizedReview) == .needsYourReview,
+               "committed-to PR stays a review under .prioritizedReview")
+        assert(botPR.inboxRole(myLogin: me, committedPlacement: .standard) == .needsYourReview,
+               "committed-to PR is grouped by author under .standard")
+        assert(botPR.exemptFromMuteRules(committedPlacement: .yourPRs)
+            && botPR.exemptFromMuteRules(committedPlacement: .prioritizedReview),
+               "committed-to PR is never rule-muted unless placement is .standard")
+        assert(!botPR.exemptFromMuteRules(committedPlacement: .standard),
+               ".standard gives a committed-to PR no mute exemption")
+        assert(!make(author: "someone").exemptFromMuteRules(committedPlacement: .yourPRs),
+               "a PR you did not commit to gets no mute exemption")
+        assert(botPR.isPrioritizedCommit(myLogin: me, committedPlacement: .prioritizedReview),
+               "committed-to review floats under .prioritizedReview")
+        assert(!botPR.isPrioritizedCommit(myLogin: me, committedPlacement: .yourPRs)
+            && !botPR.isPrioritizedCommit(myLogin: me, committedPlacement: .standard),
+               "only .prioritizedReview floats a committed-to PR")
+        assert(!make(author: me, viewerIsCommitter: true)
+            .isPrioritizedCommit(myLogin: me, committedPlacement: .prioritizedReview),
+               "your own authored PR is never a 'prioritized review'")
 
         // MARK: Review-request source — a DIRECT request must not be demoted to
         // .team (which is quiet by default) just because the case differs.

@@ -128,6 +128,24 @@ private struct GraphQLNode: Decodable {
     let reviewThreads: GraphQLReviewThreads?
     let labels: GraphQLLabels?
     let latestReviews: GraphQLLatestReviews?
+    let commitAuthors: GraphQLCommitAuthors?
+}
+
+/// The PR's first commits' authors (incl. `Co-authored-by` trailers GitHub maps
+/// to users), aliased as `commitAuthors` so it doesn't collide with the
+/// `commits(last: 1)` CI-rollup selection. Used to derive `viewerIsCommitter`.
+private struct GraphQLCommitAuthors: Decodable {
+    struct CommitNode: Decodable { let commit: Commit? }
+    struct Commit: Decodable { let authors: Authors? }
+    struct Authors: Decodable { let nodes: [Author] }
+    struct Author: Decodable { let user: User? }
+    struct User: Decodable { let login: String? }
+    let nodes: [CommitNode]
+
+    /// Every GitHub-linked commit-author login (unlinked git identities have no user).
+    var logins: [String] {
+        nodes.flatMap { $0.commit?.authors?.nodes ?? [] }.compactMap { $0.user?.login }
+    }
 }
 
 /// The most recent review per author, from `latestReviews`. Used to determine
@@ -310,7 +328,8 @@ final class GitHubClient {
     func searchPRs(
         query: String,
         token: String,
-        tab: ReviewTab
+        tab: ReviewTab,
+        telemetryQueryType: String
     ) async throws -> (snapshots: [PRSnapshot], etag: String?, degraded: Bool) {
         do {
             let (snapshots, etag) = try await runSearch(
@@ -334,7 +353,7 @@ final class GitHubClient {
             // terminal failure for this cycle and counting here as well would
             // double-count one poll as two errors.
             TelemetryService.shared.recordPollServerErrorRecovered(
-                queryType: tab.telemetryQueryType,
+                queryType: telemetryQueryType,
                 statusCode: code
             )
             return (snapshots, etag, true)
@@ -662,6 +681,13 @@ final class GitHubClient {
                 && ($0.state?.uppercased() == "APPROVED")
         } ?? false)
 
+        // Whether the viewer authored (or co-authored) one of the sampled commits —
+        // the signal that a bot-opened PR is really yours. `myLogin` is already
+        // lowercased by the caller; `loginsMatch` makes the case rule explicit.
+        let viewerIsCommitter: Bool = node.commitAuthors?.logins.contains {
+            PRSnapshot.loginsMatch($0, myLogin)
+        } ?? false
+
         return PRSnapshot(
             nodeId:             nodeId,
             number:             number,
@@ -695,7 +721,8 @@ final class GitHubClient {
             rebaseMergeAllowed: node.repository?.rebaseMergeAllowed ?? true,
             labels:             labels,
             authorIsBot:        authorIsBot,
-            viewerHasApproved:  viewerHasApproved
+            viewerHasApproved:  viewerHasApproved,
+            viewerIsCommitter:  viewerIsCommitter
         )
     }
 
@@ -758,6 +785,9 @@ final class GitHubClient {
               statusCheckRollup { state }
             }
           }
+        }
+        commitAuthors: commits(first: 10) {
+          nodes { commit { authors(first: 3) { nodes { user { login } } } } }
         }
     """
 

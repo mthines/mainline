@@ -34,7 +34,7 @@ Mainline.xcodeproj/                 ← Xcode project (at repo root)
 Mainline/Mainline/                     ← Source root
 ├── MainlineApp.swift               ← @main, MenuBarExtra scene, AppDelegate
 ├── Models/
-│   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields; `viewerHasApproved` (viewer's own latest review == APPROVED, from GraphQL `latestReviews`); role-aware `actionGroup(splitDrafts:myLogin:reviewReady:)` + `needsMyTime(...)` + `ReviewReadyConfig`; `PRClassificationChecks.run()` #if DEBUG
+│   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields; `viewerHasApproved` (viewer's own latest review == APPROVED, from GraphQL `latestReviews`); `viewerIsCommitter` (viewer authored/co-authored one of the first 10 commits, from aliased GraphQL `commitAuthors`); `CommittedPRPlacement` enum; role-aware `actionGroup(splitDrafts:myLogin:reviewReady:)` + `needsMyTime(...)` + `ReviewReadyConfig`; `PRClassificationChecks.run()` #if DEBUG
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
 │   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); `.defaults` (reviewRequested = notify); `isDeliverable`/`deliverable` SSOT for which events can actually fire; pure `migratedPolicy(from:)` + `policyMigrationVersion` for persisted-policy upgrades; `AttentionPolicyChecks.run()` #if DEBUG
 │   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding); `launchAtLogin` (SMAppService-backed launch-at-login toggle)
@@ -237,6 +237,8 @@ System-wide hotkey to open the popover, via Carbon `RegisterEventHotKey` in `Glo
 
 - **Author role (your PRs)** — three buckets: `.needsAttention` (blocked on you: failing CI, changes requested, unresolved threads, **or merge conflict** — conflicts count here, unlike the role-agnostic `needsAttention`), `.readyToMerge` (approved + mergeable + green), `.waiting` (blocked on reviewers/CI).
 - **Reviewer role (assigned to you)** — two buckets: `.readyForReview` (genuinely ready for your eyes) and `.waiting` (author still owns it). `readyForMyReview(_:)` gates readiness on `changesRequested` (always) plus four **user-configurable** signals in `ReviewReadyConfig` (merge conflict, failing CI, unresolved threads, `viewerHasApproved`), all default ON, edited in Settings → Inbox → Review Readiness and stored as four bools on `MainlineSettings` (`reviewReadyConfig` assembles them).
+
+**PRs you committed to but did not open** (`viewerIsCommitter`, e.g. a bot/agent opening your PR as `dash0-dev[bot]`) follow `settings.committedPRPlacement` (Settings → Inbox → PRs You Committed To), threaded into `inboxRole` / `actionGroup` / `needsMyTime` as `committedPlacement:`: `.yourPRs` (default) makes `inboxRole` return `.yourPRs`; `.prioritizedReview` keeps the reviewer role but `isPrioritizedCommit` floats it to the top of its section (`TriageDeckView.orderWithStacks`); `.standard` = author-only, as before. In the first two modes `exemptFromMuteRules` skips every Inbox mute rule (a manual `Q` override still wins). GitHub search has no "has my commits" qualifier, so discovery is opt-in: `settings.committedPRBotAuthors` makes `PRPoller` run one extra search (`committedPRQuery` → `is:open is:pr sort:updated-desc author:app/<bot> …`) and keep only `viewerIsCommitter` results, always tagged `.created` (a placement-dependent tag would re-tag them into For me and fire `.readyForReview` on every placement change), telemetry `poll.query_type="committed"`. The first complete poll after a bot is added SEEDS its PRs (`seedingBots` — `.newPR` suppressed) rather than announcing them. Its carry-forward is by SOURCE (`incompleteCommittedQuery` + `isCommittedBotPR`), never by tab — a 304 on it must not keep PRs that left the shared tab's regular query. `PRSnapshot.isViewersWork` (author, or committer unless `.standard`) makes a committed PR notify as `.newPRByMe`, fire CI banners, and count in `needsYouCount`.
 
 `.needsAttention` and `.readyForReview` share sortIndex 0 (they never coexist in one role's section list). The menu-bar "needs attention" badge (`PRManager.needsAttentionPRs`) now counts the role-aware `PRSnapshot.needsMyTime(myLogin:reviewReady:)` — author-role blocked-on-you PLUS reviewer-role ready-for-you — so the count means "needs my time" across both roles. `viewerHasApproved` is fetched via GraphQL `latestReviews(first:20)` matched against the authenticated login at map time (`GitHubClient.makeSnapshot` takes `myLogin`); it decodes with a `false` default and is excluded from `PRDiffEngine`.
 
@@ -488,6 +490,8 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `reviewNotReadyOnFailingCI` | Bool | true |
 | `reviewNotReadyOnUnresolvedThreads` | Bool | true |
 | `reviewNotReadyOnMyApproval` | Bool | true |
+| `committedPRPlacement` | String (`CommittedPRPlacement` rawValue) | `yourPRs` |
+| `committedPRBotAuthors` | [String] | `[]` — bots that open PRs for you; non-empty adds one search per poll |
 
 ## Bundle ID
 

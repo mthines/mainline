@@ -131,7 +131,7 @@ All attributes use **bounded, low-cardinality values** — never raw user data.
 
 | Attribute            | Allowed values                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------ |
-| `poll.query_type`    | `"author"`, `"reviewer"` (derived from query string identity, not content)                       |
+| `poll.query_type`    | `"author"`, `"reviewer"`, `"committed"` (the opt-in committed-PR bot search) — derived from query identity, not content |
 | `poll.result`        | `"success"`, `"etag_304"`, `"failure"`, `"abandoned"`, `"app_shutdown"`                          |
 | `poll.degraded`      | `true` / `false` — `true` when the poll only succeeded on the reduced-page retry after a 5xx, so its result set is a SUBSET of the tab. Set on BOTH the success and failure paths, so `sum by (poll_degraded)` never gets an empty-labelled bucket |
 | `poll.recovered`     | `true` / `false` — on `mainline.poll.errors`. `true` is a 5xx the reduced-page retry rescued (the poll still succeeded); `false` is a poll that gave up. Read "polls that failed" as `poll.recovered="false"` |
