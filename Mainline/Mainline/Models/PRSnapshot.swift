@@ -792,6 +792,14 @@ struct PRSnapshot: Codable, Equatable {
         viewerIsCommitter && committedPlacement != .standard
     }
 
+    /// Whether this PR is YOUR work for notification purposes: you opened it, or
+    /// you committed to it and placement isn't `.standard`. Drives the "New PR
+    /// opened by me" routing and CI banners in `NotificationService`.
+    func isViewersWork(myLogin: String, committedPlacement: CommittedPRPlacement) -> Bool {
+        PRSnapshot.loginsMatch(author, myLogin)
+            || exemptFromMuteRules(committedPlacement: committedPlacement)
+    }
+
     /// Whether this PR floats to the top of its section: a PR you committed to,
     /// kept in the reviewer role by `.prioritizedReview`.
     func isPrioritizedCommit(myLogin: String, committedPlacement: CommittedPRPlacement) -> Bool {

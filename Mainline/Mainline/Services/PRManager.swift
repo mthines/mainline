@@ -859,7 +859,7 @@ final class PRManager: ObservableObject {
         let myLogin = settings.githubUsername
         guard !myLogin.isEmpty else { return 0 }
         return prs.filter { pr in
-            let isMyPR = PRSnapshot.loginsMatch(pr.author, myLogin)
+            let isMyPR = pr.isViewersWork(myLogin: myLogin, committedPlacement: settings.committedPRPlacement)
             let reviewRequested = pr.tabs.contains(.forMe)
                 && pr.requestedReviewers.contains(where: { PRSnapshot.loginsMatch($0, myLogin) })
             // Merge blocker: my PR with failing CI

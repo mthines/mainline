@@ -116,7 +116,8 @@ final class PRPoller {
         previous: [String: PRSnapshot],
         incompleteTabs: [ReviewTab: CarryForwardReason],
         incompleteCommittedQuery: CarryForwardReason? = nil,
-        committedBotAuthors: Set<String> = []
+        committedBotAuthors: Set<String> = [],
+        committedQueryTab: ReviewTab? = nil
     ) -> CarryForwardResult {
         guard !incompleteTabs.isEmpty || incompleteCommittedQuery != nil else {
             return CarryForwardResult(snapshots: fetched, carriedByReason: [:])
@@ -129,9 +130,16 @@ final class PRPoller {
         // carry-forward would make the merged array's order vary between runs.
         for snapshot in previous.values.sorted(by: { $0.nodeId < $1.nodeId })
         where !fetchedIds.contains(snapshot.nodeId) {
-            var reasons = snapshot.tabs.compactMap { incompleteTabs[$0] }
-            if let reason = incompleteCommittedQuery,
-               isCommittedBotPR(snapshot, botAuthors: committedBotAuthors) {
+            // A committed bot PR holds `committedQueryTab` only BECAUSE the bot query
+            // returned it (a bot-authored PR never matches `author:@me`), so that
+            // tab's regular query being incomplete must not keep it alive — only
+            // the bot query itself can. Its other tabs (e.g. a team review request
+            // under For me) still carry forward normally.
+            let isCommitted = isCommittedBotPR(snapshot, botAuthors: committedBotAuthors)
+            var reasons = snapshot.tabs
+                .filter { !(isCommitted && $0 == committedQueryTab) }
+                .compactMap { incompleteTabs[$0] }
+            if let reason = incompleteCommittedQuery, isCommitted {
                 reasons.append(reason)
             }
             guard !reasons.isEmpty else { continue }
@@ -202,6 +210,7 @@ final class PRPoller {
         // Set when the committed query's result is incomplete — carried forward by
         // source, never by tab (see `carryingForward`).
         var incompleteCommittedQuery: CarryForwardReason?
+        let committedQueryTab = queries.first(where: \.isCommittedQuery)?.tab
 
         var allSnapshots: [PRSnapshot] = []
 
@@ -316,6 +325,12 @@ final class PRPoller {
                 if (error as? URLError)?.code == .cancelled || error is CancellationError {
                     return
                 }
+                // The committed-PR bot query is optional: its failure must not throw
+                // away the regular queries' results already fetched this cycle.
+                if isCommittedQuery {
+                    markIncomplete(.noData)
+                    continue
+                }
                 await MainActor.run { self.statusMessage = "Error: \(error.localizedDescription)" }
                 return
             }
@@ -329,7 +344,8 @@ final class PRPoller {
             previous: store.snapshots,
             incompleteTabs: incompleteTabs,
             incompleteCommittedQuery: incompleteCommittedQuery,
-            committedBotAuthors: committedBotAuthors
+            committedBotAuthors: committedBotAuthors,
+            committedQueryTab: committedQueryTab
         )
         allSnapshots = carryForward.snapshots
 
@@ -627,6 +643,15 @@ enum PollCarryForwardChecks {
         assert(committed304.snapshots.map(\.nodeId) == ["mine"],
                "committed-query carry-forward is scoped to its own PRs, not its tab")
         assert(committed304.carriedByReason == ["no_data": 1], "committed carry-forward is counted")
+
+        // The reverse: the AUTHOR query 304s while the bot query completed without
+        // `mine` (it merged). The shared Created tag must not resurrect it.
+        let author304 = PRPoller.carryingForward(
+            fetched: [], previous: store([mine, authored]), incompleteTabs: [.created: .noData],
+            committedBotAuthors: bots, committedQueryTab: .created
+        )
+        assert(author304.snapshots.map(\.nodeId) == ["authored"],
+               "a regular-query 304 never carries a committed bot PR on the shared tab")
     }
 }
 #endif

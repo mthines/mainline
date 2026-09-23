@@ -162,8 +162,9 @@ final class NotificationService {
         var quietNodeIds: [String] = []
 
         for transition in transitions {
-            guard let (event, pr, notifArgs) = resolveTransition(transition, myLogin: myLogin)
-            else { continue }
+            guard let (event, pr, notifArgs) = resolveTransition(
+                transition, myLogin: myLogin, committedPlacement: settings.committedPRPlacement
+            ) else { continue }
 
             let level = settings.level(for: event)
             switch level {
@@ -195,7 +196,8 @@ final class NotificationService {
     /// branches are exactly where notification delivery was silently lost.
     func resolveTransition(
         _ transition: PRTransition,
-        myLogin: String
+        myLogin: String,
+        committedPlacement: CommittedPRPlacement
     ) -> (PREvent, PRSnapshot, (id: String, title: String, body: String, url: String))? {
         switch transition {
         case .newPR(let pr):
@@ -203,9 +205,9 @@ final class NotificationService {
             let title: String
             // Case-insensitive: GitHub logins are, and a stored `MThines` against
             // the API's `mthines` used to demote your own PR to the review path.
-            // A PR a bot opened carrying YOUR commits is yours too — announcing it
-            // as a review request would be wrong.
-            if PRSnapshot.loginsMatch(pr.author, myLogin) || pr.viewerIsCommitter {
+            // A PR a bot opened carrying YOUR commits is yours too (unless placement
+            // is `.standard`) — announcing it as a review request would be wrong.
+            if pr.isViewersWork(myLogin: myLogin, committedPlacement: committedPlacement) {
                 event = .newPRByMe
                 title = "New PR"
             } else if pr.reviewRequestSource(myLogin: myLogin) == .team {
@@ -232,7 +234,8 @@ final class NotificationService {
             // empty `myLogin` still matches nobody — but note that an empty login
             // therefore silences CI notifications entirely, which is why
             // `PRManager.start()` now self-heals `githubUsername`.
-            guard PRSnapshot.loginsMatch(pr.author, myLogin) else { return nil }
+            // A committed-to PR counts as yours here too (see `isViewersWork`).
+            guard pr.isViewersWork(myLogin: myLogin, committedPlacement: committedPlacement) else { return nil }
             let event: PREvent = (to == .success) ? .ciPassedOnMyPR : .ciFailedOnMyPR
             let args = (id: "mainline.ci.\(pr.nodeId)", title: "CI Status Changed",
                         body: "\(pr.repoFullName): \(pr.title) — \(to.rawValue)", url: pr.htmlUrl)
@@ -288,7 +291,7 @@ enum NotificationRoutingChecks {
         let me = "MThines"   // deliberately cased differently from the API value
 
         func event(_ transition: PRTransition) -> PREvent? {
-            service.resolveTransition(transition, myLogin: me)?.0
+            service.resolveTransition(transition, myLogin: me, committedPlacement: .yourPRs)?.0
         }
 
         // MARK: .newPR routing
@@ -307,8 +310,13 @@ enum NotificationRoutingChecks {
         botPR.viewerIsCommitter = true
         assert(event(.newPR(botPR)) == .newPRByMe,
                "bot PR with your commits → newPRByMe")
+        assert(service.resolveTransition(.newPR(botPR), myLogin: me, committedPlacement: .standard)?.0
+            == .reviewRequestedTeam,
+               ".standard placement routes a committed-to PR by author only")
+        assert(event(.ciStatusChanged(botPR, from: .pending, to: .failure)) == .ciFailedOnMyPR,
+               "CI on a committed-to PR notifies like your own")
         // With an unknown viewer, your own PR can't be recognized as yours.
-        assert(service.resolveTransition(.newPR(pr(author: "mthines")), myLogin: "")?.0 == .reviewRequested,
+        assert(service.resolveTransition(.newPR(pr(author: "mthines")), myLogin: "", committedPlacement: .yourPRs)?.0 == .reviewRequested,
                "empty login cannot claim authorship")
 
         // MARK: .ciStatusChanged routing
@@ -320,11 +328,11 @@ enum NotificationRoutingChecks {
                "case-mismatched own PR CI failure → ciFailedOnMyPR")
         // Someone else's CI is not your business.
         assert(service.resolveTransition(
-            .ciStatusChanged(pr(author: "someone"), from: .pending, to: .success), myLogin: me) == nil,
+            .ciStatusChanged(pr(author: "someone"), from: .pending, to: .success), myLogin: me, committedPlacement: .yourPRs) == nil,
                "someone else's CI change → no event")
         // Unknown viewer → no CI event at all.
         assert(service.resolveTransition(
-            .ciStatusChanged(pr(author: "mthines"), from: .pending, to: .success), myLogin: "") == nil,
+            .ciStatusChanged(pr(author: "mthines"), from: .pending, to: .success), myLogin: "", committedPlacement: .yourPRs) == nil,
                "empty login → no CI event")
 
         // MARK: draft vs ready routing (unchanged, pinned against regression)
