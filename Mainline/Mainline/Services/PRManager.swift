@@ -369,7 +369,11 @@ final class PRManager: ObservableObject {
 
     /// Pure rule-based mute verdict (ignores manual overrides).
     private func ruleMuted(_ pr: PRSnapshot, config: InboxMuteConfig) -> Bool {
-        let role = pr.inboxRole(myLogin: config.myLogin)
+        let placement = settings.committedPRPlacement
+        // A PR you committed to is your work — no mute rule demotes it (unless the
+        // placement is `.standard`). A manual override still wins upstream.
+        if pr.exemptFromMuteRules(committedPlacement: placement) { return false }
+        let role = pr.inboxRole(myLogin: config.myLogin, committedPlacement: placement)
         return InboxMuteEngine.muteVerdict(
             title:          pr.title,
             headRef:        pr.headRefName,
@@ -838,8 +842,9 @@ final class PRManager: ObservableObject {
     var needsAttentionPRs: [PRSnapshot] {
         let myLogin = settings.githubUsername
         let cfg = settings.reviewReadyConfig
+        let placement = settings.committedPRPlacement
         return badgeBasePRs
-            .filter { $0.needsMyTime(myLogin: myLogin, reviewReady: cfg) }
+            .filter { $0.needsMyTime(myLogin: myLogin, reviewReady: cfg, committedPlacement: placement) }
             .sorted(by: PRSnapshot.triageOrder)
     }
 

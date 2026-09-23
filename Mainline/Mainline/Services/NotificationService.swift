@@ -203,7 +203,9 @@ final class NotificationService {
             let title: String
             // Case-insensitive: GitHub logins are, and a stored `MThines` against
             // the API's `mthines` used to demote your own PR to the review path.
-            if PRSnapshot.loginsMatch(pr.author, myLogin) {
+            // A PR a bot opened carrying YOUR commits is yours too — announcing it
+            // as a review request would be wrong.
+            if PRSnapshot.loginsMatch(pr.author, myLogin) || pr.viewerIsCommitter {
                 event = .newPRByMe
                 title = "New PR"
             } else if pr.reviewRequestSource(myLogin: myLogin) == .team {
@@ -300,6 +302,11 @@ enum NotificationRoutingChecks {
         // A team request routes to the quieter team event.
         assert(event(.newPR(pr(author: "someone", teams: ["ai"]))) == .reviewRequestedTeam,
                "team-requested new PR → reviewRequestedTeam")
+        // A bot-opened PR carrying your commits is announced as yours.
+        var botPR = pr(author: "dash0-dev", teams: ["ai"])
+        botPR.viewerIsCommitter = true
+        assert(event(.newPR(botPR)) == .newPRByMe,
+               "bot PR with your commits → newPRByMe")
         // With an unknown viewer, your own PR can't be recognized as yours.
         assert(service.resolveTransition(.newPR(pr(author: "mthines")), myLogin: "")?.0 == .reviewRequested,
                "empty login cannot claim authorship")

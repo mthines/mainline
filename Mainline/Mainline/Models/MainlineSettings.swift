@@ -567,6 +567,9 @@ final class MainlineSettings: ObservableObject {
         static let reviewNotReadyOnFailingCI        = "reviewNotReadyOnFailingCI"
         static let reviewNotReadyOnUnresolvedThreads = "reviewNotReadyOnUnresolvedThreads"
         static let reviewNotReadyOnMyApproval       = "reviewNotReadyOnMyApproval"
+        // PRs you committed to but did not open (e.g. a bot opened them for you)
+        static let committedPRPlacement  = "committedPRPlacement"
+        static let committedPRBotAuthors = "committedPRBotAuthors"
         // Preview-deployment detection
         static let vercelPreviewEnabled  = "vercelPreviewEnabled"
         static let vercelPreviewDomains  = "vercelPreviewDomains"
@@ -895,6 +898,23 @@ final class MainlineSettings: ObservableObject {
             notReadyOnUnresolvedThreads: reviewNotReadyOnUnresolvedThreads,
             notReadyOnMyApproval: reviewNotReadyOnMyApproval
         )
+    }
+
+    // MARK: - Committed-to PRs
+
+    /// Where a PR you committed to but did not open is placed (see
+    /// `CommittedPRPlacement`). Default `.yourPRs`.
+    @Published var committedPRPlacement: CommittedPRPlacement {
+        didSet { defaults.set(committedPRPlacement.rawValue, forKey: Keys.committedPRPlacement) }
+    }
+
+    /// Bots that open PRs on your behalf (e.g. `dash0-dev[bot]`). GitHub search has
+    /// no "has my commits" qualifier, so without this such a PR is only fetched by
+    /// chance (a team review request). When non-empty, `PRPoller` runs one extra
+    /// search for these bots' open PRs and keeps only those carrying your commits.
+    /// Default empty (no extra query).
+    @Published var committedPRBotAuthors: [String] {
+        didSet { defaults.set(committedPRBotAuthors, forKey: Keys.committedPRBotAuthors) }
     }
 
     /// Bot logins that bypass the `muteBotAuthors` rule. Even when `muteBotAuthors`
@@ -1355,6 +1375,9 @@ final class MainlineSettings: ObservableObject {
             ? true
             : defaults.bool(forKey: Keys.muteBotAuthors)
         botAllowList       = defaults.stringArray(forKey: Keys.botAllowList) ?? []
+        committedPRPlacement = defaults.string(forKey: Keys.committedPRPlacement)
+            .flatMap { CommittedPRPlacement(rawValue: $0) } ?? .yourPRs
+        committedPRBotAuthors = defaults.stringArray(forKey: Keys.committedPRBotAuthors) ?? []
         // Review readiness — default ON when unset (absent key → true).
         reviewNotReadyOnConflict = defaults.object(forKey: Keys.reviewNotReadyOnConflict) == nil
             ? true : defaults.bool(forKey: Keys.reviewNotReadyOnConflict)

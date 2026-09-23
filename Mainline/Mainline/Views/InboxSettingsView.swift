@@ -6,6 +6,7 @@ import SwiftUI
 /// Wired into `SettingsView` as `SettingsCategory.inbox`.
 ///
 /// Contains:
+///  - Placement of PRs you committed to but did not open, plus the bots to fetch them from
 ///  - Mute-patterns list editor (glob patterns matched against title + head branch)
 ///  - "Mute bot-authored PRs" toggle (dependabot, renovate, …)
 ///  - Review focus authors + teams (comma-separated, empty = show all)
@@ -56,6 +57,36 @@ struct InboxSettingsView: View {
                 set: { settings.reviewNotReadyOnMyApproval = $0 },
                 key: "reviewNotReadyOnMyApproval"
             )
+        }
+
+        Section("PRs You Committed To") {
+            Label("A PR you did not open but did commit to — typically one a bot or agent opened for you. GitHub lists the bot as the author, so by default Mainline files it as yours instead.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Picker("Show under", selection: $settings.committedPRPlacement) {
+                ForEach(CommittedPRPlacement.allCases) { placement in
+                    Text(placement.title).tag(placement)
+                }
+            }
+            Label(committedPlacementCaption, systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField(
+                "Bots that open PRs for you",
+                text: committedPRBotAuthorsBinding,
+                prompt: Text("dash0-dev[bot]")
+            )
+            .textFieldStyle(.roundedBorder)
+            Label("GitHub search can't find \"PRs with my commits\", so a bot-opened PR only shows up here if you're also asked to review it. List the bots below and Mainline also fetches their open PRs (one extra search per poll), keeping only the ones that contain your commits. Comma-separated; empty = no extra search.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
 
         Section("Pattern Muting") {
@@ -314,6 +345,31 @@ struct InboxSettingsView: View {
             get: { settings.muteLabels.joined(separator: ", ") },
             set: { newValue in
                 settings.muteLabels = newValue
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        )
+    }
+
+    /// What the selected `CommittedPRPlacement` does, shown under the picker.
+    private var committedPlacementCaption: String {
+        switch settings.committedPRPlacement {
+        case .yourPRs:
+            return "Grouped with the PRs you opened, under \"Your PRs\". Never muted."
+        case .prioritizedReview:
+            return "Stays under \"Needs your review\" but sorts to the top of its section. Never muted."
+        case .standard:
+            return "Grouped by the PR's author only, and mute rules apply as usual (a bot-authored PR may be muted)."
+        }
+    }
+
+    /// Bridges `committedPRBotAuthors: [String]` to a comma-separated text field.
+    private var committedPRBotAuthorsBinding: Binding<String> {
+        Binding(
+            get: { settings.committedPRBotAuthors.joined(separator: ", ") },
+            set: { newValue in
+                settings.committedPRBotAuthors = newValue
                     .split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
