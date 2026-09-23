@@ -60,11 +60,12 @@ See [The panel → Menu bar badge](./the-panel.md#menu-bar-badge).
 
 ## Appearance
 
-Density, drafts, and panel size.
+Density, drafts, panel size, and how see-through the panel is.
 See [The panel](./the-panel.md).
 
 | Setting                | Default | Notes                                                    |
 | ---------------------- | ------- | ------------------------------------------------------- |
+| Background opacity     | Translucent | Slide toward Solid to paint an opaque background behind the panel. Translucent keeps the system's frosted-glass material, which can be hard to read over a text-heavy window or a busy wallpaper. |
 | Compact rows           | On      | Off uses a taller two-line row.                          |
 | Show drafts            | On      | Include drafts in the list and counts. `D` toggles it.  |
 | Split drafts           | Off     | Give shown drafts their own group.                       |

@@ -99,3 +99,15 @@ Set the minimum and maximum content height in **Settings** → **Appearance**.
 
 - Minimum height — the panel never shrinks below this, even with few PRs. Default 600.
 - Maximum height — the panel never grows past this, capped to your display. Default 1600.
+
+## Panel opacity
+
+The panel uses macOS's own translucent material, so whatever is behind it shows
+through. Over a window full of text or a busy wallpaper that bleed-through
+competes with the panel's own text and makes it hard to read.
+
+Drag **Background opacity** in **Settings** → **Appearance** → **Panel** toward
+**Solid** to paint an opaque background behind the content. The default,
+**Translucent**, leaves the stock frosted-glass look untouched; anything in
+between is a partial wash, so you can keep some of the translucency and still
+read the list.

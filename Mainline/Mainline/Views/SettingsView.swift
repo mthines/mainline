@@ -491,6 +491,33 @@ struct SettingsView: View {
     private var appearanceSection: some View {
         Section("Panel") {
             HStack {
+                Text("Background opacity")
+                Spacer()
+                Text(PanelBackdrop.label(for: settings.panelBackgroundOpacity))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: $settings.panelBackgroundOpacity,
+                in: PanelBackdrop.minOpacity...PanelBackdrop.maxOpacity,
+                step: PanelBackdrop.opacityStep,
+                onEditingChanged: { editing in
+                    // Record once the drag ends, not on every intermediate tick —
+                    // and only whether the backdrop is on, never the exact value.
+                    guard !editing else { return }
+                    TelemetryService.shared.recordSettingChanged(
+                        name: "panelBackgroundOpacity",
+                        enabled: PanelBackdrop.isOpaqueEnough(settings.panelBackgroundOpacity)
+                    )
+                }
+            )
+            Label("Drag right to make the panel more solid. At Translucent (the default) the panel keeps the system's frosted-glass look, which can be hard to read over a text-heavy window or a busy wallpaper; Solid gives it an opaque background like a native menu.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
                 Text("Min panel height (pt)")
                 Spacer()
                 TextField("", value: $panelMinHeightDraft, formatter: Self.panelHeightFormatter)

@@ -37,7 +37,7 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields; `viewerHasApproved` (viewer's own latest review == APPROVED, from GraphQL `latestReviews`); `viewerIsCommitter` (viewer authored/co-authored one of the first 10 commits, from aliased GraphQL `commitAuthors`); `CommittedPRPlacement` enum; role-aware `actionGroup(splitDrafts:myLogin:reviewReady:)` + `needsMyTime(...)` + `ReviewReadyConfig`; `PRClassificationChecks.run()` #if DEBUG
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
 │   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); `.defaults` (reviewRequested = notify); `isDeliverable`/`deliverable` SSOT for which events can actually fire; pure `migratedPolicy(from:)` + `policyMigrationVersion` for persisted-policy upgrades; `AttentionPolicyChecks.run()` #if DEBUG
-│   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding); `launchAtLogin` (SMAppService-backed launch-at-login toggle)
+│   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding); `launchAtLogin` (SMAppService-backed launch-at-login toggle); pure `PanelBackdrop` (clamp + label for `panelBackgroundOpacity`) + `PanelBackdropChecks.run()` #if DEBUG
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor); account-parameterized
 │   ├── GitHubClient.swift       ← GraphQL search + mutations + REST diff/files; author now decoded with __typename for bot detection; labels(first:10) added
@@ -57,8 +57,8 @@ Mainline/Mainline/                     ← Source root
 │   └── TelemetryService.swift   ← Opt-in OTel singleton (no-op when disabled)
 │   └── LaunchAtLoginService.swift ← SMAppService-backed launch-at-login registration (pure enum, no I/O on the main thread)
 └── Views/
-    ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab
-    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView; GitHub pane shows the resolved login + `usernameError`; Notifications pane shows the macOS-permission warning with a state-aware CTA (`.notDetermined` → "Enable Notifications…" calling `requestNotificationAuthorization()`; `.denied`/`.silent` → "Open System Settings…") and drives the Attention Policy list from `PREvent.deliverable`
+    ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab; `panelBackdrop` paints the user-configurable opaque layer over the window's system material (`settings.panelBackgroundOpacity`, no-op at 0)
+    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height, panel background-opacity slider; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView; GitHub pane shows the resolved login + `usernameError`; Notifications pane shows the macOS-permission warning with a state-aware CTA (`.notDetermined` → "Enable Notifications…" calling `requestNotificationAuthorization()`; `.denied`/`.silent` → "Open System Settings…") and drives the Attention Policy list from `PREvent.deliverable`
     ├── InboxSettingsView.swift   ← Inbox noise-filter settings: Review Readiness (four reviewer "not ready → Waiting" toggles: conflict / failing CI / unresolved threads / approved-by-me, all default ON), mute patterns, muteBotAuthors toggle, per-org Review Focus (org sub-blocks nested INSIDE the one Review Focus card via `orgFocusBlock`, each with a Remove button; authors+teams keyed by lowercased org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
@@ -215,7 +215,8 @@ Impure shell (I/O or state): `PRStateStore`, `SnoozeStore` — own persistence.
 There is **no XCTest target**. The testing surface is `#if DEBUG` self-check
 functions on pure types, all invoked from `AppDelegate.applicationDidFinishLaunching`:
 `InboxMuteEngine.runSelfChecks()`, `PRSearchFilter.runSelfChecks()`, `PRClassificationChecks.run()`,
-`AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`, `StackEngineChecks.run()`. Add new pure logic's
+`AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`, `StackEngineChecks.run()`,
+`PanelBackdropChecks.run()`. Add new pure logic's
 assertions to one of these (or a sibling enum in the same file) rather than introducing a
 test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:)`,
 `NotificationService.classify(...)` — is what makes it assertable at all.
@@ -467,6 +468,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `attentionPolicyMigrationVersion` | Int | `0` (absent) — last-applied `PREvent.policyMigrationVersion`; v1 clears a persisted `reviewRequested: quiet` |
 | `panelHeight` | Int | 1600 |
 | `panelMinHeight` | Int | 600 |
+| `panelBackgroundOpacity` | Double | `0` — how solid the popover background is. `0` = the stock system material (translucent / "liquid glass", unchanged); `1` = an opaque `windowBackgroundColor` fill like a native menu. `MenuBarView.panelBackdrop` paints it OVER the material and UNDER the content, skipping the layer entirely at `0`. Clamped through the pure `PanelBackdrop.clamped` on load AND in the `didSet` AND at the view's read site. Slider in Settings → Appearance → Panel. |
 | `menuBarMetric` | String | `totalOpen` |
 | `globalShortcutEnabled` | Bool | true |
 | `globalShortcutKeyCode` | Int | `0x0A` (ISO section key) |

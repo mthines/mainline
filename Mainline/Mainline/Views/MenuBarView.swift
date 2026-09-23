@@ -111,6 +111,11 @@ struct MenuBarView: View {
         }
         .frame(width: 400)
         .padding(.vertical, 4)
+        // Solid backdrop between the system material and the content, at the
+        // user's chosen strength (Settings → Appearance → Panel). Drawn BEHIND
+        // everything above and ABOVE the window's material, so it is what the
+        // deck's text sits on. No-op at the default 0.
+        .background(panelBackdrop)
         .onPreferenceChange(BodyHeightKey.self) { newValue in
             // Store the measured natural body height so the scroll region can size
             // to content up to the cap. Guarded finite/non-negative at the source
@@ -216,6 +221,54 @@ struct MenuBarView: View {
         // Animate only the OPEN/CLOSE boundary (nil ↔ present), not PR-to-PR steps.
         // Keying on the node id animated every navigation and replayed the fade.
         .animation(.easeInOut(duration: 0.12), value: manager.peekPR != nil)
+    }
+
+    // MARK: - Panel backdrop
+
+    /// The opaque layer painted over the popover's system material, at
+    /// `settings.panelBackgroundOpacity` (Settings → Appearance → Panel).
+    ///
+    /// The MenuBarExtra window's material samples whatever is behind it, so over a
+    /// text-heavy window or a busy wallpaper the deck's own text competes with the
+    /// bleed-through and becomes hard to read (issue #41). The material itself is
+    /// AppKit's, and how translucent it is differs by macOS version (notably the
+    /// macOS 26 glass look), so instead of reconfiguring it we simply draw on top
+    /// of it: `windowBackgroundColor` — the same opaque fill `PRPeekView`'s card
+    /// already relies on to stop the list bleeding through — at the chosen alpha.
+    ///
+    /// At the default `0` nothing is drawn at all, so the stock panel is untouched.
+    ///
+    /// Rounded rather than a plain rect: the panel's corners are rounded by the
+    /// window, and a square fill would either square them off or leave a hard edge
+    /// in the corner. `panelCornerRadius` is deliberately a touch generous, so any
+    /// mismatch with the window's own radius shows as a sliver of the original
+    /// material in the corner rather than a fill spilling outside the window.
+    @ViewBuilder
+    private var panelBackdrop: some View {
+        if PanelBackdrop.isOpaqueEnough(panelBackdropOpacity) {
+            RoundedRectangle(cornerRadius: Self.panelCornerRadius, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .opacity(panelBackdropOpacity)
+                .ignoresSafeArea()
+                // Purely decorative — it must never swallow a click meant for a row.
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// The backdrop's alpha, clamped at the read site so a bad stored value is
+    /// corrected in the view too, not only on load.
+    private var panelBackdropOpacity: Double {
+        PanelBackdrop.clamped(settings.panelBackgroundOpacity)
+    }
+
+    /// Corner radius for `panelBackdrop`, matched to the menu-bar panel's own
+    /// corners. macOS 26 rounds them considerably more than 13–15 do, and the
+    /// value is not exposed by AppKit, so it is picked off the running OS version
+    /// rather than hard-coded to one era.
+    private static var panelCornerRadius: CGFloat {
+        ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
+        ) ? 18 : 10
     }
 
     // MARK: - Derived data

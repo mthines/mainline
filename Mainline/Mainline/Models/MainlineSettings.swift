@@ -501,6 +501,76 @@ enum PROpenTarget: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - PanelBackdrop
+
+/// Pure helpers for the popover's **backdrop** — the solid layer `MenuBarView`
+/// paints between the system material (translucent/"liquid glass" on recent
+/// macOS) and the panel's own content.
+///
+/// The system material samples whatever is behind the panel, so opening Mainline
+/// over a window full of text or a busy wallpaper leaves the deck hard to read
+/// (issue #41). Rather than fight the material — its implementation differs per
+/// OS version and is not ours to configure — the panel simply draws an opaque
+/// `windowBackgroundColor` layer over it at a user-chosen strength: `0` keeps the
+/// stock translucency, `1` is fully solid like a native AppKit menu.
+///
+/// Pure (no I/O, no AppKit state) so `PanelBackdropChecks` can assert it.
+enum PanelBackdrop {
+    /// Fully translucent — the stock system material, unchanged. Also the default.
+    static let minOpacity: Double = 0
+    /// Fully solid — nothing of the desktop behind shows through.
+    static let maxOpacity: Double = 1
+    /// Slider granularity; also the step the +/- controls move by.
+    static let opacityStep: Double = 0.05
+
+    /// Clamps a stored or user-supplied opacity into `minOpacity...maxOpacity`.
+    /// A non-finite value (a corrupted `UserDefaults` double) degrades to the
+    /// default rather than propagating a NaN into the render tree.
+    static func clamped(_ value: Double) -> Double {
+        guard value.isFinite else { return minOpacity }
+        return min(max(value, minOpacity), maxOpacity)
+    }
+
+    /// Whether any backdrop should be drawn at all. At `0` the view skips the
+    /// layer entirely so the stock panel renders exactly as it does today.
+    static func isOpaqueEnough(_ value: Double) -> Bool { clamped(value) > 0 }
+
+    /// Short label for the settings slider's readout.
+    static func label(for value: Double) -> String {
+        let percent = Int((clamped(value) * 100).rounded())
+        switch percent {
+        case 0:   return "Translucent"
+        case 100: return "Solid"
+        default:  return "\(percent)% solid"
+        }
+    }
+}
+
+#if DEBUG
+/// Launch-time assertions for the pure `PanelBackdrop` helpers. Invoked from
+/// `AppDelegate.applicationDidFinishLaunching`; no-op in Release.
+enum PanelBackdropChecks {
+    static func run() {
+        // Clamping keeps stored values inside the slider's range.
+        assert(PanelBackdrop.clamped(-1) == 0, "negative opacity clamps to 0")
+        assert(PanelBackdrop.clamped(2) == 1, "above-range opacity clamps to 1")
+        assert(PanelBackdrop.clamped(0.4) == 0.4, "in-range opacity passes through")
+        assert(PanelBackdrop.clamped(.nan) == 0, "NaN degrades to the default")
+        assert(PanelBackdrop.clamped(.infinity) == 0, "infinity degrades to the default")
+
+        // Only a positive value draws a backdrop — 0 must stay the stock panel.
+        assert(!PanelBackdrop.isOpaqueEnough(0), "0 draws no backdrop")
+        assert(!PanelBackdrop.isOpaqueEnough(-0.5), "clamped-to-0 draws no backdrop")
+        assert(PanelBackdrop.isOpaqueEnough(0.05), "the smallest step draws a backdrop")
+
+        // Labels.
+        assert(PanelBackdrop.label(for: 0) == "Translucent", "0 reads as Translucent")
+        assert(PanelBackdrop.label(for: 1) == "Solid", "1 reads as Solid")
+        assert(PanelBackdrop.label(for: 0.5) == "50% solid", "intermediate reads as a percentage")
+    }
+}
+#endif
+
 /// All non-secret app settings backed by UserDefaults.
 final class MainlineSettings: ObservableObject {
     static let shared = MainlineSettings()
@@ -538,6 +608,7 @@ final class MainlineSettings: ObservableObject {
         static let pinnedNodeIds        = "pinnedNodeIds"
         static let panelHeight          = "panelHeight"
         static let panelMinHeight       = "panelMinHeight"
+        static let panelBackgroundOpacity = "panelBackgroundOpacity"
         static let menuBarMetric        = "menuBarMetric"
         static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
@@ -771,6 +842,26 @@ final class MainlineSettings: ObservableObject {
     /// with few PRs. Clamped not to exceed `panelHeight` downstream. Default 600.
     @Published var panelMinHeight: Int {
         didSet { defaults.set(panelMinHeight, forKey: Keys.panelMinHeight) }
+    }
+
+    /// How solid the popover's background is, `0`…`1`. `0` (default) keeps the
+    /// stock system material — the translucent "liquid glass" look — and `1`
+    /// paints a fully opaque `windowBackgroundColor` behind the content, like a
+    /// native AppKit menu. Anything between is a partial wash over the material.
+    ///
+    /// Default `0` so an existing install looks exactly as it did; the control
+    /// lives in Settings → Appearance → Panel. Values are clamped through
+    /// `PanelBackdrop.clamped` on both load and write, so a hand-edited or
+    /// corrupted `UserDefaults` entry can never reach the render tree.
+    @Published var panelBackgroundOpacity: Double {
+        didSet {
+            let clamped = PanelBackdrop.clamped(panelBackgroundOpacity)
+            // Assigning inside `didSet` does NOT re-enter the observer, so this
+            // settles at the clamped value in one pass — and the persist below
+            // still runs, writing the clamped value rather than the raw one.
+            if clamped != panelBackgroundOpacity { panelBackgroundOpacity = clamped }
+            defaults.set(clamped, forKey: Keys.panelBackgroundOpacity)
+        }
     }
 
     /// What the menu-bar badge counts. Default `totalOpen`.
@@ -1333,6 +1424,11 @@ final class MainlineSettings: ObservableObject {
         pinnedNodeIdsList = defaults.stringArray(forKey: Keys.pinnedNodeIds) ?? []
         panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 1600 : defaults.integer(forKey: Keys.panelHeight)
         panelMinHeight  = defaults.object(forKey: Keys.panelMinHeight) == nil ? 600 : defaults.integer(forKey: Keys.panelMinHeight)
+        // Panel backdrop — default 0 (stock translucent material, unchanged look).
+        // Clamped on load so a corrupted/hand-edited value can't reach the view.
+        panelBackgroundOpacity = defaults.object(forKey: Keys.panelBackgroundOpacity) == nil
+            ? PanelBackdrop.minOpacity
+            : PanelBackdrop.clamped(defaults.double(forKey: Keys.panelBackgroundOpacity))
 
         // Menu-bar badge — default: count "Total Open", follow selected scope
         menuBarMetric = defaults.string(forKey: Keys.menuBarMetric)
