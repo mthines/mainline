@@ -102,7 +102,7 @@ enum PREventGroup: CaseIterable {
 
     var caption: String {
         switch self {
-        case .yourPRs:   return "PRs you opened, or that carry your commits."
+        case .yourPRs:   return "PRs you opened, or that carry your commits (unless set to By author only in Inbox)."
         case .reviewing: return "PRs from others where your review was requested."
         }
     }
