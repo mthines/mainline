@@ -183,11 +183,16 @@ extension PREvent {
     /// unambiguously a deliberate choice to silence the event, and only the old
     /// default value is ambiguous enough to migrate. Every other event's stored
     /// value is passed through unchanged.
-    static func migratedPolicy(from stored: [String: String]) -> [String: String] {
+    ///
+    /// Each rule is gated on `storedVersion` so a bump re-runs only the NEW
+    /// rules: re-running v1 for a user already at v1 would delete a
+    /// `reviewRequested: quiet` they chose deliberately after the upgrade.
+    static func migratedPolicy(from stored: [String: String], storedVersion: Int = 0) -> [String: String] {
         var next = stored
 
         // v1 — reviewRequested: quiet (the old default) → follow the new default.
-        if next[PREvent.reviewRequested.rawValue] == AttentionLevel.quiet.rawValue {
+        if storedVersion < 1,
+           next[PREvent.reviewRequested.rawValue] == AttentionLevel.quiet.rawValue {
             next.removeValue(forKey: PREvent.reviewRequested.rawValue)
         }
 
@@ -197,7 +202,7 @@ extension PREvent {
         // banners. Never overwrite a value already set for the new key.
         let legacy = PREvent.newReviewOrComment.rawValue
         let split = PREvent.newCommentOnReviewPR.rawValue
-        if let level = next[legacy], next[split] == nil {
+        if storedVersion < 2, let level = next[legacy], next[split] == nil {
             next[split] = level
         }
 
@@ -260,7 +265,14 @@ enum AttentionPolicyChecks {
         assert(PREvent.migratedPolicy(from: [nrc: "quiet"])[nrc] == "quiet",
                "v2 must keep the legacy key's own value")
 
-        // MARK: Groups — every deliverable row lands in exactly one section.
+        // A version bump re-runs only newer rules: a user already at v1 who
+        // deliberately chose reviewRequested:quiet keeps it through v2.
+        assert(PREvent.migratedPolicy(from: [rr: "quiet"], storedVersion: 1)[rr] == "quiet",
+               "v1 must not re-run for a user already at v1")
+        assert(PREvent.migratedPolicy(from: [nrc: "off"], storedVersion: 2)[ncr] == nil,
+               "v2 must not re-run for a user already at v2")
+
+                // MARK: Groups — every deliverable row lands in exactly one section.
         assert(PREventGroup.allCases.flatMap(\.events).count == PREvent.deliverable.count,
                "every deliverable event must appear in exactly one group")
         assert(PREvent.ciFailedOnMyPR.group == .yourPRs, "CI events are your-PR events")

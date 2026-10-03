@@ -475,7 +475,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `collapsedSectionsRaw` | [String] | [] — `ActionGroup` rawValues for collapsed sections, plus `"inbox:<role>:<group>"` (per-role Inbox sections) and `"stack:<id>"` (a collapsed stack card, id = bottom PR nodeId) keys; the non-`ActionGroup` keys are ignored by the typed `collapsedSections` accessor |
 | `snoozeMapData` | Data (JSON) | {} |
 | `attentionPolicy` | [String: String] (`PREvent.rawValue` → `AttentionLevel.rawValue`) | `{}` — an ABSENT key falls back to `PREvent.defaults`, where `reviewRequested` and `reviewRequestedTeam` are `.notify` / `.quiet` respectively |
-| `attentionPolicyMigrationVersion` | Int | `0` (absent) — last-applied `PREvent.policyMigrationVersion`; v1 clears a persisted `reviewRequested: quiet` |
+| `attentionPolicyMigrationVersion` | Int | `0` (absent) — last-applied `PREvent.policyMigrationVersion`; v1 clears a persisted `reviewRequested: quiet`; v2 copies `newReviewOrComment` → `newCommentOnReviewPR`. Rules are gated on the stored version so a bump never re-runs an older rule |
 | `panelHeight` | Int | 1600 |
 | `panelMinHeight` | Int | 600 |
 | `panelBackgroundOpacity` | Double | `0` — how solid the popover background is. `0` = the stock system material (translucent / "liquid glass", unchanged); `1` = an opaque `windowBackgroundColor` fill like a native menu. `MenuBarView.panelBackdrop` paints it OVER the material and UNDER the content, skipping the layer entirely at `0`. Clamped through the pure `PanelBackdrop.clamped` on load AND in the `didSet` AND at the view's read site. Slider in Settings → Appearance → Panel. |

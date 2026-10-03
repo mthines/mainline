@@ -91,9 +91,9 @@ log_success "Build OK ($ARCH_INFO)"
 # =============================================================================
 # Developer ID signing (OPT-IN — only runs when the signing secrets are present).
 #
-# Without MACOS_CERTIFICATE_P12_BASE64 the app stays unsigned (CODE_SIGNING_ALLOWED=NO
-# above), so this can never break an existing release; it only *upgrades* the
-# release when configured. See docs/release.md for the one-time setup.
+# Without MACOS_CERTIFICATE_P12_BASE64 the app gets no Developer ID; the else
+# branch ad-hoc signs the bundle instead (required for notification permission).
+# See docs/release.md for the one-time setup.
 # =============================================================================
 SIGNED="false"
 if [ -n "${MACOS_CERTIFICATE_P12_BASE64:-}" ] && [ -n "${MACOS_CERTIFICATE_PASSWORD:-}" ]; then

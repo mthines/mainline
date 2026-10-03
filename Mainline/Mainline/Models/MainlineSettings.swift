@@ -1587,8 +1587,9 @@ final class MainlineSettings: ObservableObject {
         //
         // The version key is written regardless, so the upgrade runs exactly once
         // per version.
-        if defaults.integer(forKey: Keys.attentionPolicyMigrationVersion) < PREvent.policyMigrationVersion {
-            let migrated = PREvent.migratedPolicy(from: attentionPolicy)
+        let storedPolicyVersion = defaults.integer(forKey: Keys.attentionPolicyMigrationVersion)
+        if storedPolicyVersion < PREvent.policyMigrationVersion {
+            let migrated = PREvent.migratedPolicy(from: attentionPolicy, storedVersion: storedPolicyVersion)
             if migrated != attentionPolicy {
                 attentionPolicy = migrated
                 defaults.set(migrated, forKey: Keys.attentionPolicy)
