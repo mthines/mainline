@@ -419,15 +419,13 @@ struct SettingsView: View {
         // filters `PREvent.deliverable`) — three cases have no `PRTransition`
         // behind them and would be dead controls.
         ForEach(PREventGroup.allCases, id: \.self) { group in
-            Section {
+            Section(group.title) {
                 Text(group.caption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 ForEach(group.events, id: \.rawValue) { event in
                     attentionPolicyRow(event)
                 }
-            } header: {
-                Text(group.title)
             }
         }
 
