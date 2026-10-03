@@ -68,6 +68,14 @@ private struct GraphQLError: Decodable {
     let type: String?
 }
 
+private extension Array where Element == GraphQLError {
+    /// GitHub reports a bad, expired or under-scoped token as a FORBIDDEN error at
+    /// HTTP 200, so every query maps it onto `.unauthorized`.
+    var containsForbidden: Bool {
+        contains { ($0.type ?? "").uppercased().contains("FORBIDDEN") }
+    }
+}
+
 private struct GraphQLData: Decodable {
     let search: GraphQLSearch
 }
@@ -446,7 +454,7 @@ final class GitHubClient {
             let data = try await postGraphQL(Self.prNodesQueryDocument, variables: ["ids": chunk], token: token)
             let decoded = try decodeGraphQL(GraphQLNodesResponse.self, from: data)
             if let errors = decoded.errors, !errors.isEmpty {
-                if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+                if errors.containsForbidden {
                     throw GitHubAPIError.unauthorized
                 }
                 // A partial answer (e.g. one id NOT_FOUND) is still an answer —
@@ -479,7 +487,7 @@ final class GitHubClient {
             let data = try await postGraphQL(Self.committedCandidatesQueryDocument, variables: variables, token: token)
             let decoded = try decodeGraphQL(GraphQLCommittedCandidatesResponse.self, from: data)
             if let errors = decoded.errors, !errors.isEmpty {
-                if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+                if errors.containsForbidden {
                     throw GitHubAPIError.unauthorized
                 }
                 throw GitHubAPIError.unknown(200)
@@ -629,7 +637,7 @@ final class GitHubClient {
 
         // A bad/expired token can return 200 with a top-level errors array.
         if let errors = decoded.errors, !errors.isEmpty {
-            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+            if errors.containsForbidden {
                 throw GitHubAPIError.unauthorized
             }
             throw GitHubAPIError.unknown(200)
@@ -701,7 +709,7 @@ final class GitHubClient {
         }
 
         if let errors = decoded.errors, !errors.isEmpty {
-            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+            if errors.containsForbidden {
                 throw GitHubAPIError.unauthorized
             }
             // A NOT_FOUND (wrong repo/number, or no access) is not an error worth
@@ -759,7 +767,7 @@ final class GitHubClient {
         }
 
         if let errors = decoded.errors, !errors.isEmpty {
-            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+            if errors.containsForbidden {
                 throw GitHubAPIError.unauthorized
             }
             return nil
