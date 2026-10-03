@@ -101,7 +101,14 @@ private struct GraphQLNodeByIdData: Decodable {
 /// to decide `viewerIsCommitter`.
 private struct GraphQLCommittedCandidatesResponse: Decodable {
     struct Body: Decodable { let search: Search }
-    struct Search: Decodable { let nodes: [Node] }
+    struct Search: Decodable {
+        let pageInfo: PageInfo?
+        let nodes: [Node]
+    }
+    struct PageInfo: Decodable {
+        let hasNextPage: Bool
+        let endCursor: String?
+    }
     struct Node: Decodable {
         let id: String?
         let commitAuthors: GraphQLCommitAuthors?
@@ -405,8 +412,8 @@ final class GitHubClient {
     /// since merged, which an `is:open` search can never return to clear them.
     ///
     /// `degraded` keeps `searchPRs`' contract: true when the candidate search only
-    /// got the reduced-page retry through, or when some candidate could not be
-    /// fetched in step 2. Either way the result is a subset and the caller must
+    /// got the reduced-page retry through, stopped at `committedSearchMaxPages`
+    /// with results unread, or when some candidate could not be fetched in step 2. Either way the result is a subset and the caller must
     /// carry the missing PRs forward. No ETag: this endpoint is POST-only GraphQL.
     func searchCommittedPRs(
         query: String,
@@ -416,18 +423,22 @@ final class GitHubClient {
     ) async throws -> (snapshots: [PRSnapshot], degraded: Bool) {
         let myLogin = settings.githubUsername.lowercased()
         var degraded = false
-        let ids: [String]
+        let candidates: (ids: [String], complete: Bool)
         do {
-            ids = try await committedCandidateIds(query: query, first: Self.searchPageSize, myLogin: myLogin, token: token)
+            candidates = try await committedCandidateIds(query: query, first: Self.searchPageSize, myLogin: myLogin, token: token)
         } catch GitHubAPIError.serverError(let code) {
             try await Task.sleep(nanoseconds: Self.searchRetryDelayNanos)
-            ids = try await committedCandidateIds(query: query, first: Self.searchPageSizeDegraded, myLogin: myLogin, token: token)
+            candidates = try await committedCandidateIds(query: query, first: Self.searchPageSizeDegraded, myLogin: myLogin, token: token)
             TelemetryService.shared.recordPollServerErrorRecovered(
                 queryType: telemetryQueryType,
                 statusCode: code
             )
             degraded = true
         }
+        // Results left unread past the page cap are a subset, exactly like a
+        // degraded page: the caller must carry the rest forward, not drop them.
+        if !candidates.complete { degraded = true }
+        let ids = candidates.ids
         guard !ids.isEmpty else { return ([], degraded) }
 
         var snapshots: [PRSnapshot] = []
@@ -451,31 +462,41 @@ final class GitHubClient {
     }
 
     /// Step 1 of `searchCommittedPRs`: node ids of the search results the viewer
-    /// committed to, in result order.
+    /// committed to, in result order, paging through up to
+    /// `committedSearchMaxPages` pages. `complete` is false when results were
+    /// left unread at the cap.
     private func committedCandidateIds(
         query: String,
         first: Int,
         myLogin: String,
         token: String
-    ) async throws -> [String] {
-        let data = try await postGraphQL(
-            Self.committedCandidatesQueryDocument,
-            variables: ["q": query, "first": first],
-            token: token
-        )
-        let decoded = try decodeGraphQL(GraphQLCommittedCandidatesResponse.self, from: data)
-        if let errors = decoded.errors, !errors.isEmpty {
-            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
-                throw GitHubAPIError.unauthorized
+    ) async throws -> (ids: [String], complete: Bool) {
+        var ids: [String] = []
+        var cursor: String?
+        for _ in 0..<Self.committedSearchMaxPages {
+            var variables: [String: Any] = ["q": query, "first": first]
+            if let cursor { variables["after"] = cursor }
+            let data = try await postGraphQL(Self.committedCandidatesQueryDocument, variables: variables, token: token)
+            let decoded = try decodeGraphQL(GraphQLCommittedCandidatesResponse.self, from: data)
+            if let errors = decoded.errors, !errors.isEmpty {
+                if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+                    throw GitHubAPIError.unauthorized
+                }
+                throw GitHubAPIError.unknown(200)
             }
-            throw GitHubAPIError.unknown(200)
+            guard let search = decoded.data?.search else { return (ids, true) }
+            ids += search.nodes.compactMap { node in
+                guard let id = node.id,
+                      node.commitAuthors?.logins.contains(where: { PRSnapshot.loginsMatch($0, myLogin) }) == true
+                else { return nil }
+                return id
+            }
+            guard search.pageInfo?.hasNextPage == true, let next = search.pageInfo?.endCursor else {
+                return (ids, true)
+            }
+            cursor = next
         }
-        return (decoded.data?.search.nodes ?? []).compactMap { node in
-            guard let id = node.id,
-                  node.commitAuthors?.logins.contains(where: { PRSnapshot.loginsMatch($0, myLogin) }) == true
-            else { return nil }
-            return id
-        }
+        return (ids, false)
     }
 
     /// The current lifecycle state (`OPEN` / `CLOSED` / `MERGED`) of each PR,
@@ -1022,8 +1043,9 @@ final class GitHubClient {
     /// nodes — and at ~3x the cost of this selection, the 50-node retry was the
     /// best it ever did.
     private static let committedCandidatesQueryDocument = """
-    query($q: String!, $first: Int!) {
-      search(query: $q, type: ISSUE, first: $first) {
+    query($q: String!, $first: Int!, $after: String) {
+      search(query: $q, type: ISSUE, first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           ... on PullRequest {
             id
@@ -1054,6 +1076,12 @@ final class GitHubClient {
       }
     }
     """
+
+    /// Most candidate-search pages `searchCommittedPRs` reads per poll. A busy org
+    /// bot has well over one page of open PRs (128 for `dash0-dev` when this was
+    /// written) and the viewer's PRs can sit anywhere in it, so one page is not the
+    /// whole set; past this cap the result is reported incomplete instead.
+    static let committedSearchMaxPages = 5
 
     /// GitHub's cap on `nodes(ids:)` per request.
     static let nodesPerRequest = 100
