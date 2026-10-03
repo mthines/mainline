@@ -18,7 +18,8 @@ enum PREvent: String, Codable, CaseIterable {
     case reviewRequestedTeam // review requested from a team I belong to
     case ciFailedOnMyPR      // CI failed on my PR
     case changesRequested    // reviewer requested changes on my PR
-    case newReviewOrComment  // new review or comment needing response
+    case newReviewOrComment  // new review or comment on MY PR (rawValue predates the role split)
+    case newCommentOnReviewPR // new review or comment on someone else's PR I'm reviewing
     case readyForReview      // PR transitioned from draft to ready
     case prMerged            // PR was merged
     case prClosed            // PR was closed (not merged)
@@ -47,6 +48,7 @@ enum PREvent: String, Codable, CaseIterable {
              .ciFailedOnMyPR,
              .ciPassedOnMyPR,
              .newReviewOrComment,
+             .newCommentOnReviewPR,
              .readyForReview,
              .draftCreated:
             return true
@@ -62,20 +64,64 @@ enum PREvent: String, Codable, CaseIterable {
     /// `allCases` so it never renders a row that cannot fire.
     static let deliverable: [PREvent] = PREvent.allCases.filter { $0.isDeliverable }
 
-    /// Human-readable label for Settings UI.
+    /// Human-readable label for Settings UI. Role-free on purpose: the row sits
+    /// under its `group` header, which already says whose PR it is.
     var displayName: String {
         switch self {
-        case .newPRByMe:          return "New PR opened by me"
+        case .newPRByMe:          return "New PR opened"
         case .reviewRequested:    return "Review requested from me"
         case .reviewRequestedTeam: return "Team review requested"
-        case .ciFailedOnMyPR:     return "CI failed on my PR"
-        case .changesRequested:   return "Changes requested on my PR"
+        case .ciFailedOnMyPR:     return "CI failed"
+        case .changesRequested:   return "Changes requested"
         case .newReviewOrComment: return "New review or comment"
+        case .newCommentOnReviewPR: return "New review or comment"
         case .readyForReview:     return "PR ready for review"
         case .prMerged:           return "PR merged"
         case .prClosed:           return "PR closed"
-        case .ciPassedOnMyPR:     return "CI passed on my PR"
+        case .ciPassedOnMyPR:     return "CI passed"
         case .draftCreated:       return "Draft PR created"
+        }
+    }
+}
+
+// MARK: - Settings grouping
+
+/// The two roles the Settings pane groups events under — the same split the
+/// deck uses ("Your PRs" / "Needs your review"), so a row's meaning is
+/// unambiguous from its section.
+enum PREventGroup: CaseIterable {
+    case yourPRs
+    case reviewing
+
+    var title: String {
+        switch self {
+        case .yourPRs:   return "Your PRs"
+        case .reviewing: return "PRs You Review"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .yourPRs:   return "PRs you opened, or that carry your commits."
+        case .reviewing: return "PRs from others where your review was requested."
+        }
+    }
+
+    /// Deliverable events in this group, in `allCases` order.
+    var events: [PREvent] { PREvent.deliverable.filter { $0.group == self } }
+}
+
+extension PREvent {
+    /// Which Settings group the event belongs to. Exhaustive on purpose, like
+    /// `isDeliverable`: a new event must declare its role.
+    var group: PREventGroup {
+        switch self {
+        case .newPRByMe, .ciFailedOnMyPR, .ciPassedOnMyPR, .changesRequested,
+             .newReviewOrComment, .prMerged, .prClosed:
+            return .yourPRs
+        case .reviewRequested, .reviewRequestedTeam, .newCommentOnReviewPR,
+             .readyForReview, .draftCreated:
+            return .reviewing
         }
     }
 }
@@ -97,6 +143,7 @@ extension PREvent {
         .ciFailedOnMyPR:     .notify,
         .changesRequested:   .notify,
         .newReviewOrComment: .notify,
+        .newCommentOnReviewPR: .notify,
         .readyForReview:     .notify,
         .prMerged:           .quiet,   // good news / terminal — no focus steal
         .prClosed:           .quiet,   // terminal state
@@ -116,7 +163,9 @@ extension PREvent {
     /// `Keys.attentionPolicyMigrationVersion` and runs the upgrade exactly once.
     ///
     /// - v1: `reviewRequested` default flipped `.quiet` → `.notify`.
-    static let policyMigrationVersion = 1
+    /// - v2: `newReviewOrComment` split by role; `newCommentOnReviewPR` inherits
+    ///   the stored level so nobody's comment banners change on upgrade.
+    static let policyMigrationVersion = 2
 
     /// Pure. Upgrades a persisted `[PREvent.rawValue: AttentionLevel.rawValue]`
     /// dictionary to the current policy version.
@@ -140,6 +189,16 @@ extension PREvent {
         // v1 — reviewRequested: quiet (the old default) → follow the new default.
         if next[PREvent.reviewRequested.rawValue] == AttentionLevel.quiet.rawValue {
             next.removeValue(forKey: PREvent.reviewRequested.rawValue)
+        }
+
+        // v2 — `newReviewOrComment` used to cover every PR. It now means "on my
+        // PR"; the reviewer half is `newCommentOnReviewPR`. Copy a stored level
+        // across so a user who silenced comments doesn't start getting reviewer
+        // banners. Never overwrite a value already set for the new key.
+        let legacy = PREvent.newReviewOrComment.rawValue
+        let split = PREvent.newCommentOnReviewPR.rawValue
+        if let level = next[legacy], next[split] == nil {
+            next[split] = level
         }
 
         return next
@@ -190,6 +249,22 @@ enum AttentionPolicyChecks {
         // Idempotent: re-running over its own output changes nothing.
         let once = PREvent.migratedPolicy(from: [rr: "quiet", other: "off"])
         assert(PREvent.migratedPolicy(from: once) == once, "migration must be idempotent")
+
+        // v2 — the reviewer comment event inherits the legacy level, once.
+        let nrc = PREvent.newReviewOrComment.rawValue
+        let ncr = PREvent.newCommentOnReviewPR.rawValue
+        assert(PREvent.migratedPolicy(from: [nrc: "off"])[ncr] == "off",
+               "v2 must copy a silenced comment level to the reviewer event")
+        assert(PREvent.migratedPolicy(from: [nrc: "off", ncr: "notify"])[ncr] == "notify",
+               "v2 must not overwrite an explicit reviewer comment level")
+        assert(PREvent.migratedPolicy(from: [nrc: "quiet"])[nrc] == "quiet",
+               "v2 must keep the legacy key's own value")
+
+        // MARK: Groups — every deliverable row lands in exactly one section.
+        assert(PREventGroup.allCases.flatMap(\.events).count == PREvent.deliverable.count,
+               "every deliverable event must appear in exactly one group")
+        assert(PREvent.ciFailedOnMyPR.group == .yourPRs, "CI events are your-PR events")
+        assert(PREvent.reviewRequested.group == .reviewing, "review requests are reviewer events")
 
         // MARK: Deliverable set — dead rows must not reach the Settings pane.
         assert(!PREvent.changesRequested.isDeliverable, "changesRequested is never emitted")

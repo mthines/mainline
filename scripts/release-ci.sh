@@ -136,7 +136,17 @@ if [ -n "${MACOS_CERTIFICATE_P12_BASE64:-}" ] && [ -n "${MACOS_CERTIFICATE_PASSW
   log_success "Signed with Developer ID"
   SIGNED="true"
 else
-  log_warning "MACOS_CERTIFICATE_* not set — building UNSIGNED. See docs/release.md for signing setup."
+  log_warning "MACOS_CERTIFICATE_* not set — no Developer ID. See docs/release.md for signing setup."
+  # Ad-hoc sign the BUNDLE anyway. CODE_SIGNING_ALLOWED=NO leaves only the
+  # linker's signature on the Mach-O — no bound Info.plist, no sealed
+  # resources — and macOS refuses UNUserNotificationCenter.requestAuthorization
+  # outright (no prompt) for a bundle it can't tie to a bundle ID. An ad-hoc
+  # bundle signature fixes that; Gatekeeper still treats the app as unsigned.
+  log_info "Ad-hoc signing the app bundle..."
+  codesign --force --deep --sign - \
+    --entitlements "$PROJECT_DIR/Mainline/Mainline/Mainline.entitlements" "$APP_PATH"
+  codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+  log_success "Ad-hoc signed"
 fi
 
 # =============================================================================

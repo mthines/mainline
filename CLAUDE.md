@@ -135,7 +135,10 @@ notifications", check them in this order — the first two used to fail silently
    "Allow" row. Requesting from the Settings window (app active → prompt shows, or an
    already-granted state resolves without one) clears it. `.denied` / `.silent` instead
    get "Open System Settings…". `requestAuthorization()` is `async` and no longer
-   discards `granted`.
+   discards `granted`; it also returns the request's `error`, which Settings shows as
+   `PRManager.notificationRequestError`. A request rejected with **no prompt** almost
+   always means a broken bundle signature — CI builds without a Developer ID must be
+   ad-hoc signed (`scripts/release-ci.sh`, see `docs/release.md`).
 2. **A `PRTransition` must exist.** `PRTransition` has only FOUR cases
    (`newPR`, `readyForReview`, `ciStatusChanged`, `newReviewOrComment`), so only the
    `PREvent`s reachable from `NotificationService.resolveTransition` can ever fire.
@@ -151,6 +154,13 @@ notifications", check them in this order — the first two used to fail silently
    `PREvent.migratedPolicy(from:)`, run once from the trailing block of
    `MainlineSettings.init()`. v1 REMOVES a stored `reviewRequested: quiet` (removal, not
    overwrite, so future default changes also land) while preserving a deliberate `off`.
+   v2 copies a stored `newReviewOrComment` level to `newCommentOnReviewPR` (the
+   comment event was split by role — see below).
+
+The Settings pane groups the rows by `PREvent.group` (`PREventGroup`: **Your PRs** /
+**PRs You Review**, mirroring the deck's role split); `group` is exhaustive like
+`isDeliverable`. Comments are routed by role: `.newReviewOrComment` on your own work
+(`isViewersWork`), `.newCommentOnReviewPR` on anyone else's.
 
 Note `resolveTransition` routes *every* new PR you did not author to `.reviewRequested`
 (or `.reviewRequestedTeam` when only a team was requested) — so `reviewRequested`'s
