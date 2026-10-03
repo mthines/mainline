@@ -18,7 +18,8 @@ enum PREvent: String, Codable, CaseIterable {
     case reviewRequestedTeam // review requested from a team I belong to
     case ciFailedOnMyPR      // CI failed on my PR
     case changesRequested    // reviewer requested changes on my PR
-    case newReviewOrComment  // new review or comment needing response
+    case newReviewOrComment  // new review or comment on MY PR (rawValue predates the role split)
+    case newCommentOnReviewPR // new review or comment on someone else's PR I'm reviewing
     case readyForReview      // PR transitioned from draft to ready
     case prMerged            // PR was merged
     case prClosed            // PR was closed (not merged)
@@ -47,6 +48,7 @@ enum PREvent: String, Codable, CaseIterable {
              .ciFailedOnMyPR,
              .ciPassedOnMyPR,
              .newReviewOrComment,
+             .newCommentOnReviewPR,
              .readyForReview,
              .draftCreated:
             return true
@@ -62,20 +64,64 @@ enum PREvent: String, Codable, CaseIterable {
     /// `allCases` so it never renders a row that cannot fire.
     static let deliverable: [PREvent] = PREvent.allCases.filter { $0.isDeliverable }
 
-    /// Human-readable label for Settings UI.
+    /// Human-readable label for Settings UI. Role-free on purpose: the row sits
+    /// under its `group` header, which already says whose PR it is.
     var displayName: String {
         switch self {
-        case .newPRByMe:          return "New PR opened by me"
+        case .newPRByMe:          return "New PR opened"
         case .reviewRequested:    return "Review requested from me"
         case .reviewRequestedTeam: return "Team review requested"
-        case .ciFailedOnMyPR:     return "CI failed on my PR"
-        case .changesRequested:   return "Changes requested on my PR"
+        case .ciFailedOnMyPR:     return "CI failed"
+        case .changesRequested:   return "Changes requested"
         case .newReviewOrComment: return "New review or comment"
+        case .newCommentOnReviewPR: return "New review or comment"
         case .readyForReview:     return "PR ready for review"
         case .prMerged:           return "PR merged"
         case .prClosed:           return "PR closed"
-        case .ciPassedOnMyPR:     return "CI passed on my PR"
+        case .ciPassedOnMyPR:     return "CI passed"
         case .draftCreated:       return "Draft PR created"
+        }
+    }
+}
+
+// MARK: - Settings grouping
+
+/// The two roles the Settings pane groups events under — the same split the
+/// deck uses ("Your PRs" / "Needs your review"), so a row's meaning is
+/// unambiguous from its section.
+enum PREventGroup: CaseIterable {
+    case yourPRs
+    case reviewing
+
+    var title: String {
+        switch self {
+        case .yourPRs:   return "Your PRs"
+        case .reviewing: return "PRs You Review"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .yourPRs:   return "PRs you opened, or that carry your commits (unless set to By author only in Inbox)."
+        case .reviewing: return "PRs from others where your review was requested."
+        }
+    }
+
+    /// Deliverable events in this group, in `allCases` order.
+    var events: [PREvent] { PREvent.deliverable.filter { $0.group == self } }
+}
+
+extension PREvent {
+    /// Which Settings group the event belongs to. Exhaustive on purpose, like
+    /// `isDeliverable`: a new event must declare its role.
+    var group: PREventGroup {
+        switch self {
+        case .newPRByMe, .ciFailedOnMyPR, .ciPassedOnMyPR, .changesRequested,
+             .newReviewOrComment, .prMerged, .prClosed:
+            return .yourPRs
+        case .reviewRequested, .reviewRequestedTeam, .newCommentOnReviewPR,
+             .readyForReview, .draftCreated:
+            return .reviewing
         }
     }
 }
@@ -91,12 +137,13 @@ extension PREvent {
         // unreachable for anyone but yourself. It was also incoherent with
         // `.readyForReview` (`.notify`), which the diff engine emits when a review
         // is requested on an ALREADY-tracked PR: known PRs rang, brand-new ones
-        // were silent. Existing users are upgraded once by `migratedPolicy(from:)`.
+        // were silent. Existing users are upgraded once by `migratedPolicy(from:storedVersion:)`.
         .reviewRequested:    .notify,
         .reviewRequestedTeam: .quiet,   // team pulled it in — legitimately lower signal
         .ciFailedOnMyPR:     .notify,
         .changesRequested:   .notify,
         .newReviewOrComment: .notify,
+        .newCommentOnReviewPR: .notify,
         .readyForReview:     .notify,
         .prMerged:           .quiet,   // good news / terminal — no focus steal
         .prClosed:           .quiet,   // terminal state
@@ -110,13 +157,15 @@ extension PREvent {
 extension PREvent {
     /// Current version of the persisted `attentionPolicy` dictionary shape.
     ///
-    /// Bump this (and extend `migratedPolicy(from:)`) whenever a change to
+    /// Bump this (and extend `migratedPolicy(from:storedVersion:)`) whenever a change to
     /// `defaults` needs to reach users who already have a value on disk.
     /// `MainlineSettings` stores the last-applied version under
     /// `Keys.attentionPolicyMigrationVersion` and runs the upgrade exactly once.
     ///
     /// - v1: `reviewRequested` default flipped `.quiet` → `.notify`.
-    static let policyMigrationVersion = 1
+    /// - v2: `newReviewOrComment` split by role; `newCommentOnReviewPR` inherits
+    ///   the stored level so nobody's comment banners change on upgrade.
+    static let policyMigrationVersion = 2
 
     /// Pure. Upgrades a persisted `[PREvent.rawValue: AttentionLevel.rawValue]`
     /// dictionary to the current policy version.
@@ -134,12 +183,27 @@ extension PREvent {
     /// unambiguously a deliberate choice to silence the event, and only the old
     /// default value is ambiguous enough to migrate. Every other event's stored
     /// value is passed through unchanged.
-    static func migratedPolicy(from stored: [String: String]) -> [String: String] {
+    ///
+    /// Each rule is gated on `storedVersion` so a bump re-runs only the NEW
+    /// rules: re-running v1 for a user already at v1 would delete a
+    /// `reviewRequested: quiet` they chose deliberately after the upgrade.
+    static func migratedPolicy(from stored: [String: String], storedVersion: Int) -> [String: String] {
         var next = stored
 
         // v1 — reviewRequested: quiet (the old default) → follow the new default.
-        if next[PREvent.reviewRequested.rawValue] == AttentionLevel.quiet.rawValue {
+        if storedVersion < 1,
+           next[PREvent.reviewRequested.rawValue] == AttentionLevel.quiet.rawValue {
             next.removeValue(forKey: PREvent.reviewRequested.rawValue)
+        }
+
+        // v2 — `newReviewOrComment` used to cover every PR. It now means "on my
+        // PR"; the reviewer half is `newCommentOnReviewPR`. Copy a stored level
+        // across so a user who silenced comments doesn't start getting reviewer
+        // banners. Never overwrite a value already set for the new key.
+        let legacy = PREvent.newReviewOrComment.rawValue
+        let split = PREvent.newCommentOnReviewPR.rawValue
+        if storedVersion < 2, let level = next[legacy], next[split] == nil {
+            next[split] = level
         }
 
         return next
@@ -171,25 +235,48 @@ enum AttentionPolicyChecks {
         let rr = PREvent.reviewRequested.rawValue
 
         // A stored old default is removed, so `level(for:)` falls through to .notify.
-        assert(PREvent.migratedPolicy(from: [rr: "quiet"])[rr] == nil,
+        assert(PREvent.migratedPolicy(from: [rr: "quiet"], storedVersion: 0)[rr] == nil,
                "migration must clear a stored reviewRequested:quiet")
         // A deliberate silence is preserved.
-        assert(PREvent.migratedPolicy(from: [rr: "off"])[rr] == "off",
+        assert(PREvent.migratedPolicy(from: [rr: "off"], storedVersion: 0)[rr] == "off",
                "migration must preserve a deliberate reviewRequested:off")
         // An explicit notify is already correct and stays put.
-        assert(PREvent.migratedPolicy(from: [rr: "notify"])[rr] == "notify",
+        assert(PREvent.migratedPolicy(from: [rr: "notify"], storedVersion: 0)[rr] == "notify",
                "migration must preserve an explicit reviewRequested:notify")
         // Other events are untouched, including ones whose default IS quiet.
         let other = PREvent.ciPassedOnMyPR.rawValue
-        let mixed = PREvent.migratedPolicy(from: [rr: "quiet", other: "quiet"])
+        let mixed = PREvent.migratedPolicy(from: [rr: "quiet", other: "quiet"], storedVersion: 0)
         assert(mixed[other] == "quiet", "migration must not touch other events")
         assert(mixed[rr] == nil, "migration must still clear reviewRequested in a mixed dict")
         // Empty in, empty out — a fresh install migrates to a no-op.
-        assert(PREvent.migratedPolicy(from: [:]).isEmpty,
+        assert(PREvent.migratedPolicy(from: [:], storedVersion: 0).isEmpty,
                "migration of an empty policy must stay empty")
         // Idempotent: re-running over its own output changes nothing.
-        let once = PREvent.migratedPolicy(from: [rr: "quiet", other: "off"])
-        assert(PREvent.migratedPolicy(from: once) == once, "migration must be idempotent")
+        let once = PREvent.migratedPolicy(from: [rr: "quiet", other: "off"], storedVersion: 0)
+        assert(PREvent.migratedPolicy(from: once, storedVersion: 0) == once, "migration must be idempotent")
+
+        // v2 — the reviewer comment event inherits the legacy level, once.
+        let nrc = PREvent.newReviewOrComment.rawValue
+        let ncr = PREvent.newCommentOnReviewPR.rawValue
+        assert(PREvent.migratedPolicy(from: [nrc: "off"], storedVersion: 0)[ncr] == "off",
+               "v2 must copy a silenced comment level to the reviewer event")
+        assert(PREvent.migratedPolicy(from: [nrc: "off", ncr: "notify"], storedVersion: 0)[ncr] == "notify",
+               "v2 must not overwrite an explicit reviewer comment level")
+        assert(PREvent.migratedPolicy(from: [nrc: "quiet"], storedVersion: 0)[nrc] == "quiet",
+               "v2 must keep the legacy key's own value")
+
+        // A version bump re-runs only newer rules: a user already at v1 who
+        // deliberately chose reviewRequested:quiet keeps it through v2.
+        assert(PREvent.migratedPolicy(from: [rr: "quiet"], storedVersion: 1)[rr] == "quiet",
+               "v1 must not re-run for a user already at v1")
+        assert(PREvent.migratedPolicy(from: [nrc: "off"], storedVersion: 2)[ncr] == nil,
+               "v2 must not re-run for a user already at v2")
+
+        // MARK: Groups — every deliverable row lands in exactly one section.
+        assert(PREventGroup.allCases.flatMap(\.events).count == PREvent.deliverable.count,
+               "every deliverable event must appear in exactly one group")
+        assert(PREvent.ciFailedOnMyPR.group == .yourPRs, "CI events are your-PR events")
+        assert(PREvent.reviewRequested.group == .reviewing, "review requests are reviewer events")
 
         // MARK: Deliverable set — dead rows must not reach the Settings pane.
         assert(!PREvent.changesRequested.isDeliverable, "changesRequested is never emitted")

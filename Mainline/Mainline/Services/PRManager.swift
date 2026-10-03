@@ -85,6 +85,10 @@ final class PRManager: ObservableObject {
     /// launch and whenever the Notifications settings pane appears, so a change
     /// made in System Settings while the app runs is picked up.
     @Published var notificationAuthorization: NotificationAuthorizationState = .unknown
+    /// Why the last Settings-driven permission request failed, or `nil`. macOS
+    /// can reject a request with no prompt at all (e.g. an invalid bundle
+    /// signature), which otherwise looks like a dead button.
+    @Published var notificationRequestError: String?
 
     /// True once the poller has been started. Guards `start()` against being
     /// invoked twice (label `.task` + popover-content `.task`) which would
@@ -1395,7 +1399,14 @@ final class PRManager: ObservableObject {
     /// this process simply hadn't observed, the request resolves to `.authorized`
     /// without a prompt. Either way the warning clears once the state refreshes.
     func requestNotificationAuthorization() async {
-        await notifications.requestAuthorization()
+        let (_, error) = await notifications.requestAuthorization()
         await refreshNotificationAuthorization()
+        // Only a request that left us still undetermined is a failure worth
+        // showing — a denial is already explained by the `.denied` warning.
+        if let error, notificationAuthorization == .notDetermined {
+            notificationRequestError = "macOS rejected the request: \(error.localizedDescription)"
+        } else {
+            notificationRequestError = nil
+        }
     }
 }

@@ -89,6 +89,12 @@ are quarantined by Gatekeeper on download; the Homebrew cask removes the quarant
 attribute via `xattr -cr` in its `preflight` block so installation via `brew install`
 is transparent to users. Direct downloads require the user to right-click → Open once.
 
+"Unsigned" here means no Developer ID: `release-ci.sh` still **ad-hoc signs the bundle**
+(`codesign --sign -`). The bare `CODE_SIGNING_ALLOWED=NO` output carries only the
+linker's Mach-O signature (no bound Info.plist, no sealed resources), and macOS rejects
+`UNUserNotificationCenter.requestAuthorization` for such a bundle without ever showing
+a prompt — so notifications could never be enabled. Don't drop that step.
+
 To ship a signed and notarized app, add the following secrets:
 
 | Secret | Description |

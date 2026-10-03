@@ -62,8 +62,11 @@ final class NotificationService {
     /// Async so the caller can await the user's answer and then read
     /// `authorizationState()` — the `granted` flag used to be discarded, which is
     /// why a denied prompt left the app with no idea it could never deliver.
+    /// The `error` is returned too: macOS rejects the request outright, with no
+    /// prompt, when the app's bundle signature is invalid (an unsigned CI build),
+    /// and without it the Settings button silently did nothing.
     @discardableResult
-    func requestAuthorization() async -> Bool {
+    func requestAuthorization() async -> (granted: Bool, error: Error?) {
         let openAction = UNNotificationAction(
             identifier: Self.openActionId,
             title: "Open in Browser",
@@ -86,7 +89,7 @@ final class NotificationService {
                     if !granted {
                         print("[Mainline] Notification authorization NOT granted — banners will not be delivered.")
                     }
-                    continuation.resume(returning: granted)
+                    continuation.resume(returning: (granted, error))
                 }
         }
     }
@@ -243,7 +246,11 @@ final class NotificationService {
         case .newReviewOrComment(let pr):
             let args = (id: "mainline.comment.\(pr.nodeId)", title: "New Review/Comment",
                         body: "\(pr.repoFullName): \(pr.title)", url: pr.htmlUrl)
-            return (.newReviewOrComment, pr, args)
+            // Split by role so "comments on my PR" and "comments on a PR I'm
+            // reviewing" are configured independently.
+            let event: PREvent = pr.isViewersWork(myLogin: myLogin, committedPlacement: committedPlacement)
+                ? .newReviewOrComment : .newCommentOnReviewPR
+            return (event, pr, args)
         }
     }
 
@@ -338,8 +345,11 @@ enum NotificationRoutingChecks {
         // MARK: draft vs ready routing (unchanged, pinned against regression)
         assert(event(.readyForReview(pr(author: "someone"))) == .readyForReview,
                "non-draft readyForReview → readyForReview")
-        assert(event(.newReviewOrComment(pr(author: "someone"))) == .newReviewOrComment,
-               "comment transition → newReviewOrComment")
+        // Comments split by role: someone else's PR vs your own (case-insensitive).
+        assert(event(.newReviewOrComment(pr(author: "someone"))) == .newCommentOnReviewPR,
+               "comment on someone else's PR → newCommentOnReviewPR")
+        assert(event(.newReviewOrComment(pr(author: "mthines"))) == .newReviewOrComment,
+               "comment on my PR → newReviewOrComment")
 
         // MARK: Authorization classification
         assert(NotificationService.classify(

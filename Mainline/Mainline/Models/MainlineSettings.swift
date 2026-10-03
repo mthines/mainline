@@ -1569,7 +1569,7 @@ final class MainlineSettings: ObservableObject {
         }
 
         // One-time upgrade of the persisted attention policy to the current
-        // version (see `PREvent.migratedPolicy(from:)` for the per-version rules).
+        // version (see `PREvent.migratedPolicy(from:storedVersion:)` for the per-version rules).
         // `level(for:)` honours a stored value over the baked-in default, so a
         // default change alone never reaches a user who has opened the
         // Notifications pane — this is what makes the new default actually land.
@@ -1587,8 +1587,9 @@ final class MainlineSettings: ObservableObject {
         //
         // The version key is written regardless, so the upgrade runs exactly once
         // per version.
-        if defaults.integer(forKey: Keys.attentionPolicyMigrationVersion) < PREvent.policyMigrationVersion {
-            let migrated = PREvent.migratedPolicy(from: attentionPolicy)
+        let storedPolicyVersion = defaults.integer(forKey: Keys.attentionPolicyMigrationVersion)
+        if storedPolicyVersion < PREvent.policyMigrationVersion {
+            let migrated = PREvent.migratedPolicy(from: attentionPolicy, storedVersion: storedPolicyVersion)
             if migrated != attentionPolicy {
                 attentionPolicy = migrated
                 defaults.set(migrated, forKey: Keys.attentionPolicy)

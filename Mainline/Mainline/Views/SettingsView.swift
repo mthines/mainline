@@ -399,6 +399,12 @@ struct SettingsView: View {
                     Button("Enable Notifications…") {
                         Task { await manager.requestNotificationAuthorization() }
                     }
+                    if let error = manager.notificationRequestError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 } else {
                     Button("Open System Settings…") {
                         NotificationService.openSystemNotificationSettings()
@@ -407,35 +413,18 @@ struct SettingsView: View {
             }
         }
 
-        Section("Attention Policy") {
-            Text("Control how interrupting each event is.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            // Only events the notification service can actually emit. Three
-            // `PREvent` cases have no `PRTransition` behind them, so their rows
-            // were dead controls — configuring them did nothing.
-            ForEach(PREvent.deliverable, id: \.rawValue) { event in
-                HStack {
-                    Text(event.displayName)
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { settings.level(for: event) },
-                        set: { newLevel in
-                            var policy = settings.attentionPolicy
-                            policy[event.rawValue] = newLevel.rawValue
-                            settings.attentionPolicy = policy
-                            TelemetryService.shared.recordAttentionPolicyChanged(
-                                event: event.rawValue,
-                                level: newLevel.rawValue
-                            )
-                        }
-                    )) {
-                        Text("Notify").tag(AttentionLevel.notify)
-                        Text("Quiet").tag(AttentionLevel.quiet)
-                        Text("Off").tag(AttentionLevel.off)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 200)
+        // Grouped by role, mirroring the deck's "Your PRs" / "Needs your review"
+        // split, so it's clear whose PR each row is about. Only events the
+        // notification service can actually emit are listed (`group.events`
+        // filters `PREvent.deliverable`) — three cases have no `PRTransition`
+        // behind them and would be dead controls.
+        ForEach(PREventGroup.allCases, id: \.self) { group in
+            Section(group.title) {
+                Text(group.caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(group.events, id: \.rawValue) { event in
+                    attentionPolicyRow(event)
                 }
             }
         }
@@ -453,6 +442,31 @@ struct SettingsView: View {
         // app is running is reflected without a relaunch.
         .task {
             await manager.refreshNotificationAuthorization()
+        }
+    }
+
+    private func attentionPolicyRow(_ event: PREvent) -> some View {
+        HStack {
+            Text(event.displayName)
+            Spacer()
+            Picker("", selection: Binding(
+                get: { settings.level(for: event) },
+                set: { newLevel in
+                    var policy = settings.attentionPolicy
+                    policy[event.rawValue] = newLevel.rawValue
+                    settings.attentionPolicy = policy
+                    TelemetryService.shared.recordAttentionPolicyChanged(
+                        event: event.rawValue,
+                        level: newLevel.rawValue
+                    )
+                }
+            )) {
+                Text("Notify").tag(AttentionLevel.notify)
+                Text("Quiet").tag(AttentionLevel.quiet)
+                Text("Off").tag(AttentionLevel.off)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 200)
         }
     }
 

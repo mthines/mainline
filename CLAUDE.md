@@ -36,7 +36,7 @@ Mainline/Mainline/                     ← Source root
 ├── Models/
 │   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields; `viewerHasApproved` (viewer's own latest review == APPROVED, from GraphQL `latestReviews`); `viewerIsCommitter` (viewer authored/co-authored one of the first 10 commits, from aliased GraphQL `commitAuthors`); `CommittedPRPlacement` enum; role-aware `actionGroup(splitDrafts:myLogin:reviewReady:)` + `needsMyTime(...)` + `ReviewReadyConfig`; `PRClassificationChecks.run()` #if DEBUG
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
-│   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); `.defaults` (reviewRequested = notify); `isDeliverable`/`deliverable` SSOT for which events can actually fire; pure `migratedPolicy(from:)` + `policyMigrationVersion` for persisted-policy upgrades; `AttentionPolicyChecks.run()` #if DEBUG
+│   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); `.defaults` (reviewRequested = notify); `isDeliverable`/`deliverable` SSOT for which events can actually fire; `PREventGroup` (Your PRs / PRs You Review) + `PREvent.group`; pure `migratedPolicy(from:storedVersion:)` + `policyMigrationVersion` for persisted-policy upgrades, each rule gated by stored version (v2 splits comments by role into `newCommentOnReviewPR`); `AttentionPolicyChecks.run()` #if DEBUG
 │   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding); `launchAtLogin` (SMAppService-backed launch-at-login toggle); pure `PanelBackdrop` (clamp + label for `panelBackgroundOpacity`) + `PanelBackdropChecks.run()` #if DEBUG
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor); account-parameterized
@@ -44,8 +44,8 @@ Mainline/Mainline/                     ← Source root
 │   ├── PRStateStore.swift       ← @MainActor [nodeId: PRSnapshot] dict
 │   ├── PRDiffEngine.swift       ← Pure diff(previous:next:myLogin:)
 │   ├── PRPoller.swift           ← Task-based poll loop + pollOnce(); pure `carryingForward(fetched:previous:incompleteTabs:)` → `CarryForwardResult` keeps a 304 / 5xx / degraded-page tab from shrinking the diff baseline and counts what it rescued (`mainline.poll.carried_forward`); pure `droppingFinished(_:states:)` drops carried PRs GitHub reports merged/closed; `CarryForwardReason` enum; `PollCarryForwardChecks.run()` #if DEBUG
-│   ├── NotificationService.swift← UNNotificationRequest per transition; `async requestAuthorization()` (no longer discards `granted`); `authorizationState()` + pure `classify(...)` → `NotificationAuthorizationState`; `openSystemNotificationSettings()`; case-insensitive `resolveTransition` via `PRSnapshot.loginsMatch`; `NotificationRoutingChecks.run()` #if DEBUG
-│   ├── PRManager.swift          ← @MainActor orchestrator + write actions; inbox-derived populations (inboxActivePRs, inboxMutedPRs, inboxMuteConfig); currentViewPRs routes to inboxActivePRs on .inbox tab; self-healing `refreshUsername` (nonisolated fetch + `UsernameFetchError` + published `usernameError`); published `notificationAuthorization` via `refreshNotificationAuthorization()`
+│   ├── NotificationService.swift← UNNotificationRequest per transition; `async requestAuthorization()` returns `(granted, error)`; comment transitions route by role (`newReviewOrComment` on your work, `newCommentOnReviewPR` otherwise); `authorizationState()` + pure `classify(...)` → `NotificationAuthorizationState`; `openSystemNotificationSettings()`; case-insensitive `resolveTransition` via `PRSnapshot.loginsMatch`; `NotificationRoutingChecks.run()` #if DEBUG
+│   ├── PRManager.swift          ← @MainActor orchestrator + write actions; inbox-derived populations (inboxActivePRs, inboxMutedPRs, inboxMuteConfig); currentViewPRs routes to inboxActivePRs on .inbox tab; self-healing `refreshUsername` (nonisolated fetch + `UsernameFetchError` + published `usernameError`); published `notificationAuthorization` via `refreshNotificationAuthorization()`; published `notificationRequestError` (why a Settings-driven permission request was rejected)
 │   ├── SensitivePathMatcher.swift ← Pure path/branch-name heuristic classifier
 │   ├── TriageClassifier.swift   ← Pure needsHuman predicate engine
 │   ├── PRSearchFilter.swift     ← Pure search matcher (number / PR-URL / free-text); `matches(_:query:)` + `runSelfChecks()` #if DEBUG
@@ -58,7 +58,7 @@ Mainline/Mainline/                     ← Source root
 │   └── LaunchAtLoginService.swift ← SMAppService-backed launch-at-login registration (pure enum, no I/O on the main thread)
 └── Views/
     ├── MenuBarView.swift         ← MenuBarExtra panel; single actionability-grouped TriageDeckView; passes mutedPRs + inboxMode to TriageDeckView on .inbox tab; `panelBackdrop` paints the user-configurable opaque layer over the window's system material (`settings.panelBackgroundOpacity`, no-op at 0)
-    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height, panel background-opacity slider; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView; GitHub pane shows the resolved login + `usernameError`; Notifications pane shows the macOS-permission warning with a state-aware CTA (`.notDetermined` → "Enable Notifications…" calling `requestNotificationAuthorization()`; `.denied`/`.silent` → "Open System Settings…") and drives the Attention Policy list from `PREvent.deliverable`
+    ├── SettingsView.swift        ← PAT entry, gh import, toggles, write-actions, shortcut recorder, panel min/max height, panel background-opacity slider; includes `.inbox` SettingsCategory routing to InboxSettingsView and `.keyboard` routing to KeyboardShortcutsView; GitHub pane shows the resolved login + `usernameError`; Notifications pane shows the macOS-permission warning with a state-aware CTA (`.notDetermined` → "Enable Notifications…" calling `requestNotificationAuthorization()`, with a `notificationRequestError` caption beneath it; `.denied`/`.silent` → "Open System Settings…") and groups the Attention Policy list into per-role sections via `PREventGroup.events` (filters `PREvent.deliverable`)
     ├── InboxSettingsView.swift   ← Inbox noise-filter settings: Review Readiness (four reviewer "not ready → Waiting" toggles: conflict / failing CI / unresolved threads / approved-by-me, all default ON), mute patterns, muteBotAuthors toggle, per-org Review Focus (org sub-blocks nested INSIDE the one Review Focus card via `orgFocusBlock`, each with a Remove button; authors+teams keyed by lowercased org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
@@ -144,7 +144,10 @@ notifications", check them in this order — the first two used to fail silently
    "Allow" row. Requesting from the Settings window (app active → prompt shows, or an
    already-granted state resolves without one) clears it. `.denied` / `.silent` instead
    get "Open System Settings…". `requestAuthorization()` is `async` and no longer
-   discards `granted`.
+   discards `granted`; it also returns the request's `error`, which Settings shows as
+   `PRManager.notificationRequestError`. A request rejected with **no prompt** almost
+   always means a broken bundle signature — CI builds without a Developer ID must be
+   ad-hoc signed (`scripts/release-ci.sh`, see `docs/release.md`).
 2. **A `PRTransition` must exist.** `PRTransition` has only FOUR cases
    (`newPR`, `readyForReview`, `ciStatusChanged`, `newReviewOrComment`), so only the
    `PREvent`s reachable from `NotificationService.resolveTransition` can ever fire.
@@ -157,9 +160,16 @@ notifications", check them in this order — the first two used to fail silently
    PERSISTED value over `PREvent.defaults`, so changing a default never reaches a user
    who has opened the Notifications pane. Any such change needs a bump to
    `PREvent.policyMigrationVersion` plus a rule in the pure
-   `PREvent.migratedPolicy(from:)`, run once from the trailing block of
+   `PREvent.migratedPolicy(from:storedVersion:)`, run once from the trailing block of
    `MainlineSettings.init()`. v1 REMOVES a stored `reviewRequested: quiet` (removal, not
    overwrite, so future default changes also land) while preserving a deliberate `off`.
+   v2 copies a stored `newReviewOrComment` level to `newCommentOnReviewPR` (the
+   comment event was split by role — see below).
+
+The Settings pane groups the rows by `PREvent.group` (`PREventGroup`: **Your PRs** /
+**PRs You Review**, mirroring the deck's role split); `group` is exhaustive like
+`isDeliverable`. Comments are routed by role: `.newReviewOrComment` on your own work
+(`isViewersWork`), `.newCommentOnReviewPR` on anyone else's.
 
 Note `resolveTransition` routes *every* new PR you did not author to `.reviewRequested`
 (or `.reviewRequestedTeam` when only a team was requested) — so `reviewRequested`'s
@@ -227,7 +237,7 @@ functions on pure types, all invoked from `AppDelegate.applicationDidFinishLaunc
 `AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`, `StackEngineChecks.run()`,
 `PanelBackdropChecks.run()`. Add new pure logic's
 assertions to one of these (or a sibling enum in the same file) rather than introducing a
-test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:)`,
+test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:storedVersion:)`,
 `NotificationService.classify(...)` — is what makes it assertable at all.
 
 ### Write actions
@@ -474,7 +484,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `collapsedSectionsRaw` | [String] | [] — `ActionGroup` rawValues for collapsed sections, plus `"inbox:<role>:<group>"` (per-role Inbox sections) and `"stack:<id>"` (a collapsed stack card, id = bottom PR nodeId) keys; the non-`ActionGroup` keys are ignored by the typed `collapsedSections` accessor |
 | `snoozeMapData` | Data (JSON) | {} |
 | `attentionPolicy` | [String: String] (`PREvent.rawValue` → `AttentionLevel.rawValue`) | `{}` — an ABSENT key falls back to `PREvent.defaults`, where `reviewRequested` and `reviewRequestedTeam` are `.notify` / `.quiet` respectively |
-| `attentionPolicyMigrationVersion` | Int | `0` (absent) — last-applied `PREvent.policyMigrationVersion`; v1 clears a persisted `reviewRequested: quiet` |
+| `attentionPolicyMigrationVersion` | Int | `0` (absent) — last-applied `PREvent.policyMigrationVersion`; v1 clears a persisted `reviewRequested: quiet`; v2 copies `newReviewOrComment` → `newCommentOnReviewPR`. Rules are gated on the stored version so a bump never re-runs an older rule |
 | `panelHeight` | Int | 1600 |
 | `panelMinHeight` | Int | 600 |
 | `panelBackgroundOpacity` | Double | `0` — how solid the popover background is. `0` = the stock system material (translucent / "liquid glass", unchanged); `1` = an opaque `windowBackgroundColor` fill like a native menu. `MenuBarView.panelBackdrop` paints it OVER the material and UNDER the content, skipping the layer entirely at `0`. Clamped through the pure `PanelBackdrop.clamped` on load AND in the `didSet` AND at the view's read site. Slider in Settings → Appearance → Panel. |
