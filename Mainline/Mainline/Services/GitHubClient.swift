@@ -68,6 +68,14 @@ private struct GraphQLError: Decodable {
     let type: String?
 }
 
+private extension Array where Element == GraphQLError {
+    /// GitHub reports a bad, expired or under-scoped token as a FORBIDDEN error at
+    /// HTTP 200, so every query maps it onto `.unauthorized`.
+    var containsForbidden: Bool {
+        contains { ($0.type ?? "").uppercased().contains("FORBIDDEN") }
+    }
+}
+
 private struct GraphQLData: Decodable {
     let search: GraphQLSearch
 }
@@ -95,6 +103,45 @@ private struct GraphQLNodeByIdResponse: Decodable {
 
 private struct GraphQLNodeByIdData: Decodable {
     let node: GraphQLNode?
+}
+
+/// Response for the light committed-PR candidate search: just enough per node
+/// to decide `viewerIsCommitter`.
+private struct GraphQLCommittedCandidatesResponse: Decodable {
+    struct Body: Decodable { let search: Search }
+    struct Search: Decodable {
+        let pageInfo: PageInfo?
+        let nodes: [Node]
+    }
+    struct PageInfo: Decodable {
+        let hasNextPage: Bool
+        let endCursor: String?
+    }
+    struct Node: Decodable {
+        let id: String?
+        let commitAuthors: GraphQLCommitAuthors?
+    }
+    let data: Body?
+    let errors: [GraphQLError]?
+}
+
+/// Response for `nodes(ids:)` with the full PR selection. An id GitHub can no
+/// longer resolve comes back as a `null` entry plus a NOT_FOUND error.
+private struct GraphQLNodesResponse: Decodable {
+    struct Body: Decodable { let nodes: [GraphQLNode?] }
+    let data: Body?
+    let errors: [GraphQLError]?
+}
+
+/// Response for `nodes(ids:) { id state }`.
+private struct GraphQLNodeStatesResponse: Decodable {
+    struct Body: Decodable { let nodes: [Node?] }
+    struct Node: Decodable {
+        let id: String?
+        let state: String?   // OPEN | CLOSED | MERGED
+    }
+    let data: Body?
+    let errors: [GraphQLError]?
 }
 
 private struct GraphQLSearch: Decodable {
@@ -360,6 +407,166 @@ final class GitHubClient {
         }
     }
 
+    /// The viewer's open PRs among those `committedPRQuery` returns — PRs a bot
+    /// opened that carry the viewer's commits — in TWO requests: a light search for
+    /// candidate ids (`committedCandidatesQueryDocument`), then the full selection
+    /// for only the viewer's ones (`prNodesQueryDocument`).
+    ///
+    /// One request with the full selection used to time out: the search returns
+    /// every PR the bot opened for ANYONE (well over 100 for a busy org bot), and
+    /// the heavy fan-out on all of them sat past GitHub's budget, so nearly every
+    /// poll fell back to the half-size retry. That degraded page made the poller
+    /// carry the bot's previous PRs forward indefinitely — including ones that had
+    /// since merged, which an `is:open` search can never return to clear them.
+    ///
+    /// `degraded` keeps `searchPRs`' contract: true when the candidate search only
+    /// got the reduced-page retry through, stopped at `committedSearchMaxPages`
+    /// with results unread, or when some candidate could not be fetched in step 2. Either way the result is a subset and the caller must
+    /// carry the missing PRs forward. No ETag: this endpoint is POST-only GraphQL.
+    func searchCommittedPRs(
+        query: String,
+        token: String,
+        tab: ReviewTab,
+        telemetryQueryType: String
+    ) async throws -> (snapshots: [PRSnapshot], degraded: Bool) {
+        let myLogin = settings.githubUsername.lowercased()
+        var degraded = false
+        let candidates: (ids: [String], complete: Bool)
+        do {
+            candidates = try await committedCandidateIds(query: query, first: Self.searchPageSize, myLogin: myLogin, token: token)
+        } catch GitHubAPIError.serverError(let code) {
+            try await Task.sleep(nanoseconds: Self.searchRetryDelayNanos)
+            candidates = try await committedCandidateIds(query: query, first: Self.searchPageSizeDegraded, myLogin: myLogin, token: token)
+            TelemetryService.shared.recordPollServerErrorRecovered(
+                queryType: telemetryQueryType,
+                statusCode: code
+            )
+            degraded = true
+        }
+        // Results left unread past the page cap are a subset, exactly like a
+        // degraded page: the caller must carry the rest forward, not drop them.
+        if !candidates.complete { degraded = true }
+        let ids = candidates.ids
+        guard !ids.isEmpty else { return ([], degraded) }
+
+        var snapshots: [PRSnapshot] = []
+        for chunk in Self.chunked(ids, size: Self.nodesPerRequest) {
+            let data = try await postGraphQL(Self.prNodesQueryDocument, variables: ["ids": chunk], token: token)
+            let decoded = try decodeGraphQL(GraphQLNodesResponse.self, from: data)
+            if let errors = decoded.errors, !errors.isEmpty {
+                if errors.containsForbidden {
+                    throw GitHubAPIError.unauthorized
+                }
+                // A partial answer (e.g. one id NOT_FOUND) is still an answer —
+                // but it is not the whole set.
+                degraded = true
+            }
+            guard let nodes = decoded.data?.nodes else { throw GitHubAPIError.unknown(200) }
+            snapshots += nodes.compactMap { node in
+                node.flatMap { Self.makeSnapshot(from: $0, tab: tab, myLogin: myLogin) }
+            }
+        }
+        return (snapshots, degraded)
+    }
+
+    /// Step 1 of `searchCommittedPRs`: node ids of the search results the viewer
+    /// committed to, in result order, paging through up to
+    /// `committedSearchMaxPages` pages. `complete` is false when results were
+    /// left unread at the cap.
+    private func committedCandidateIds(
+        query: String,
+        first: Int,
+        myLogin: String,
+        token: String
+    ) async throws -> (ids: [String], complete: Bool) {
+        var ids: [String] = []
+        var cursor: String?
+        for _ in 0..<Self.committedSearchMaxPages {
+            var variables: [String: Any] = ["q": query, "first": first]
+            if let cursor { variables["after"] = cursor }
+            let data = try await postGraphQL(Self.committedCandidatesQueryDocument, variables: variables, token: token)
+            let decoded = try decodeGraphQL(GraphQLCommittedCandidatesResponse.self, from: data)
+            if let errors = decoded.errors, !errors.isEmpty {
+                if errors.containsForbidden {
+                    throw GitHubAPIError.unauthorized
+                }
+                throw GitHubAPIError.unknown(200)
+            }
+            guard let search = decoded.data?.search else { return (ids, true) }
+            ids += search.nodes.compactMap { node in
+                guard let id = node.id,
+                      node.commitAuthors?.logins.contains(where: { PRSnapshot.loginsMatch($0, myLogin) }) == true
+                else { return nil }
+                return id
+            }
+            guard search.pageInfo?.hasNextPage == true, let next = search.pageInfo?.endCursor else {
+                return (ids, true)
+            }
+            cursor = next
+        }
+        return (ids, false)
+    }
+
+    /// The current lifecycle state (`OPEN` / `CLOSED` / `MERGED`) of each PR,
+    /// keyed by node id — the cheapest possible selection, used to vet PRs the
+    /// poller is about to carry forward unchanged (`PRPoller.droppingFinished`).
+    /// An id GitHub can't resolve is simply ABSENT from the result: "unknown" must
+    /// never be read as "finished".
+    func fetchPRStates(nodeIds: [String], token: String) async throws -> [String: String] {
+        var states: [String: String] = [:]
+        for chunk in Self.chunked(nodeIds, size: Self.nodesPerRequest) {
+            let data = try await postGraphQL(Self.prStatesQueryDocument, variables: ["ids": chunk], token: token)
+            let decoded = try decodeGraphQL(GraphQLNodeStatesResponse.self, from: data)
+            // Per-id NOT_FOUND errors arrive alongside the data; only the data matters.
+            for case let node? in decoded.data?.nodes ?? [] {
+                if let id = node.id, let state = node.state { states[id] = state }
+            }
+        }
+        return states
+    }
+
+    private static func chunked(_ ids: [String], size: Int) -> [[String]] {
+        stride(from: 0, to: ids.count, by: size).map { Array(ids[$0..<min($0 + size, ids.count)]) }
+    }
+
+    /// POSTs a GraphQL query and returns the body of a 200, mapping transport and
+    /// HTTP failures onto `GitHubAPIError` the way every query here does. GraphQL
+    /// `errors` are left to the caller — whether they are fatal depends on the query.
+    private func postGraphQL(_ document: String, variables: [String: Any], token: String) async throws -> Data {
+        guard let url = URL(string: "https://api.github.com/graphql"),
+              let body = try? JSONSerialization.data(withJSONObject: ["query": document, "variables": variables])
+        else {
+            throw GitHubAPIError.unknown(0)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
+
+        try checkRateLimit(http)
+
+        switch http.statusCode {
+        case 200:       return data
+        case 401:       throw GitHubAPIError.unauthorized
+        case 500...599: throw GitHubAPIError.serverError(http.statusCode)
+        default:        throw GitHubAPIError.unknown(http.statusCode)
+        }
+    }
+
+    private func decodeGraphQL<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            throw GitHubAPIError.decodingError(error)
+        }
+    }
+
     /// Shared GraphQL search executor backing both `searchPRs` (open, first: 100)
     /// and `searchDonePRs` (completed, first: 30). `etagPrefix` keeps the two
     /// caches distinct so an open 304 can't suppress a Done fetch (and vice versa).
@@ -430,7 +637,7 @@ final class GitHubClient {
 
         // A bad/expired token can return 200 with a top-level errors array.
         if let errors = decoded.errors, !errors.isEmpty {
-            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+            if errors.containsForbidden {
                 throw GitHubAPIError.unauthorized
             }
             throw GitHubAPIError.unknown(200)
@@ -502,7 +709,7 @@ final class GitHubClient {
         }
 
         if let errors = decoded.errors, !errors.isEmpty {
-            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+            if errors.containsForbidden {
                 throw GitHubAPIError.unauthorized
             }
             // A NOT_FOUND (wrong repo/number, or no access) is not an error worth
@@ -560,7 +767,7 @@ final class GitHubClient {
         }
 
         if let errors = decoded.errors, !errors.isEmpty {
-            if errors.contains(where: { ($0.type ?? "").uppercased().contains("FORBIDDEN") }) {
+            if errors.containsForbidden {
                 throw GitHubAPIError.unauthorized
             }
             return nil
@@ -786,6 +993,13 @@ final class GitHubClient {
             }
           }
         }
+        \(commitAuthorsField)
+    """
+
+    /// The sampled commit authors behind `viewerIsCommitter`. Shared by
+    /// `prNodeFields` and the light committed-PR candidate search, so the two can
+    /// never disagree about which PRs count as the viewer's.
+    private static let commitAuthorsField = """
         commitAuthors: commits(first: 10) {
           nodes { commit { authors(first: 3) { nodes { user { login } } } } }
         }
@@ -830,6 +1044,55 @@ final class GitHubClient {
       }
     }
     """
+
+    /// Step 1 of `searchCommittedPRs`: the bot-wide search, selecting ONLY what
+    /// `viewerIsCommitter` needs. The full `prNodeFields` page over every PR a bot
+    /// opened (for everyone, not just the viewer) blew GitHub's time budget at 100
+    /// nodes — and at ~3x the cost of this selection, the 50-node retry was the
+    /// best it ever did.
+    private static let committedCandidatesQueryDocument = """
+    query($q: String!, $first: Int!, $after: String) {
+      search(query: $q, type: ISSUE, first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          ... on PullRequest {
+            id
+            \(commitAuthorsField)
+          }
+        }
+      }
+    }
+    """
+
+    /// Step 2 of `searchCommittedPRs`: the full field selection, for the viewer's
+    /// PRs only.
+    private static let prNodesQueryDocument = """
+    query($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on PullRequest {
+          \(prNodeFields)
+        }
+      }
+    }
+    """
+
+    /// Just the lifecycle state of a set of PRs — see `fetchPRStates`.
+    private static let prStatesQueryDocument = """
+    query($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on PullRequest { id state }
+      }
+    }
+    """
+
+    /// Most candidate-search pages `searchCommittedPRs` reads per poll. A busy org
+    /// bot has well over one page of open PRs (128 for `dash0-dev` when this was
+    /// written) and the viewer's PRs can sit anywhere in it, so one page is not the
+    /// whole set; past this cap the result is reported incomplete instead.
+    static let committedSearchMaxPages = 5
+
+    /// GitHub's cap on `nodes(ids:)` per request.
+    static let nodesPerRequest = 100
 
     // MARK: - Fetch files (REST)
 
