@@ -1569,7 +1569,7 @@ final class MainlineSettings: ObservableObject {
         }
 
         // One-time upgrade of the persisted attention policy to the current
-        // version (see `PREvent.migratedPolicy(from:)` for the per-version rules).
+        // version (see `PREvent.migratedPolicy(from:storedVersion:)` for the per-version rules).
         // `level(for:)` honours a stored value over the baked-in default, so a
         // default change alone never reaches a user who has opened the
         // Notifications pane — this is what makes the new default actually land.

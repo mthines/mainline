@@ -137,7 +137,7 @@ extension PREvent {
         // unreachable for anyone but yourself. It was also incoherent with
         // `.readyForReview` (`.notify`), which the diff engine emits when a review
         // is requested on an ALREADY-tracked PR: known PRs rang, brand-new ones
-        // were silent. Existing users are upgraded once by `migratedPolicy(from:)`.
+        // were silent. Existing users are upgraded once by `migratedPolicy(from:storedVersion:)`.
         .reviewRequested:    .notify,
         .reviewRequestedTeam: .quiet,   // team pulled it in — legitimately lower signal
         .ciFailedOnMyPR:     .notify,
@@ -157,7 +157,7 @@ extension PREvent {
 extension PREvent {
     /// Current version of the persisted `attentionPolicy` dictionary shape.
     ///
-    /// Bump this (and extend `migratedPolicy(from:)`) whenever a change to
+    /// Bump this (and extend `migratedPolicy(from:storedVersion:)`) whenever a change to
     /// `defaults` needs to reach users who already have a value on disk.
     /// `MainlineSettings` stores the last-applied version under
     /// `Keys.attentionPolicyMigrationVersion` and runs the upgrade exactly once.
@@ -187,7 +187,7 @@ extension PREvent {
     /// Each rule is gated on `storedVersion` so a bump re-runs only the NEW
     /// rules: re-running v1 for a user already at v1 would delete a
     /// `reviewRequested: quiet` they chose deliberately after the upgrade.
-    static func migratedPolicy(from stored: [String: String], storedVersion: Int = 0) -> [String: String] {
+    static func migratedPolicy(from stored: [String: String], storedVersion: Int) -> [String: String] {
         var next = stored
 
         // v1 — reviewRequested: quiet (the old default) → follow the new default.
@@ -235,34 +235,34 @@ enum AttentionPolicyChecks {
         let rr = PREvent.reviewRequested.rawValue
 
         // A stored old default is removed, so `level(for:)` falls through to .notify.
-        assert(PREvent.migratedPolicy(from: [rr: "quiet"])[rr] == nil,
+        assert(PREvent.migratedPolicy(from: [rr: "quiet"], storedVersion: 0)[rr] == nil,
                "migration must clear a stored reviewRequested:quiet")
         // A deliberate silence is preserved.
-        assert(PREvent.migratedPolicy(from: [rr: "off"])[rr] == "off",
+        assert(PREvent.migratedPolicy(from: [rr: "off"], storedVersion: 0)[rr] == "off",
                "migration must preserve a deliberate reviewRequested:off")
         // An explicit notify is already correct and stays put.
-        assert(PREvent.migratedPolicy(from: [rr: "notify"])[rr] == "notify",
+        assert(PREvent.migratedPolicy(from: [rr: "notify"], storedVersion: 0)[rr] == "notify",
                "migration must preserve an explicit reviewRequested:notify")
         // Other events are untouched, including ones whose default IS quiet.
         let other = PREvent.ciPassedOnMyPR.rawValue
-        let mixed = PREvent.migratedPolicy(from: [rr: "quiet", other: "quiet"])
+        let mixed = PREvent.migratedPolicy(from: [rr: "quiet", other: "quiet"], storedVersion: 0)
         assert(mixed[other] == "quiet", "migration must not touch other events")
         assert(mixed[rr] == nil, "migration must still clear reviewRequested in a mixed dict")
         // Empty in, empty out — a fresh install migrates to a no-op.
-        assert(PREvent.migratedPolicy(from: [:]).isEmpty,
+        assert(PREvent.migratedPolicy(from: [:], storedVersion: 0).isEmpty,
                "migration of an empty policy must stay empty")
         // Idempotent: re-running over its own output changes nothing.
-        let once = PREvent.migratedPolicy(from: [rr: "quiet", other: "off"])
-        assert(PREvent.migratedPolicy(from: once) == once, "migration must be idempotent")
+        let once = PREvent.migratedPolicy(from: [rr: "quiet", other: "off"], storedVersion: 0)
+        assert(PREvent.migratedPolicy(from: once, storedVersion: 0) == once, "migration must be idempotent")
 
         // v2 — the reviewer comment event inherits the legacy level, once.
         let nrc = PREvent.newReviewOrComment.rawValue
         let ncr = PREvent.newCommentOnReviewPR.rawValue
-        assert(PREvent.migratedPolicy(from: [nrc: "off"])[ncr] == "off",
+        assert(PREvent.migratedPolicy(from: [nrc: "off"], storedVersion: 0)[ncr] == "off",
                "v2 must copy a silenced comment level to the reviewer event")
-        assert(PREvent.migratedPolicy(from: [nrc: "off", ncr: "notify"])[ncr] == "notify",
+        assert(PREvent.migratedPolicy(from: [nrc: "off", ncr: "notify"], storedVersion: 0)[ncr] == "notify",
                "v2 must not overwrite an explicit reviewer comment level")
-        assert(PREvent.migratedPolicy(from: [nrc: "quiet"])[nrc] == "quiet",
+        assert(PREvent.migratedPolicy(from: [nrc: "quiet"], storedVersion: 0)[nrc] == "quiet",
                "v2 must keep the legacy key's own value")
 
         // A version bump re-runs only newer rules: a user already at v1 who
@@ -272,7 +272,7 @@ enum AttentionPolicyChecks {
         assert(PREvent.migratedPolicy(from: [nrc: "off"], storedVersion: 2)[ncr] == nil,
                "v2 must not re-run for a user already at v2")
 
-                // MARK: Groups — every deliverable row lands in exactly one section.
+        // MARK: Groups — every deliverable row lands in exactly one section.
         assert(PREventGroup.allCases.flatMap(\.events).count == PREvent.deliverable.count,
                "every deliverable event must appear in exactly one group")
         assert(PREvent.ciFailedOnMyPR.group == .yourPRs, "CI events are your-PR events")

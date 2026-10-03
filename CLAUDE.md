@@ -36,7 +36,7 @@ Mainline/Mainline/                     ← Source root
 ├── Models/
 │   ├── PRSnapshot.swift         ← Canonical diff unit (one per PR); mergeable+headRefName+lines fields; `viewerHasApproved` (viewer's own latest review == APPROVED, from GraphQL `latestReviews`); `viewerIsCommitter` (viewer authored/co-authored one of the first 10 commits, from aliased GraphQL `commitAuthors`); `CommittedPRPlacement` enum; role-aware `actionGroup(splitDrafts:myLogin:reviewReady:)` + `needsMyTime(...)` + `ReviewReadyConfig`; `PRClassificationChecks.run()` #if DEBUG
 │   ├── PRTransition.swift       ← Output of diff engine (4 cases)
-│   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); `.defaults` (reviewRequested = notify); `isDeliverable`/`deliverable` SSOT for which events can actually fire; pure `migratedPolicy(from:)` + `policyMigrationVersion` for persisted-policy upgrades; `AttentionPolicyChecks.run()` #if DEBUG
+│   ├── AttentionPolicy.swift    ← PREvent → AttentionLevel map (notify/quiet); `.defaults` (reviewRequested = notify); `isDeliverable`/`deliverable` SSOT for which events can actually fire; pure `migratedPolicy(from:storedVersion:)` + `policyMigrationVersion` for persisted-policy upgrades; `AttentionPolicyChecks.run()` #if DEBUG
 │   └── MainlineSettings.swift      ← UserDefaults-backed settings + global-shortcut defaults; `InAppShortcut` enum + `ShortcutBinding` value type + `InAppShortcutBindings` custom-Codable struct for configurable deck/peek shortcuts (supports modifier combos ⌘⇧⌃⌥ per binding); `launchAtLogin` (SMAppService-backed launch-at-login toggle); pure `PanelBackdrop` (clamp + label for `panelBackgroundOpacity`) + `PanelBackdropChecks.run()` #if DEBUG
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor); account-parameterized
@@ -151,7 +151,7 @@ notifications", check them in this order — the first two used to fail silently
    PERSISTED value over `PREvent.defaults`, so changing a default never reaches a user
    who has opened the Notifications pane. Any such change needs a bump to
    `PREvent.policyMigrationVersion` plus a rule in the pure
-   `PREvent.migratedPolicy(from:)`, run once from the trailing block of
+   `PREvent.migratedPolicy(from:storedVersion:)`, run once from the trailing block of
    `MainlineSettings.init()`. v1 REMOVES a stored `reviewRequested: quiet` (removal, not
    overwrite, so future default changes also land) while preserving a deliberate `off`.
    v2 copies a stored `newReviewOrComment` level to `newCommentOnReviewPR` (the
@@ -228,7 +228,7 @@ functions on pure types, all invoked from `AppDelegate.applicationDidFinishLaunc
 `AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`, `StackEngineChecks.run()`,
 `PanelBackdropChecks.run()`. Add new pure logic's
 assertions to one of these (or a sibling enum in the same file) rather than introducing a
-test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:)`,
+test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:storedVersion:)`,
 `NotificationService.classify(...)` — is what makes it assertable at all.
 
 ### Write actions
