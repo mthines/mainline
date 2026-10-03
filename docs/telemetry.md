@@ -87,6 +87,7 @@ telemetry silently does nothing (correct for dev builds without the token).
 | `mainline.poll.etag_hits`          | counter   | `poll.query_type`                                        |
 | `mainline.poll.errors`             | counter   | `poll.query_type`, `error.type`, `poll.recovered`        |
 | `mainline.poll.carried_forward`    | counter   | `poll.carry_forward_reason`                              |
+| `mainline.poll.carried_forward_dropped` | counter | —                                                     |
 | `mainline.write_actions`           | counter   | `write.action`, `write.result`, `write.merge_method`     |
 | `mainline.triage_interactions`     | counter   | `interaction.type`                                       |
 | `mainline.notifications.fired`     | counter   | `notification.event_type`, `notification.attention_level`|

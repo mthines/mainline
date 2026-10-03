@@ -16,13 +16,18 @@ enum CarryForwardReason: String, Equatable {
     case degradedPage = "degraded_page"
 }
 
-/// The merged snapshot array plus how many PRs the carry-forward rescued, split by
-/// reason. The counts feed `TelemetryService.recordPRsCarriedForward`; each PR is
-/// counted exactly ONCE, so the total is a true PR count rather than a per-tab tally
-/// that double-counts anything sitting in both tabs.
+/// The merged snapshot array plus which PRs the carry-forward rescued, and why.
+/// The counts feed `TelemetryService.recordPRsCarriedForward`; each PR is counted
+/// exactly ONCE, so the total is a true PR count rather than a per-tab tally that
+/// double-counts anything sitting in both tabs.
 struct CarryForwardResult: Equatable {
     var snapshots: [PRSnapshot]
-    var carriedByReason: [String: Int]
+    /// nodeId → why it was carried. Fetched PRs never appear here.
+    var carriedReasons: [String: CarryForwardReason]
+
+    var carriedByReason: [String: Int] {
+        carriedReasons.values.reduce(into: [:]) { $0[$1.rawValue, default: 0] += 1 }
+    }
 }
 
 /// Task-based poll loop. Cancels cleanly via `stop()`.
@@ -124,11 +129,11 @@ final class PRPoller {
         committedQueryTab: ReviewTab? = nil
     ) -> CarryForwardResult {
         guard !incompleteTabs.isEmpty || incompleteCommittedQuery != nil else {
-            return CarryForwardResult(snapshots: fetched, carriedByReason: [:])
+            return CarryForwardResult(snapshots: fetched, carriedReasons: [:])
         }
 
         var result = fetched
-        var carriedByReason: [String: Int] = [:]
+        var carriedReasons: [String: CarryForwardReason] = [:]
         let fetchedIds = Set(fetched.map(\.nodeId))
         // Sorted for determinism: the store is a dictionary, and an unordered
         // carry-forward would make the merged array's order vary between runs.
@@ -151,9 +156,39 @@ final class PRPoller {
             // the iteration order of `snapshot.tabs` (a Set).
             let reason: CarryForwardReason = reasons.contains(.degradedPage) ? .degradedPage : .noData
             result.append(snapshot)
-            carriedByReason[reason.rawValue, default: 0] += 1
+            carriedReasons[snapshot.nodeId] = reason
         }
-        return CarryForwardResult(snapshots: result, carriedByReason: carriedByReason)
+        return CarryForwardResult(snapshots: result, carriedReasons: carriedReasons)
+    }
+
+    /// Removes carried-forward PRs that GitHub now reports as MERGED or CLOSED.
+    ///
+    /// Carrying forward is blind by design — it re-adds the last known snapshot of
+    /// anything an incomplete fetch didn't return. But the open-PR searches can
+    /// never return a PR that has since finished, so if the same query stays
+    /// incomplete poll after poll (a bot query that only ever got its half-size
+    /// retry through did exactly that), a merged PR is carried forever, frozen as
+    /// "open". `states` comes from one cheap `GitHubClient.fetchPRStates` lookup of
+    /// the carried ids; a finished PR is dropped exactly as a complete poll would
+    /// have dropped it. Dropping fires nothing — `PRDiffEngine` only diffs PRs that
+    /// are present.
+    ///
+    /// Only CARRIED PRs are vetted: a fetched PR is fresh by definition. A carried
+    /// PR with no reported state (lookup failed, node unresolvable) is KEPT —
+    /// unknown is not finished, and dropping it would re-notify it as `.newPR`
+    /// once it reappears.
+    nonisolated static func droppingFinished(
+        _ result: CarryForwardResult,
+        states: [String: String]
+    ) -> (result: CarryForwardResult, dropped: Int) {
+        let finished = Set(result.carriedReasons.keys.filter { id in
+            states[id].map { $0.uppercased() != "OPEN" } ?? false
+        })
+        guard !finished.isEmpty else { return (result, 0) }
+        var pruned = result
+        pruned.snapshots.removeAll { finished.contains($0.nodeId) }
+        for id in finished { pruned.carriedReasons[id] = nil }
+        return (pruned, finished.count)
     }
 
     // MARK: - Committed-PR bot query (pure)
@@ -257,9 +292,21 @@ final class PRPoller {
             TelemetryService.shared.recordPollStarted(queryType: queryType)
 
             do {
-                let (snapshots, _, degraded) = try await client.searchPRs(
-                    query: query, token: token, tab: tab, telemetryQueryType: queryType
-                )
+                // The bot query has its own two-step fetch: the single full-field
+                // search over every PR a bot opened timed out (see
+                // `GitHubClient.searchCommittedPRs`).
+                let page: (snapshots: [PRSnapshot], degraded: Bool)
+                if isCommittedQuery {
+                    page = try await client.searchCommittedPRs(
+                        query: query, token: token, tab: tab, telemetryQueryType: queryType
+                    )
+                } else {
+                    let search = try await client.searchPRs(
+                        query: query, token: token, tab: tab, telemetryQueryType: queryType
+                    )
+                    page = (search.snapshots, search.degraded)
+                }
+                let (snapshots, degraded) = page
                 let duration = Date().timeIntervalSince(pollStart)
                 TelemetryService.shared.recordPollCompleted(
                     queryType: queryType,
@@ -360,7 +407,7 @@ final class PRPoller {
         // Carry forward the last known snapshots for any tab whose result set was
         // incomplete this cycle, so a failed, unchanged or half-size query never
         // empties — or silently truncates — that tab's list.
-        let carryForward = Self.carryingForward(
+        var carryForward = Self.carryingForward(
             fetched: allSnapshots,
             previous: store.snapshots,
             incompleteTabs: incompleteTabs,
@@ -368,6 +415,18 @@ final class PRPoller {
             committedBotAuthors: committedBotAuthors,
             committedQueryTab: committedQueryTab
         )
+        // Vet what was just carried: a PR that has since merged or closed can't come
+        // back through an open-PR search, so without this it stays carried — frozen
+        // as open — for as long as its query keeps coming back incomplete. A failed
+        // lookup keeps everything (the pre-vetting behavior); it never blocks a poll.
+        if !carryForward.carriedReasons.isEmpty,
+           let states = try? await client.fetchPRStates(
+               nodeIds: carryForward.carriedReasons.keys.sorted(), token: token
+           ) {
+            let vetted = Self.droppingFinished(carryForward, states: states)
+            carryForward = vetted.result
+            TelemetryService.shared.recordCarriedForwardFinishedDropped(count: vetted.dropped)
+        }
         allSnapshots = carryForward.snapshots
 
         // Count what the guard just rescued. Every PR here is one that would
@@ -697,6 +756,38 @@ enum PollCarryForwardChecks {
         )
         assert(author304.snapshots.map(\.nodeId) == ["authored"],
                "a regular-query 304 never carries a committed bot PR on the shared tab")
+
+        // MARK: Vetting carried PRs (`droppingFinished`)
+        // The stale-merged-PR bug: the bot query only ever got its degraded page
+        // through, so every merged bot PR was carried forward forever.
+        let merged = pr("merged", tabs: [.created], author: "dash0-dev", viewerIsCommitter: true)
+        let closed = pr("closed", tabs: [.created], author: "dash0-dev", viewerIsCommitter: true)
+        let fresh = pr("fresh", tabs: [.created], author: "dash0-dev", viewerIsCommitter: true)
+        let carried = PRPoller.carryingForward(
+            fetched: [fresh], previous: store([fresh, mine, merged, closed]), incompleteTabs: [:],
+            incompleteCommittedQuery: .degradedPage, committedBotAuthors: bots
+        )
+        assert(carried.carriedByReason == ["degraded_page": 3], "precondition: the degraded page carries all three")
+
+        let vetted = PRPoller.droppingFinished(carried, states: [
+            "fresh": "MERGED",   // fetched, so never vetted — a fetched PR is fresh by definition
+            "mine": "OPEN",
+            "merged": "MERGED",
+            "closed": "CLOSED",
+        ])
+        assert(vetted.result.snapshots.map(\.nodeId) == ["fresh", "mine"],
+               "a carried PR GitHub reports merged/closed is dropped; open and fetched PRs stay")
+        assert(vetted.dropped == 2, "both finished PRs are counted")
+        assert(vetted.result.carriedByReason == ["degraded_page": 1],
+               "the carried count only covers PRs still carried")
+
+        // Unknown is not finished: a failed or partial state lookup keeps the PR,
+        // because dropping it would re-notify it as `.newPR` when it reappears.
+        let unknown = PRPoller.droppingFinished(carried, states: ["merged": "MERGED"])
+        assert(Set(unknown.result.snapshots.map(\.nodeId)) == ["fresh", "mine", "closed"],
+               "a carried PR with no reported state is kept")
+        assert(PRPoller.droppingFinished(carried, states: [:]).result == carried,
+               "no states → the carry-forward is untouched")
     }
 }
 #endif

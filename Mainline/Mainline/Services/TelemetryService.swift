@@ -83,6 +83,7 @@ final class TelemetryService {
     private var pollEtagHitsCounter: LongCounterSdk?
     private var pollErrorsCounter: LongCounterSdk?
     private var pollCarriedForwardCounter: LongCounterSdk?
+    private var pollCarriedForwardDroppedCounter: LongCounterSdk?
     private var appLaunchCounter: LongCounterSdk?
     private var writeActionsCounter: LongCounterSdk?
     private var triageInteractionsCounter: LongCounterSdk?
@@ -220,6 +221,12 @@ final class TelemetryService {
         pollCarriedForwardCounter = meter
             .counterBuilder(name: "mainline.poll.carried_forward")
             .setDescription("Number of PRs carried forward because a tab's fetch was incomplete")
+            .setUnit("1")
+            .build()
+
+        pollCarriedForwardDroppedCounter = meter
+            .counterBuilder(name: "mainline.poll.carried_forward_dropped")
+            .setDescription("Number of carried-forward PRs dropped because GitHub reported them merged or closed")
             .setUnit("1")
             .build()
 
@@ -514,6 +521,22 @@ final class TelemetryService {
         pollCarriedForwardCounter?.add(value: count, attribute: [
             "poll.carry_forward_reason": .string(reason),
         ])
+    }
+
+    /// Record PRs removed from a carry-forward because GitHub reported them MERGED
+    /// or CLOSED (`PRPoller.droppingFinished`).
+    ///
+    /// Each one is a PR that would otherwise have stayed on screen as a stale "open"
+    /// row. A steady trickle is normal (PRs finish while a query is incomplete); a
+    /// sustained high rate means some query is incomplete on most polls — check
+    /// `mainline.poll.errors{poll.recovered="true"}` for the query type that keeps
+    /// falling back to its half-size retry.
+    func recordCarriedForwardFinishedDropped(count: Int) {
+        guard count > 0 else { return }
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+
+        pollCarriedForwardDroppedCounter?.add(value: count, attribute: [:])
     }
 
     // MARK: - Write Actions
