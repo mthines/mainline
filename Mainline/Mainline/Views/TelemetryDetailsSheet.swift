@@ -16,7 +16,7 @@ struct TelemetryDetailsSheet: View {
                     items: [
                         "Whether a GitHub poll succeeded, returned 304, or failed — and how long it took",
                         "Error categories — e.g. \"rate_limited\", \"server_error\" (never the raw message)",
-                        "Write actions — approve, merge, request changes — action type and result only",
+                        "Write actions — approve, merge, request changes, draft state, close, reopen — action type and result only",
                         "Triage interactions — snooze, tab switches, scope changes, shortcut usage",
                         "Notification counts by event type and attention level",
                         "App launch count and session duration",

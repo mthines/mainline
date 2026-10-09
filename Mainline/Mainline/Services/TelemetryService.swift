@@ -238,7 +238,7 @@ final class TelemetryService {
 
         writeActionsCounter = meter
             .counterBuilder(name: "mainline.write_actions")
-            .setDescription("Number of write actions (approve/merge/request changes)")
+            .setDescription("Number of write actions (approve/merge/request changes/mark ready/convert to draft/close/reopen)")
             .setUnit("1")
             .build()
 

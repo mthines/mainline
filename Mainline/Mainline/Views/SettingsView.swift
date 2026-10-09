@@ -254,7 +254,10 @@ struct SettingsView: View {
         }
 
         Section("Write Actions") {
-            Toggle("Enable write actions (Approve, Merge, Request Changes, Close)", isOn: tracked(\.writeActionsEnabled, name: "writeActionsEnabled"))
+            Toggle("Enable write actions", isOn: tracked(\.writeActionsEnabled, name: "writeActionsEnabled"))
+            Label("Lets Mainline approve, merge, request changes, mark ready or convert to draft, and close or reopen PRs on GitHub. Each asks for confirmation, except the draft-state pair.", systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             if settings.writeActionsEnabled {
                 Picker("Merge method", selection: $settings.mergeMethodPreference) {
                     ForEach(MergeMethodPreference.allCases) { method in
