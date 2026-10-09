@@ -10,7 +10,7 @@ Write actions are disabled until you enable them.
 1. Open **Settings** → **GitHub**.
 2. Turn on **Enable write actions**.
 
-While write actions are off, `M` shows a reminder alert instead of acting, and the menu's write items are greyed out.
+While write actions are off, `M` (on a ready-to-merge PR) and `T` (on a draft) show a reminder alert instead of acting, and the menu's write items are greyed out.
 
 ## The actions
 
