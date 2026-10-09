@@ -10,6 +10,9 @@ enum WriteAction {
     case merge(PRSnapshot)
     case requestChanges(PRSnapshot)
     case markReady(PRSnapshot)
+    case convertToDraft(PRSnapshot)
+    case close(PRSnapshot)
+    case reopen(PRSnapshot)
     case snooze(PRSnapshot, until: Date)
     case unsnooze(PRSnapshot)
     case markSeen(PRSnapshot)
@@ -1219,6 +1222,75 @@ final class PRManager: ObservableObject {
                     failureCategory: "api_error"
                 )
                 Self.presentActionFailure("Mark ready failed", error: error)
+            }
+
+        case .convertToDraft(let pr):
+            let actionStart = Date()
+            do {
+                try await client.convertToDraft(nodeId: pr.nodeId, token: token)
+                TelemetryService.shared.recordWriteAction(
+                    "convert_to_draft",
+                    mergeMethod: nil,
+                    result: "success",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: nil
+                )
+            } catch {
+                statusMessage = "Convert to draft failed: \(error.localizedDescription)"
+                TelemetryService.shared.recordWriteAction(
+                    "convert_to_draft",
+                    mergeMethod: nil,
+                    result: "failure",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: "api_error"
+                )
+                Self.presentActionFailure("Convert to draft failed", error: error)
+            }
+
+        case .close(let pr):
+            let actionStart = Date()
+            do {
+                try await client.closePR(nodeId: pr.nodeId, token: token)
+                TelemetryService.shared.recordWriteAction(
+                    "close",
+                    mergeMethod: nil,
+                    result: "success",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: nil
+                )
+            } catch {
+                statusMessage = "Close failed: \(error.localizedDescription)"
+                TelemetryService.shared.recordWriteAction(
+                    "close",
+                    mergeMethod: nil,
+                    result: "failure",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: "api_error"
+                )
+                Self.presentActionFailure("Close failed", error: error)
+            }
+
+        case .reopen(let pr):
+            let actionStart = Date()
+            do {
+                try await client.reopenPR(nodeId: pr.nodeId, token: token)
+                TelemetryService.shared.recordWriteAction(
+                    "reopen",
+                    mergeMethod: nil,
+                    result: "success",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: nil
+                )
+            } catch {
+                statusMessage = "Reopen failed: \(error.localizedDescription)"
+                TelemetryService.shared.recordWriteAction(
+                    "reopen",
+                    mergeMethod: nil,
+                    result: "failure",
+                    duration: Date().timeIntervalSince(actionStart),
+                    failureCategory: "api_error"
+                )
+                Self.presentActionFailure("Reopen failed", error: error)
             }
 
         case .snooze, .unsnooze, .markSeen, .dismiss:

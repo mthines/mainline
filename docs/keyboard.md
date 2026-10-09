@@ -62,20 +62,30 @@ Postponing a PR also mutes its notifications for good — see [Notifications →
 `⌘Z` reverses the last triage action, including postpone, dismiss, and mark-seen.
 Undone actions stack a batched toast so you can see what reverted.
 
-## Approve and request changes
+## Approve, request changes, and close
 
-Approve and request changes have no default key.
+Approve, request changes, convert to draft, close, and reopen have no default key.
 They live in the row menu — right-click a PR — because they change state on GitHub.
-Merge is on the menu too, and also on the `M` key.
+Merge is on the menu too, and also on the `M` key; mark ready is on the menu and the `T` key.
 
-All three need write actions turned on.
+All of them need write actions turned on.
 See [Write actions](./actions.md).
 
 ## The row menu
 
 Right-click any PR row to open its menu.
-The menu carries every action for that PR — approve, merge, request changes, snooze durations, mark seen, dismiss, view details, open, open preview, and mute.
+The menu carries every action for that PR, in this order:
+
+1. **GitHub write actions** — approve, merge, request changes, and mark ready for review (drafts) or convert to draft (open, non-draft PRs).
+2. **Triage** — later (every snooze duration), mark seen, dismiss, and mute (Inbox only).
+3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), and pin / unpin.
+4. **Copy** — copy link (the GitHub URL) and copy branch name.
+5. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
+
 The "open" item follows your open target, so it reads **Open in Linear** when Linear is configured.
+
+Postponed rows have the same menu, with **Resume** in place of **Later**.
+Rows in **Done** have a shorter menu: open, open on GitHub, copy link, copy branch name, and — for a PR closed without merging — reopen.
 
 ## Global shortcut
 

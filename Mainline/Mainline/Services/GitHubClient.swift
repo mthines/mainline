@@ -1412,6 +1412,95 @@ final class GitHubClient {
         )
     }
 
+    // MARK: - Convert to Draft mutation
+
+    private static let convertPullRequestToDraftMutation = """
+    mutation($pullRequestId: ID!) {
+      convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
+        pullRequest { isDraft }
+      }
+    }
+    """
+
+    struct ConvertToDraftMutationResponse: Decodable {
+        struct ConvertToDraft: Decodable {
+            struct PR: Decodable { let isDraft: Bool }
+            let pullRequest: PR?
+        }
+        let data: ConvertToDraft?
+    }
+
+    /// Converts an open pull request back to a draft via GraphQL
+    /// convertPullRequestToDraft — the inverse of `markReadyForReview`.
+    func convertToDraft(nodeId: String, token: String) async throws {
+        let variables: [String: Any] = ["pullRequestId": nodeId]
+        _ = try await performMutation(
+            Self.convertPullRequestToDraftMutation,
+            variables: variables,
+            token: token,
+            responseType: ConvertToDraftMutationResponse.self
+        )
+    }
+
+    // MARK: - Close / Reopen mutations
+
+    private static let closePullRequestMutation = """
+    mutation($pullRequestId: ID!) {
+      closePullRequest(input: { pullRequestId: $pullRequestId }) {
+        pullRequest { closed }
+      }
+    }
+    """
+
+    private static let reopenPullRequestMutation = """
+    mutation($pullRequestId: ID!) {
+      reopenPullRequest(input: { pullRequestId: $pullRequestId }) {
+        pullRequest { closed }
+      }
+    }
+    """
+
+    struct CloseMutationResponse: Decodable {
+        struct ClosePR: Decodable {
+            struct PR: Decodable { let closed: Bool }
+            let pullRequest: PR?
+        }
+        let data: ClosePR?
+    }
+
+    struct ReopenMutationResponse: Decodable {
+        struct ReopenPR: Decodable {
+            struct PR: Decodable { let closed: Bool }
+            let pullRequest: PR?
+        }
+        let data: ReopenPR?
+    }
+
+    /// Closes an open pull request without merging it, via GraphQL closePullRequest.
+    /// GitHub rejects the call (top-level `errors`, surfaced by `performMutation`
+    /// as `.actionFailed`) when the viewer may not close it.
+    func closePR(nodeId: String, token: String) async throws {
+        let variables: [String: Any] = ["pullRequestId": nodeId]
+        _ = try await performMutation(
+            Self.closePullRequestMutation,
+            variables: variables,
+            token: token,
+            responseType: CloseMutationResponse.self
+        )
+    }
+
+    /// Reopens a closed, unmerged pull request via GraphQL reopenPullRequest.
+    /// A merged PR can't be reopened; GitHub's error is surfaced as `.actionFailed`.
+    func reopenPR(nodeId: String, token: String) async throws {
+        let variables: [String: Any] = ["pullRequestId": nodeId]
+        _ = try await performMutation(
+            Self.reopenPullRequestMutation,
+            variables: variables,
+            token: token,
+            responseType: ReopenMutationResponse.self
+        )
+    }
+
     // MARK: - Review mutations
 
     private static let addPullRequestReviewMutation = """

@@ -719,7 +719,8 @@ final class MainlineSettings: ObservableObject {
 
     // MARK: - Triage Cockpit settings
 
-    /// Whether write actions (Approve, Merge, Request Changes) are enabled. Default OFF.
+    /// Whether write actions (Approve, Merge, Request Changes, Mark Ready / Convert
+    /// to Draft, Close / Reopen) are enabled. Default OFF.
     @Published var writeActionsEnabled: Bool {
         didSet { defaults.set(writeActionsEnabled, forKey: Keys.writeActionsEnabled) }
     }

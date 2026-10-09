@@ -15,7 +15,7 @@ Token, queries, polling, and write actions.
 | Author query          | `is:open is:pr author:@me`         | PRs you opened.                                          |
 | Reviewer query        | `is:open is:pr review-requested:@me` | PRs that request your review.                          |
 | Poll interval         | 30 s                               | Range 30–3600 s.                                         |
-| Enable write actions  | Off                                | Gates approve, merge, and request changes.              |
+| Enable write actions  | Off                                | Gates approve, merge, request changes, mark ready / convert to draft, and close / reopen. |
 | Merge method          | Auto                               | Auto, squash, merge commit, or rebase. See [Write actions](./actions.md). |
 | Open target           | GitHub                             | GitHub or Linear. See [Integrations](./integrations.md). |
 | Linear repo filter    | Empty (all repos)                  | Allow-list of `owner` or `owner/repo` entries.          |
