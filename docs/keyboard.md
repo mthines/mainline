@@ -76,7 +76,7 @@ See [Write actions](./actions.md).
 Right-click any PR row to open its menu.
 The menu carries every action for that PR, in this order:
 
-1. **GitHub write actions** — approve, merge, request changes, and mark ready for review (drafts) or convert to draft (everything else).
+1. **GitHub write actions** — approve, merge, request changes, and mark ready for review (drafts) or convert to draft (open, non-draft PRs).
 2. **Triage** — later (every snooze duration), mark seen, dismiss, and mute (Inbox only).
 3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), and pin / unpin.
 4. **Copy** — copy link (the GitHub URL) and copy branch name.
