@@ -541,9 +541,10 @@ final class TelemetryService {
 
     // MARK: - Write Actions
 
-    /// Record a write action (approve/merge/requestChanges).
+    /// Record a write action (approve/merge/requestChanges/markReady/convertToDraft/close/reopen).
     /// - Parameters:
-    ///   - action: "approve" | "merge" | "request_changes"
+    ///   - action: "approve" | "merge" | "request_changes" | "mark_ready" |
+    ///     "convert_to_draft" | "close" | "reopen"
     ///   - mergeMethod: resolved method for merge: "squash" | "merge" | "rebase" | nil
     ///   - result: "success" | "failure"
     ///   - duration: seconds from action start to completion
@@ -583,7 +584,8 @@ final class TelemetryService {
     /// - Parameter interaction: bounded value — "snooze" | "unsnooze" | "mark_seen" | "dismiss" |
     ///   "open_in_browser" | "diff_preview" | "copy_branch" | "open_preview" | "tab_switch" |
     ///   "scope_filter_change" | "toggle_drafts" | "inbox_mute" | "inbox_unmute" |
-    ///   "undo" | "refresh" | "multi_select_toggle" | "mark_ready" | "for_me_filter_change"
+    ///   "undo" | "refresh" | "multi_select_toggle" | "mark_ready" | "for_me_filter_change" |
+    ///   "convert_to_draft" | "copy_link"
     func recordTriageInteraction(_ interaction: String) {
         guard MainlineSettings.shared.telemetryEnabled else { return }
         ensureSetup()

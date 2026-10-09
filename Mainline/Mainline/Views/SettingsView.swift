@@ -254,7 +254,7 @@ struct SettingsView: View {
         }
 
         Section("Write Actions") {
-            Toggle("Enable write actions (Approve, Merge, Request Changes)", isOn: tracked(\.writeActionsEnabled, name: "writeActionsEnabled"))
+            Toggle("Enable write actions (Approve, Merge, Request Changes, Close)", isOn: tracked(\.writeActionsEnabled, name: "writeActionsEnabled"))
             if settings.writeActionsEnabled {
                 Picker("Merge method", selection: $settings.mergeMethodPreference) {
                     ForEach(MergeMethodPreference.allCases) { method in

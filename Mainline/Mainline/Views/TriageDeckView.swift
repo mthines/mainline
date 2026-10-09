@@ -10,13 +10,19 @@ enum TriageAction: Identifiable {
     case merge
     case requestChanges
     case markReady
+    case convertToDraft
+    case close
+    case reopen
     case snooze(SnoozeDuration)
+    case resume
     case markSeen
     case dismiss
     case viewDiff
     case openInBrowser
+    case openOnGitHub
     case openPreview
     case toggleMute
+    case copyLink
     case copyBranch
     case togglePin
 
@@ -28,13 +34,19 @@ enum TriageAction: Identifiable {
         case .merge:              return "Merge PR"
         case .requestChanges:     return "Request Changes"
         case .markReady:          return "Mark Ready for Review"
+        case .convertToDraft:     return "Convert to Draft"
+        case .close:              return "Close PR"
+        case .reopen:             return "Reopen PR"
         case .snooze(let d):      return "Later — \(d.title)"
+        case .resume:             return "Resume"
         case .markSeen:           return "Mark as Seen"
         case .dismiss:            return "Dismiss"
         case .viewDiff:           return "View Details"
         case .openInBrowser:      return "Open in Browser"
+        case .openOnGitHub:       return "Open on GitHub"
         case .openPreview:        return "Open Preview"
         case .toggleMute:         return "Mute / Move Up"
+        case .copyLink:           return "Copy Link"
         case .copyBranch:         return "Copy Branch Name"
         case .togglePin:          return "Pin / Unpin"
         }
@@ -46,13 +58,19 @@ enum TriageAction: Identifiable {
         case .merge:           return "arrow.triangle.merge"
         case .requestChanges:  return "text.bubble"
         case .markReady:       return "paperplane"
+        case .convertToDraft:  return "pencil.circle"
+        case .close:           return "xmark.circle"
+        case .reopen:          return "arrow.uturn.backward.circle"
         case .snooze:          return "clock"
+        case .resume:          return "play.circle"
         case .markSeen:        return "eye"
         case .dismiss:         return "xmark"
         case .viewDiff:        return "rectangle.stack"
         case .openInBrowser:   return "safari"
+        case .openOnGitHub:    return "arrow.up.right.square"
         case .openPreview:     return "globe"
         case .toggleMute:      return "arrow.down.circle"
+        case .copyLink:        return "link"
         case .copyBranch:      return "doc.on.doc"
         case .togglePin:       return "pin"
         }
@@ -61,7 +79,7 @@ enum TriageAction: Identifiable {
     /// Returns true if this action requires write-actions to be enabled.
     var requiresWriteActions: Bool {
         switch self {
-        case .approve, .merge, .requestChanges, .markReady: return true
+        case .approve, .merge, .requestChanges, .markReady, .convertToDraft, .close, .reopen: return true
         default: return false
         }
     }
@@ -1304,81 +1322,181 @@ struct TriageDeckView: View {
     }
 
     /// Native right-click action menu for a PR row — the discoverable home for
-    /// every triage verb (replaces the old ⌘K command palette). Write actions are
+    /// every triage verb (replaces the old ⌘K command palette) AND for GitHub's own
+    /// PR actions (close / reopen, draft state, copy link). Write actions are
     /// disabled while `writeActionsEnabled` is off. Dispatches through the same
-    /// `handleTriageAction` path as the single-key verbs.
+    /// `handleTriageAction` path as the single-key verbs. Used by the deck rows and
+    /// the Postponed rows (where Resume replaces Later); Done rows have their own
+    /// smaller menu (`doneRowContextMenu`).
+    ///
+    /// Grouped into `Group` blocks so each builder stays well under the ViewBuilder
+    /// child limit as items are added.
     @ViewBuilder
     private func rowContextMenu(for pr: PRSnapshot) -> some View {
         let writeOff = !settings.writeActionsEnabled
-        Button { handleTriageAction(.approve, on: pr) } label: {
-            Label("Approve PR", systemImage: "checkmark.circle")
+        // `merged` implies `closed` on GitHub; both are checked so a snapshot that
+        // somehow carries only one still reads as finished.
+        let isOpen = !pr.closed && !pr.merged
+
+        // Review + draft-state write verbs.
+        Group {
+            Button { handleTriageAction(.approve, on: pr) } label: {
+                Label("Approve PR", systemImage: "checkmark.circle")
+            }
+            .disabled(writeOff)
+            // Merge is always LISTED for discoverability, but only ENABLED when the PR
+            // can actually be merged (approved, clean, green CI, open) — the same
+            // `readyToMerge` gate as the inline Merge button — or when write actions are
+            // off. A disabled item can't be clicked, so the reason for an unmergeable PR
+            // is surfaced instead via the M-key toast (see `handleKeyDown`).
+            Button { handleTriageAction(.merge, on: pr) } label: {
+                Label("Merge PR", systemImage: "arrow.triangle.merge")
+            }
+            .disabled(writeOff || !pr.readyToMerge)
+            Button { handleTriageAction(.requestChanges, on: pr) } label: {
+                Label("Request Changes", systemImage: "text.bubble")
+            }
+            .disabled(writeOff)
+            if pr.isDraft {
+                Button { handleTriageAction(.markReady, on: pr) } label: {
+                    Label("Mark Ready for Review", systemImage: "paperplane")
+                }
+                .disabled(writeOff)
+            } else if isOpen {
+                Button { handleTriageAction(.convertToDraft, on: pr) } label: {
+                    Label("Convert to Draft", systemImage: "pencil.circle")
+                }
+                .disabled(writeOff)
+            }
         }
-        .disabled(writeOff)
-        // Merge is always LISTED for discoverability, but only ENABLED when the PR
-        // can actually be merged (approved, clean, green CI, open) — the same
-        // `readyToMerge` gate as the inline Merge button — or when write actions are
-        // off. A disabled item can't be clicked, so the reason for an unmergeable PR
-        // is surfaced instead via the M-key toast (see `handleKeyDown`).
-        Button { handleTriageAction(.merge, on: pr) } label: {
-            Label("Merge PR", systemImage: "arrow.triangle.merge")
+
+        Divider()
+
+        // Local triage verbs. A postponed PR offers Resume instead of Later — the
+        // same flip the snooze key makes on a postponed row.
+        Group {
+            if manager.snoozeStore.isSnoozed(pr) {
+                Button { handleTriageAction(.resume, on: pr) } label: {
+                    Label("Resume", systemImage: "play.circle")
+                }
+            } else {
+                Menu {
+                    ForEach(SnoozeDuration.allCases) { duration in
+                        Button(duration.title) { handleTriageAction(.snooze(duration), on: pr) }
+                    }
+                } label: {
+                    Label("Later", systemImage: "clock")
+                }
+            }
+            Button { handleTriageAction(.markSeen, on: pr) } label: {
+                Label("Mark as Seen", systemImage: "eye")
+            }
+            Button { handleTriageAction(.dismiss, on: pr) } label: {
+                Label("Dismiss", systemImage: "xmark")
+            }
+            if inboxMode {
+                let muted = manager.isInboxMuted(pr)
+                Button { handleTriageAction(.toggleMute, on: pr) } label: {
+                    Label(muted ? "Move Up (Un-mute)" : "Mute / Low-priority",
+                          systemImage: muted ? "arrow.up.circle" : "arrow.down.circle")
+                }
+            }
         }
-        .disabled(writeOff || !pr.readyToMerge)
-        Button { handleTriageAction(.requestChanges, on: pr) } label: {
-            Label("Request Changes", systemImage: "text.bubble")
+
+        Divider()
+
+        // Viewing and opening.
+        Group {
+            Button { handleTriageAction(.viewDiff, on: pr) } label: {
+                Label("View Details", systemImage: "rectangle.stack")
+            }
+            Button { handleTriageAction(.openInBrowser, on: pr) } label: {
+                Label(openActionLabel, systemImage: openActionSymbol)
+            }
+            // Under the Linear open target the primary item reads "Open in Linear",
+            // so GitHub would otherwise be unreachable from the menu.
+            if settings.prOpenTarget == .linear {
+                Button { handleTriageAction(.openOnGitHub, on: pr) } label: {
+                    Label("Open on GitHub", systemImage: "arrow.up.right.square")
+                }
+            }
+            if pr.vercelPreviewUrl != nil {
+                Button { handleTriageAction(.openPreview, on: pr) } label: {
+                    Label("Open Preview", systemImage: "globe")
+                }
+            }
+            let pinned = isPinned(pr)
+            Button { handleTriageAction(.togglePin, on: pr) } label: {
+                Label(pinned ? "Unpin" : "Pin to Top",
+                      systemImage: pinned ? "pin.slash" : "pin")
+            }
         }
-        .disabled(writeOff)
-        if pr.isDraft {
-            Button { handleTriageAction(.markReady, on: pr) } label: {
-                Label("Mark Ready for Review", systemImage: "paperplane")
+
+        Divider()
+
+        // Copying.
+        Group {
+            Button { handleTriageAction(.copyLink, on: pr) } label: {
+                Label("Copy Link", systemImage: "link")
+            }
+            if !pr.headRefName.isEmpty {
+                Button { handleTriageAction(.copyBranch, on: pr) } label: {
+                    Label("Copy Branch Name", systemImage: "doc.on.doc")
+                }
+            }
+        }
+
+        // Close / reopen sit last and apart from everything else: they end (or
+        // revive) the PR on GitHub. A closed-but-unmerged PR can still be on screen
+        // here when it is pinned (pins survive a close), so it gets Reopen instead.
+        // A merged PR gets neither.
+        if isOpen {
+            Divider()
+            Button(role: .destructive) { handleTriageAction(.close, on: pr) } label: {
+                Label("Close PR", systemImage: "xmark.circle")
+            }
+            .disabled(writeOff)
+        } else if pr.closed && !pr.merged {
+            Divider()
+            Button { handleTriageAction(.reopen, on: pr) } label: {
+                Label("Reopen PR", systemImage: "arrow.uturn.backward.circle")
             }
             .disabled(writeOff)
         }
+    }
 
-        Divider()
-
-        Menu {
-            ForEach(SnoozeDuration.allCases) { duration in
-                Button(duration.title) { handleTriageAction(.snooze(duration), on: pr) }
-            }
-        } label: {
-            Label("Later", systemImage: "clock")
-        }
-        Button { handleTriageAction(.markSeen, on: pr) } label: {
-            Label("Mark as Seen", systemImage: "eye")
-        }
-        Button { handleTriageAction(.dismiss, on: pr) } label: {
-            Label("Dismiss", systemImage: "xmark")
-        }
-        if inboxMode {
-            let muted = manager.isInboxMuted(pr)
-            Button { handleTriageAction(.toggleMute, on: pr) } label: {
-                Label(muted ? "Move Up (Un-mute)" : "Mute / Low-priority",
-                      systemImage: muted ? "arrow.up.circle" : "arrow.down.circle")
-            }
-        }
-
-        Divider()
-
-        Button { handleTriageAction(.viewDiff, on: pr) } label: {
-            Label("View Details", systemImage: "rectangle.stack")
-        }
+    /// Right-click menu for a Done-section row (recently merged / closed PRs). A
+    /// finished PR has no triage verb, so this carries only what still applies to
+    /// it: opening, copying, and — for a PR closed WITHOUT merging — reopening it on
+    /// GitHub (a merged PR can't be reopened).
+    @ViewBuilder
+    private func doneRowContextMenu(for pr: PRSnapshot) -> some View {
         Button { handleTriageAction(.openInBrowser, on: pr) } label: {
             Label(openActionLabel, systemImage: openActionSymbol)
         }
-        let pinned = isPinned(pr)
-        Button { handleTriageAction(.togglePin, on: pr) } label: {
-            Label(pinned ? "Unpin" : "Pin to Top",
-                  systemImage: pinned ? "pin.slash" : "pin")
+        if settings.prOpenTarget == .linear {
+            Button { handleTriageAction(.openOnGitHub, on: pr) } label: {
+                Label("Open on GitHub", systemImage: "arrow.up.right.square")
+            }
+        }
+
+        Divider()
+
+        Button { handleTriageAction(.copyLink, on: pr) } label: {
+            Label("Copy Link", systemImage: "link")
         }
         if !pr.headRefName.isEmpty {
             Button { handleTriageAction(.copyBranch, on: pr) } label: {
                 Label("Copy Branch Name", systemImage: "doc.on.doc")
             }
         }
-        if pr.vercelPreviewUrl != nil {
-            Button { handleTriageAction(.openPreview, on: pr) } label: {
-                Label("Open Preview", systemImage: "globe")
+
+        if pr.closed && !pr.merged {
+            Divider()
+            Button { handleTriageAction(.reopen, on: pr) } label: {
+                Label("Reopen PR", systemImage: "arrow.uturn.backward.circle")
             }
+            .disabled(!settings.writeActionsEnabled)
         }
     }
 
@@ -1492,6 +1610,9 @@ struct TriageDeckView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Same menu as the deck rows; `rowContextMenu` swaps Later for Resume on a
+        // postponed PR.
+        .contextMenu { rowContextMenu(for: pr) }
     }
 
     /// A row in the collapsed "Done" section (recently merged / closed PRs). These
@@ -1499,8 +1620,10 @@ struct TriageDeckView: View {
     /// space), no unread dot, and NO hover action cluster — a finished PR has no
     /// Merge / Later action. Reuses the shared `LeadingColumn` + `RowMetrics` so it
     /// aligns with every other section, shows the purple merged / grey closed status
-    /// icon in the leading slot, and opens the PR in the browser on click. Rendered
-    /// inside the SAME single scroll region — no nested ScrollView.
+    /// icon in the leading slot, and opens the PR in the browser on click. Its
+    /// right-click menu (`doneRowContextMenu`) offers open / copy, plus Reopen for a
+    /// PR closed without merging. Rendered inside the SAME single scroll region — no
+    /// nested ScrollView.
     private func doneRow(pr: PRSnapshot) -> some View {
         let m = metrics
         return Button {
@@ -1542,6 +1665,7 @@ struct TriageDeckView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu { doneRowContextMenu(for: pr) }
     }
 
     /// A mouse click focuses the row and — unless multi-select is active —
@@ -1753,8 +1877,9 @@ struct TriageDeckView: View {
             return nil
         }
 
-        // Write verb (gated by writeActionsEnabled). Approve and Request Changes
-        // remain available via the row context menu only. Merge only PERFORMS when
+        // Write verb (gated by writeActionsEnabled). Approve, Request Changes,
+        // Convert to Draft and Close / Reopen are row-context-menu only (no key —
+        // Close in particular is too destructive for a bare key). Merge only PERFORMS when
         // the PR is actually mergeable (`readyToMerge` — same condition that shows
         // the inline Merge button); on any other PR, instead of a silent no-op we
         // surface a toast explaining why it can't be merged, so M never feels dead.
@@ -1881,13 +2006,7 @@ struct TriageDeckView: View {
 
     private func dispatchVerb(_ action: WriteAction) {
         guard settings.writeActionsEnabled else {
-            // Show disabled-state alert
-            let alert = NSAlert()
-            alert.messageText = "Write Actions Disabled"
-            alert.informativeText = "Enable \"Write Actions\" in Settings to use approve, merge, and request-changes."
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+            presentWriteActionsDisabledAlert()
             return
         }
         // Require confirmation for write actions via an app-modal NSAlert.
@@ -1904,6 +2023,16 @@ struct TriageDeckView: View {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         Task { await manager.performAction(action) }
+    }
+
+    /// The guidance alert every GitHub write verb shows while write actions are off.
+    private func presentWriteActionsDisabledAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Write Actions Disabled"
+        alert.informativeText = "Enable \"Write Actions\" in Settings to approve, merge, request changes, close, reopen, or change a PR's draft state."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     // MARK: - Triage action from context menu
@@ -1929,8 +2058,16 @@ struct TriageDeckView: View {
             dispatchVerb(.requestChanges(pr))
         case .markReady:
             markReady(pr)
+        case .convertToDraft:
+            convertToDraft(pr)
+        case .close:
+            dispatchVerb(.close(pr))
+        case .reopen:
+            dispatchVerb(.reopen(pr))
         case .snooze(let duration):
             postpone(pr, for: duration)
+        case .resume:
+            resume(pr)
         case .markSeen:
             Task { await manager.performAction(.markSeen(pr)) }
             pushUndo(label: "Marked seen: \(pr.title)", pr: pr) {}
@@ -1942,8 +2079,12 @@ struct TriageDeckView: View {
             TelemetryService.shared.recordTriageInteraction("diff_preview")
         case .openInBrowser:
             manager.openPR(pr)
+        case .openOnGitHub:
+            openOnGitHub(pr)
         case .openPreview:
             openPreview(pr)
+        case .copyLink:
+            copyLink(pr)
         case .copyBranch:
             copyBranch(pr)
         case .togglePin:
@@ -1996,25 +2137,57 @@ struct TriageDeckView: View {
         manager.showInfoToast("Copied branch: \(branch)", symbol: "doc.on.doc")
     }
 
+    /// Copies the PR's GitHub URL to the system clipboard and confirms with a toast.
+    /// Always the GitHub page (`htmlUrl`), whatever the configured open target, so
+    /// the copied link works for anyone it is pasted to. Silent no-op when empty.
+    private func copyLink(_ pr: PRSnapshot) {
+        let link = pr.htmlUrl
+        guard !link.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(link, forType: .string)
+        TelemetryService.shared.recordTriageInteraction("copy_link")
+        manager.showInfoToast("Copied link: \(pr.repoFullName) #\(pr.number)", symbol: "link")
+    }
+
+    /// Opens the PR's GitHub page directly, bypassing the configured open target —
+    /// the way back to GitHub when the primary open action is "Open in Linear".
+    private func openOnGitHub(_ pr: PRSnapshot) {
+        guard let url = URL(string: pr.htmlUrl) else { return }
+        TelemetryService.shared.recordTriageInteraction("open_in_browser")
+        NSWorkspace.shared.open(url)
+    }
+
     /// Marks a draft PR as ready for review — fires immediately (no NSAlert confirm),
     /// gated by `settings.writeActionsEnabled` and `pr.isDraft`.
     /// Shows the write-actions disabled guidance alert when write actions are off.
-    /// Shows a plain confirmation toast (non-undoable — no inverse convert-to-draft).
+    /// Shows a plain confirmation toast — non-undoable, since an undo would be a
+    /// second GitHub write (Convert to Draft is offered in the row menu instead).
     private func markReady(_ pr: PRSnapshot) {
         guard pr.isDraft else { return }
         guard settings.writeActionsEnabled else {
-            let alert = NSAlert()
-            alert.messageText = "Write Actions Disabled"
-            alert.informativeText = "Enable \"Write Actions\" in Settings to use approve, merge, request-changes, and mark-ready."
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+            presentWriteActionsDisabledAlert()
             return
         }
         TelemetryService.shared.recordTriageInteraction("mark_ready")
         Task { await manager.performAction(.markReady(pr)) }
-        // Plain confirmation toast — empty undo closure (no convert-back-to-draft).
+        // Plain confirmation toast — empty undo closure (see doc comment).
         pushUndo(label: "Marked ready: \(pr.title)", pr: pr) {}
+    }
+
+    /// Converts an open, non-draft PR back to a draft — the inverse of `markReady`,
+    /// and like it fires immediately (no NSAlert confirm: it notifies no one and
+    /// Mark Ready reverses it), gated by `settings.writeActionsEnabled`. Plain
+    /// confirmation toast, non-undoable for the same reason as `markReady`.
+    private func convertToDraft(_ pr: PRSnapshot) {
+        guard !pr.isDraft, !pr.closed, !pr.merged else { return }
+        guard settings.writeActionsEnabled else {
+            presentWriteActionsDisabledAlert()
+            return
+        }
+        TelemetryService.shared.recordTriageInteraction("convert_to_draft")
+        Task { await manager.performAction(.convertToDraft(pr)) }
+        pushUndo(label: "Converted to draft: \(pr.title)", pr: pr) {}
     }
 
     // MARK: - Undo
@@ -2091,6 +2264,8 @@ struct TriageDeckView: View {
         case .approve(let pr):        return ("Approve \"\(pr.title)\"?", "Approve")
         case .merge(let pr):          return ("Merge \"\(pr.title)\"?", "Merge")
         case .requestChanges(let pr): return ("Request changes on \"\(pr.title)\"?", "Request Changes")
+        case .close(let pr):          return ("Close \"\(pr.title)\" without merging?", "Close PR")
+        case .reopen(let pr):         return ("Reopen \"\(pr.title)\"?", "Reopen PR")
         default:                      return ("Perform this action?", "Confirm")
         }
     }
