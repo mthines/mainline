@@ -99,7 +99,7 @@ Not relevant, hover and press `Q`. For later, press `S`.
 - **Menu bar panel** — click the icon to see your PRs grouped by actionability (Needs attention, Ready to merge, Waiting, …), each with CI status.
 - **Keyboard triage** — drive the whole panel from the keyboard: `J`/`K` to move, `Space` to peek, `↩` to open, `M` to merge, `S` to postpone, `E` to open the preview, `N` to mark seen, `X` to dismiss, `V` for multi-select, `D` to toggle drafts, `Q` to mute (Inbox), `R` to refresh, `⌘Z` to undo. Every key is rebindable in Settings → Keyboard.
 - **Peek** — `Space` opens a glance card with the PR's changed-files list.
-- **Row menu** — right-click any PR for every action, including approve and request changes.
+- **Row menu** — right-click any PR for every action, including approve, request changes, close, convert to draft, and copy link.
 - **Global shortcut** — open Mainline from any app with a system-wide hotkey (default ⇧⌃ + the key left of `1`; customizable in Settings).
 - **Scope filter** — narrow the panel and badge to a single org or repo.
 
@@ -107,7 +107,7 @@ See the [keyboard reference](docs/keyboard.md) for the full list and how to rebi
 
 ### Act (optional, off by default)
 
-- **Write actions** — approve, merge, or request changes without leaving the menu bar (each behind a confirmation; enable in Settings). See [Write actions](docs/actions.md).
+- **Write actions** — approve, merge, request changes, close, or reopen without leaving the menu bar (each behind a confirmation; enable in Settings), and flip a PR between draft and ready. See [Write actions](docs/actions.md).
 
 ### Configure and secure
 

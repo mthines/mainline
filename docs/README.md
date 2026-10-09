@@ -14,7 +14,7 @@ After that, treat them as reference.
 - [Notifications](./notifications.md) — the four events, per-event attention levels, and noise control.
 - [Keyboard triage](./keyboard.md) — every key, the peek card, the row menu, and the global shortcut.
 - [Filtering the Inbox](./filtering.md) — the four mute rules and the review-focus allow-list.
-- [Write actions](./actions.md) — approve, merge, and request changes from the menu bar.
+- [Write actions](./actions.md) — approve, merge, request changes, close, and reopen from the menu bar.
 - [Integrations](./integrations.md) — Preview links and opening PRs in Linear.
 
 ## Reference

@@ -2176,9 +2176,9 @@ struct TriageDeckView: View {
     }
 
     /// Converts an open, non-draft PR back to a draft — the inverse of `markReady`,
-    /// and like it fires immediately (no NSAlert confirm: it notifies no one and
-    /// Mark Ready reverses it), gated by `settings.writeActionsEnabled`. Plain
-    /// confirmation toast, non-undoable for the same reason as `markReady`.
+    /// and like it fires immediately (no NSAlert confirm: Mark Ready reverses it),
+    /// gated by `settings.writeActionsEnabled`. Plain confirmation toast,
+    /// non-undoable for the same reason as `markReady`.
     private func convertToDraft(_ pr: PRSnapshot) {
         guard !pr.isDraft, !pr.closed, !pr.merged else { return }
         guard settings.writeActionsEnabled else {

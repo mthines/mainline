@@ -138,10 +138,10 @@ All attributes use **bounded, low-cardinality values** — never raw user data.
 | `poll.recovered`     | `true` / `false` — on `mainline.poll.errors`. `true` is a 5xx the reduced-page retry rescued (the poll still succeeded); `false` is a poll that gave up. Read "polls that failed" as `poll.recovered="false"` |
 | `poll.carry_forward_reason` | `"degraded_page"`, `"no_data"` — why a tab's PRs had to be carried forward from the previous baseline |
 | `error.type`         | `"unauthorized"`, `"rate_limited"`, `"server_error"`, `"cancelled"`, `"decoding"`, `"network_error"`, `"action_failed"`, `"not_modified"`, `"unknown"` |
-| `write.action`       | `"approve"`, `"merge"`, `"request_changes"`                                                      |
+| `write.action`       | `"approve"`, `"merge"`, `"request_changes"`, `"mark_ready"`, `"convert_to_draft"`, `"close"`, `"reopen"` |
 | `write.result`       | `"success"`, `"failure"`                                                                         |
 | `write.merge_method` | `"squash"`, `"merge"`, `"rebase"`, `"auto"` (from resolved preference, never PR title/branch)   |
-| `interaction.type`   | `"snooze"`, `"unsnooze"`, `"mark_seen"`, `"dismiss"`, `"open_in_browser"`, `"diff_preview"`, `"copy_branch"`, `"open_preview"`, `"tab_switch"`, `"scope_filter_change"`, `"toggle_drafts"`, `"inbox_mute"`, `"inbox_unmute"`, `"undo"`, `"refresh"`, `"multi_select_toggle"` |
+| `interaction.type`   | `"snooze"`, `"unsnooze"`, `"mark_seen"`, `"dismiss"`, `"open_in_browser"`, `"diff_preview"`, `"copy_branch"`, `"open_preview"`, `"tab_switch"`, `"scope_filter_change"`, `"toggle_drafts"`, `"inbox_mute"`, `"inbox_unmute"`, `"undo"`, `"refresh"`, `"multi_select_toggle"`, `"mark_ready"`, `"convert_to_draft"`, `"copy_link"` |
 | `notification.event_type` | `"newPR"`, `"readyForReview"`, `"ciChanged"`, `"reviewComment"`                           |
 | `notification.attention_level` | `"notify"`, `"quiet"`                                                                |
 | `attention.event`    | `PREvent` raw values (e.g. `"reviewRequested"`, `"ciFailedOnMyPR"`) — never PR content |
