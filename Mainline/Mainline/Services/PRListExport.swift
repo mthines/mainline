@@ -8,12 +8,10 @@ import Foundation
 /// plain words rather than icons. No I/O; `PRListExportChecks` asserts it.
 enum PRListExport {
 
-    /// - Parameters:
-    ///   - heading: section path shown above the list, e.g. `"Your PRs › Needs attention"`.
-    ///   - prs: the section's PRs, in display order.
-    static func markdown(heading: String, prs: [PRSnapshot]) -> String {
-        let noun = prs.count == 1 ? "PR" : "PRs"
-        var lines = ["## \(heading) (\(prs.count) \(noun))", ""]
+    /// Just the list, no heading — the user pastes it under their own prompt.
+    /// - Parameter prs: the section's PRs, in display order.
+    static func markdown(prs: [PRSnapshot]) -> String {
+        var lines: [String] = []
         for pr in prs {
             lines.append("- [\(pr.repoFullName)#\(pr.number)](\(pr.htmlUrl)) \(pr.title)")
             lines.append("  - \(details(pr).joined(separator: " · "))")
@@ -85,15 +83,14 @@ enum PRListExportChecks {
             unresolvedThreadCount: 1
         )
 
-        let out = PRListExport.markdown(heading: "Your PRs › Needs attention", prs: [green, blocked])
+        let out = PRListExport.markdown(prs: [green, blocked])
         let lines = out.components(separatedBy: "\n")
-        assert(lines[0] == "## Your PRs › Needs attention (2 PRs)", "heading carries path + count")
-        assert(lines[2] == "- [o/r#12](https://github.com/o/r/pull/12) feat: thing", "row links repo#number to the URL")
-        assert(lines[3] == "  - author: @me · CI: passing · review: approved · +10 −2 · branch: `feat/thing` → main",
+        assert(lines.count == 4, "two lines per PR, no heading")
+        assert(lines[0] == "- [o/r#12](https://github.com/o/r/pull/12) feat: thing", "row links repo#number to the URL")
+        assert(lines[1] == "  - author: @me · CI: passing · review: approved · +10 −2 · branch: `feat/thing` → main",
                "green PR details")
-        assert(lines[5] == "  - draft · CI: failing · review: changes requested · merge conflict · 1 unresolved thread · +0 −0",
+        assert(lines[3] == "  - draft · CI: failing · review: changes requested · merge conflict · 1 unresolved thread · +0 −0",
                "blocked PR: draft/conflict/thread flags; empty author and branch omitted")
-        assert(PRListExport.markdown(heading: "X", prs: [green]).hasPrefix("## X (1 PR)"), "singular noun")
     }
 }
 #endif

@@ -2165,7 +2165,7 @@ struct TriageDeckView: View {
         guard !listPRs.isEmpty else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(PRListExport.markdown(heading: heading, prs: listPRs), forType: .string)
+        pasteboard.setString(PRListExport.markdown(prs: listPRs), forType: .string)
         TelemetryService.shared.recordTriageInteraction("copy_pr_list")
         let noun = listPRs.count == 1 ? "PR" : "PRs"
         manager.showInfoToast("Copied \(listPRs.count) \(noun): \(heading)", symbol: "doc.on.doc")
