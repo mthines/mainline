@@ -631,7 +631,9 @@ struct TriageDeckView: View {
     private var inboxList: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(inboxSections, id: \.role.rawValue) { section in
-                inboxRoleSectionHeader(for: section.role, prs: inboxRolePRs(for: section.role))
+                // Display order (pinned first, then each actionability group), so a copied
+                // list matches the screen.
+                inboxRoleSectionHeader(for: section.role, prs: section.actionSections.flatMap(\.prs))
                 ForEach(section.actionSections, id: \.group) { actionSection in
                     sectionView(
                         group: actionSection.group,
