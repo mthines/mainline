@@ -2184,7 +2184,7 @@ struct TriageDeckView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Copy these \(listPRs.count) PRs as a Markdown list")
+        .help("Copy \(listPRs.count == 1 ? "this PR" : "these \(listPRs.count) PRs") as a Markdown list")
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
     }
