@@ -585,7 +585,7 @@ final class TelemetryService {
     ///   "open_in_browser" | "diff_preview" | "copy_branch" | "open_preview" | "tab_switch" |
     ///   "scope_filter_change" | "toggle_drafts" | "inbox_mute" | "inbox_unmute" |
     ///   "undo" | "refresh" | "multi_select_toggle" | "mark_ready" | "for_me_filter_change" |
-    ///   "convert_to_draft" | "copy_link"
+    ///   "convert_to_draft" | "copy_link" | "copy_pr_list"
     func recordTriageInteraction(_ interaction: String) {
         guard MainlineSettings.shared.telemetryEnabled else { return }
         ensureSetup()

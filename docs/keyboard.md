@@ -87,6 +87,11 @@ The "open" item follows your open target, so it reads **Open in Linear** when Li
 Postponed rows have the same menu, with **Resume** in place of **Later**.
 Rows in **Done** have a shorter menu: open, open on GitHub, copy link, copy branch name, and — for a PR closed without merging — reopen.
 
+## Copying a section
+
+Hover a section header (**Needs attention**, **Waiting**, …) or a role header (**Your PRs**, **Needs your review**) and a copy button appears; right-clicking the header offers **Copy PR List** too.
+It copies the section's PRs, in on-screen order and including collapsed stack members, as a Markdown list — each PR's link and title plus its author, draft state, CI, review decision, conflicts, unresolved threads, size, and branch — ready to paste into an agent.
+
 ## Global shortcut
 
 A system-wide hotkey opens the Mainline panel from any app.

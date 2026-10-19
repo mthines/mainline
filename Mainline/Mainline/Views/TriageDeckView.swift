@@ -631,12 +631,15 @@ struct TriageDeckView: View {
     private var inboxList: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(inboxSections, id: \.role.rawValue) { section in
-                inboxRoleSectionHeader(for: section.role, prs: inboxRolePRs(for: section.role))
+                // Display order (pinned first, then each actionability group), so a copied
+                // list matches the screen.
+                inboxRoleSectionHeader(for: section.role, prs: section.actionSections.flatMap(\.prs))
                 ForEach(section.actionSections, id: \.group) { actionSection in
                     sectionView(
                         group: actionSection.group,
                         prs: actionSection.prs,
-                        expansion: inboxExpansionBinding(for: section.role, group: actionSection.group)
+                        expansion: inboxExpansionBinding(for: section.role, group: actionSection.group),
+                        headingPrefix: inboxRoleTitle(section.role)
                     )
                 }
             }
@@ -654,23 +657,32 @@ struct TriageDeckView: View {
 
     @ViewBuilder
     private func inboxRoleSectionHeader(for role: InboxRole, prs rolePRs: [PRSnapshot]) -> some View {
-        let title = role == .needsYourReview ? "Needs your review" : "Your PRs"
-        HStack(spacing: 6) {
-            Text(title)
-                .font(.caption)
-                .fontWeight(.bold)
-                .foregroundStyle(.primary)
-            Text("\(rolePRs.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(.quaternary, in: Capsule())
-            Spacer()
+        let title = inboxRoleTitle(role)
+        HoverReveal { hovering in
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.primary)
+                Text("\(rolePRs.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
+                copyListButton(heading: title, prs: rolePRs, visible: hovering)
+            }
+            .padding(.horizontal, RowMetrics.horizontalPadding)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+            .contentShape(Rectangle())
+            .contextMenu { copyListMenuItem(heading: title, prs: rolePRs) }
         }
-        .padding(.horizontal, RowMetrics.horizontalPadding)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
+    }
+
+    private func inboxRoleTitle(_ role: InboxRole) -> String {
+        role == .needsYourReview ? "Needs your review" : "Your PRs"
     }
 
     /// The shared "Muted / low-priority (N)" group rendered at the bottom of the
@@ -816,11 +828,15 @@ struct TriageDeckView: View {
     private func sectionView(
         group: ActionGroup,
         prs sectionPRs: [PRSnapshot],
-        expansion: Binding<Bool>
+        expansion: Binding<Bool>,
+        headingPrefix: String? = nil
     ) -> some View {
+        let copyHeading = headingPrefix.map { "\($0) › \(group.title)" } ?? group.title
         // Whole-header tap toggles the section (label + count + chevron), matching
         // the Needs-a-Human header. Replaces DisclosureGroup so tapping the text or
-        // count — not just the triangle — expands/collapses.
+        // count — not just the triangle — expands/collapses. The copy button is an
+        // overlay (not nested in the toggle's label) so its click doesn't also toggle.
+        HoverReveal { hovering in
         Button {
             // No withAnimation: animating the expand makes the body height change
             // every frame, which the GeometryReader/BodyHeightKey → .frame(height:)
@@ -856,6 +872,13 @@ struct TriageDeckView: View {
         }
         .buttonStyle(.plain)
         .help(expansion.wrappedValue ? "Collapse \(group.title)" : "Expand \(group.title)")
+        .overlay(alignment: .trailing) {
+            // Sits just left of the chevron.
+            copyListButton(heading: copyHeading, prs: sectionPRs, visible: hovering)
+                .padding(.trailing, RowMetrics.horizontalPadding + 18)
+        }
+        .contextMenu { copyListMenuItem(heading: copyHeading, prs: sectionPRs) }
+        }
 
         if expansion.wrappedValue {
             sectionRows(group: group, prs: sectionPRs)
@@ -2137,6 +2160,44 @@ struct TriageDeckView: View {
         manager.showInfoToast("Copied branch: \(branch)", symbol: "doc.on.doc")
     }
 
+    /// Copies a section's PRs to the clipboard as a Markdown list (`PRListExport`) —
+    /// URL, CI, review, draft/conflict/thread flags per PR — ready to paste into an
+    /// agent. Includes collapsed stack members, which the section always carries.
+    private func copyPRList(heading: String, prs listPRs: [PRSnapshot]) {
+        guard !listPRs.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(PRListExport.markdown(prs: listPRs), forType: .string)
+        TelemetryService.shared.recordTriageInteraction("copy_pr_list")
+        let noun = listPRs.count == 1 ? "PR" : "PRs"
+        manager.showInfoToast("Copied \(listPRs.count) \(noun): \(heading)", symbol: "doc.on.doc")
+    }
+
+    /// Header copy button, revealed while the header is hovered. Kept in the layout
+    /// (opacity, not removal) so hovering doesn't shift the header's contents.
+    private func copyListButton(heading: String, prs listPRs: [PRSnapshot], visible: Bool) -> some View {
+        Button {
+            copyPRList(heading: heading, prs: listPRs)
+        } label: {
+            Image(systemName: "doc.on.doc")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Copy \(listPRs.count == 1 ? "this PR" : "these \(listPRs.count) PRs") as a Markdown list")
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible)
+    }
+
+    @ViewBuilder
+    private func copyListMenuItem(heading: String, prs listPRs: [PRSnapshot]) -> some View {
+        Button("Copy PR List (\(listPRs.count))") {
+            copyPRList(heading: heading, prs: listPRs)
+        }
+    }
+
     /// Copies the PR's GitHub URL to the system clipboard and confirms with a toast.
     /// Always the GitHub page (`htmlUrl`), whatever the configured open target, so
     /// the copied link works for anyone it is pasted to. Silent no-op when empty.
@@ -2736,5 +2797,16 @@ private struct KeyCaptureView: NSViewRepresentable {
             }
             super.keyDown(with: event)
         }
+    }
+}
+
+/// Tracks hover for one header in its own `@State`, so hovering a section header
+/// re-renders just that header rather than the whole deck.
+private struct HoverReveal<Content: View>: View {
+    @ViewBuilder let content: (Bool) -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        content(hovering).onHover { hovering = $0 }
     }
 }

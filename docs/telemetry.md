@@ -141,7 +141,7 @@ All attributes use **bounded, low-cardinality values** — never raw user data.
 | `write.action`       | `"approve"`, `"merge"`, `"request_changes"`, `"mark_ready"`, `"convert_to_draft"`, `"close"`, `"reopen"` |
 | `write.result`       | `"success"`, `"failure"`                                                                         |
 | `write.merge_method` | `"squash"`, `"merge"`, `"rebase"`, `"auto"` (from resolved preference, never PR title/branch)   |
-| `interaction.type`   | `"snooze"`, `"unsnooze"`, `"mark_seen"`, `"dismiss"`, `"open_in_browser"`, `"diff_preview"`, `"copy_branch"`, `"open_preview"`, `"tab_switch"`, `"scope_filter_change"`, `"toggle_drafts"`, `"inbox_mute"`, `"inbox_unmute"`, `"undo"`, `"refresh"`, `"multi_select_toggle"`, `"mark_ready"`, `"convert_to_draft"`, `"copy_link"` |
+| `interaction.type`   | `"snooze"`, `"unsnooze"`, `"mark_seen"`, `"dismiss"`, `"open_in_browser"`, `"diff_preview"`, `"copy_branch"`, `"open_preview"`, `"tab_switch"`, `"scope_filter_change"`, `"toggle_drafts"`, `"inbox_mute"`, `"inbox_unmute"`, `"undo"`, `"refresh"`, `"multi_select_toggle"`, `"mark_ready"`, `"convert_to_draft"`, `"copy_link"`, `"copy_pr_list"` |
 | `notification.event_type` | `"newPR"`, `"readyForReview"`, `"ciChanged"`, `"reviewComment"`                           |
 | `notification.attention_level` | `"notify"`, `"quiet"`                                                                |
 | `attention.event`    | `PREvent` raw values (e.g. `"reviewRequested"`, `"ciFailedOnMyPR"`) — never PR content |
