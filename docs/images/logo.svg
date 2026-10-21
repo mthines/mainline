@@ -6,7 +6,7 @@
     </linearGradient>
   </defs>
   <path d="M100 286C100 183 183 100 286 100H738C841 100 924 183 924 286V738C924 841 841 924 738 924H286C183 924 100 841 100 738Z" fill="url(#tile)"/>
-  <path d="M512 250V774" stroke="#3A3D3F" stroke-width="40" stroke-linecap="round"/>
+  <path d="M512 310V774" stroke="#3A3D3F" stroke-width="40" stroke-linecap="round"/>
   <circle cx="512" cy="310" r="72" fill="#4FD18F"/>
   <circle cx="512" cy="530" r="52" fill="#9C9F9E"/>
   <circle cx="512" cy="716" r="40" fill="#55585A"/>

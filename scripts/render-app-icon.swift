@@ -42,7 +42,7 @@ func drawIcon(in ctx: CGContext) {
     ctx.setStrokeColor(color(0x3A3D3F))
     ctx.setLineWidth(40)
     ctx.setLineCap(.round)
-    ctx.move(to: CGPoint(x: 512, y: 250))
+    ctx.move(to: CGPoint(x: 512, y: 310))  // starts under the green stop so its cap never peeks out
     ctx.addLine(to: CGPoint(x: 512, y: 774))
     ctx.strokePath()
 
