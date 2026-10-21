@@ -1,4 +1,4 @@
-<img width="128" height="128" alt="mainline-logo" src="https://github.com/user-attachments/assets/d039c639-ef8c-4388-8423-e8e546da3e1a" />
+<img width="128" height="128" alt="Mainline logo" src="docs/images/logo.png" />
 
 # Mainline
 

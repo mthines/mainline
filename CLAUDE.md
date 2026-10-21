@@ -27,6 +27,14 @@ PRs otherwise run a Debug smoke build only. Betas are on-demand because the macO
 notarize can only run on metered macOS runners. See `docs/release.md` for secrets, trigger
 model, and signing setup.
 
+## App icon
+
+The source of truth is `docs/images/logo.svg` (the "Queue" mark: three stops on one line,
+shrinking by priority, the top one green). `swift scripts/render-app-icon.swift` (from repo
+root) redraws it with CoreGraphics into every `AppIcon.appiconset` PNG plus
+`docs/images/logo.png` (the README logo). The script carries its own copy of the geometry —
+keep it in step with the SVG when either changes.
+
 ## Architecture
 
 ```
