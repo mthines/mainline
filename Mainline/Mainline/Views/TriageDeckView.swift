@@ -988,38 +988,50 @@ struct TriageDeckView: View {
 
     @ViewBuilder
     private func stackHeader(_ stack: StackEngine.Stack, expansion: Binding<Bool>) -> some View {
-        Button {
-            expansion.wrappedValue.toggle()
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 10)
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text("Stack")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.primary)
-                Text("\(stack.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(.quaternary, in: Capsule())
-                Text("#\(stack.bottom.number) → #\(stack.top.number)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 4)
+        let copyHeading = "Stack #\(stack.bottom.number) → #\(stack.top.number)"
+        // Same layering as `sectionView`: the copy button is an overlay (not nested in
+        // the toggle's label) so its click doesn't also collapse the stack.
+        HoverReveal { hovering in
+            Button {
+                expansion.wrappedValue.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 10)
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Stack")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    Text("\(stack.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
+                    Text("#\(stack.bottom.number) → #\(stack.top.number)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 4)
+                }
+                .padding(.horizontal, RowMetrics.horizontalPadding)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, RowMetrics.horizontalPadding)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .help("Collapse stack — merges bottom-up (base at top)")
+            .overlay(alignment: .trailing) {
+                // The whole stack in merge order (bottom → top) — the same members the
+                // header counts and that pin / Later act on as a unit.
+                copyListButton(heading: copyHeading, prs: stack.members, visible: hovering)
+                    .padding(.trailing, RowMetrics.horizontalPadding)
+            }
+            .contextMenu { copyListMenuItem(heading: copyHeading, prs: stack.members) }
         }
-        .buttonStyle(.plain)
-        .help("Collapse stack — merges bottom-up (base at top)")
     }
 
     /// The connector spine drawn to the left of each stack member: a vertical line

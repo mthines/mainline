@@ -100,7 +100,7 @@ Not relevant, hover and press `Q`. For later, press `S`.
 - **Keyboard triage** — drive the whole panel from the keyboard: `J`/`K` to move, `Space` to peek, `↩` to open, `M` to merge, `S` to postpone, `E` to open the preview, `N` to mark seen, `X` to dismiss, `V` for multi-select, `D` to toggle drafts, `Q` to mute (Inbox), `R` to refresh, `⌘Z` to undo. Every key is rebindable in Settings → Keyboard.
 - **Peek** — `Space` opens a glance card with the PR's changed-files list.
 - **Row menu** — right-click any PR for every action, including approve, request changes, close, convert to draft, and copy link.
-- **Copy a section** — hover a section header to copy its PRs as a Markdown list (links + CI/review state), ready to paste into an agent.
+- **Copy a section** — hover a section header (or a stack's header) to copy its PRs as a Markdown list (links + CI/review state), ready to paste into an agent.
 - **Global shortcut** — open Mainline from any app with a system-wide hotkey (default ⇧⌃ + the key left of `1`; customizable in Settings).
 - **Scope filter** — narrow the panel and badge to a single org or repo.
 

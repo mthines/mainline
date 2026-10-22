@@ -92,6 +92,8 @@ Rows in **Done** have a shorter menu: open, open on GitHub, copy link, copy bran
 Hover a section header (**Needs attention**, **Waiting**, …) or a role header (**Your PRs**, **Needs your review**) and a copy button appears; right-clicking the header offers **Copy PR List** too.
 It copies the section's PRs, in on-screen order and including collapsed stack members, as a Markdown list — each PR's link and title plus its author, draft state, CI, review decision, conflicts, unresolved threads, size, and branch — ready to paste into an agent.
 
+An expanded stack's **Stack** header has the same button and right-click item. It copies just that stack's PRs, in merge order (base first).
+
 ## Global shortcut
 
 A system-wide hotkey opens the Mainline panel from any app.
