@@ -175,6 +175,7 @@ private struct GraphQLNode: Decodable {
     let reviewThreads: GraphQLReviewThreads?
     let labels: GraphQLLabels?
     let latestReviews: GraphQLLatestReviews?
+    let latestOpinionatedReviews: GraphQLLatestReviews?   // excludes comment-only reviews
     let commitAuthors: GraphQLCommitAuthors?
 }
 
@@ -892,7 +893,9 @@ final class GitHubClient {
         // review and nobody (you included) has requested changes. Badge-only fallback
         // for repos that leave `reviewDecision` null (see `PRSnapshot.approvalBadge`);
         // your own approval stays "You approved" via `viewerHasApproved`.
-        let nonAuthorReviews = (node.latestReviews?.nodes ?? []).filter {
+        // `latestOpinionatedReviews` skips comment-only reviews, so a later plain comment
+        // can't hide an earlier CHANGES_REQUESTED the way it would in `latestReviews`.
+        let nonAuthorReviews = (node.latestOpinionatedReviews?.nodes ?? node.latestReviews?.nodes ?? []).filter {
             !PRSnapshot.loginsMatch($0.author?.login ?? "", authorLogin)
         }
         let hasApproval: Bool = nonAuthorReviews.contains {
@@ -998,6 +1001,9 @@ final class GitHubClient {
           nodes { isResolved }
         }
         latestReviews(first: 20) {
+          nodes { state author { __typename login } }
+        }
+        latestOpinionatedReviews(first: 20) {
           nodes { state author { __typename login } }
         }
         commits(last: 1) {
