@@ -1,0 +1,8 @@
+# .agents/aw/telemetry.yml — the telemetry witness. Personal values live in ~/.agents/aw/config.yml.
+version: 1
+backend: dash0-mcp
+environments:
+  local: { service_name: mainline }   # OTEL_SERVICE_NAME default; dataset is personal
+ingest_wait_seconds: 45
+thresholds: { interactive_span_ms: 1000, repeated_child_spans: 10 }
+loops: 3

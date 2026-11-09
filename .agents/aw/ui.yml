@@ -1,0 +1,4 @@
+# .agents/aw/ui.yml — the browser witness. Not applicable: Mainline has no web surface.
+version: 1
+surface:
+  include: []

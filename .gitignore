@@ -1,5 +1,6 @@
 # Autonomous workflow artifacts
 .agent/
+.pr-reviewer-scratch/
 
 # Node / Nx
 node_modules/
