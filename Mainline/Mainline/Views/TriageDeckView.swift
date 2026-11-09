@@ -2484,7 +2484,7 @@ struct DraftBadge: View {
 
 // MARK: - ApprovalBadge / ConflictBadge
 
-/// Green "Approved" pill (or "You approved" when only your own review is in). It
+/// Green approval icon; hover shows "Approved" (or "You approved" when only your own review is in). It
 /// answers "has this been approved?" on its own; the row's CI icon, the
 /// `ConflictBadge`, and the unresolved-threads count (`FeedbackBadge`) say what is
 /// still blocking it — so approved+green, approved+failing CI, approved+conflicts
@@ -2495,32 +2495,16 @@ struct ApprovalBadge: View {
     var body: some View {
         switch pr.approvalBadge {
         case .approved:
-            pill("Approved", icon: "checkmark.seal.fill", color: Color(nsColor: .systemGreen))
+            IconBadge(icon: "checkmark.seal.fill", label: "Approved", color: Color(nsColor: .systemGreen))
         case .approvedByYou:
-            pill("You approved", icon: "checkmark.seal", color: Color(nsColor: .systemGreen))
+            IconBadge(icon: "checkmark.seal", label: "You approved", color: Color(nsColor: .systemGreen))
         case nil:
             EmptyView()
         }
     }
-
-    private func pill(_ text: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 2) {
-            Image(systemName: icon)
-            Text(text)
-        }
-        .font(.caption2)
-        .lineLimit(1)
-        .fixedSize()
-        .padding(.horizontal, 4)
-        .padding(.vertical, 1)
-        .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
-        .foregroundStyle(color)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(text)
-    }
 }
 
-/// Orange "Conflicts" pill for an open PR GitHub reports as unmergeable. Shown for
+/// Orange conflict icon for an open PR GitHub reports as unmergeable. Shown for
 /// every role on open PRs (never merged or closed) — a conflict is the reason an
 /// approved PR has no Merge button, and it needs a rebase from the author.
 struct ConflictBadge: View {
@@ -2528,21 +2512,31 @@ struct ConflictBadge: View {
 
     var body: some View {
         if pr.hasMergeConflict {
-            let color = Color(nsColor: .systemOrange)
-            HStack(spacing: 2) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                Text("Conflicts")
-            }
+            IconBadge(icon: "exclamationmark.triangle.fill", label: "Merge conflicts",
+                      color: Color(nsColor: .systemOrange))
+        }
+    }
+}
+
+/// Icon-only tinted pill whose name appears as a hover tooltip (and is the
+/// VoiceOver label). Keeps the row's metadata line short — the text pills crowded
+/// out the repo name — while the colour + glyph still carry the state.
+private struct IconBadge: View {
+    let icon: String
+    let label: String
+    let color: Color
+
+    var body: some View {
+        Image(systemName: icon)
             .font(.caption2)
-            .lineLimit(1)
             .fixedSize()
             .padding(.horizontal, 4)
             .padding(.vertical, 1)
             .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
             .foregroundStyle(color)
+            .help(label)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Merge conflicts")
-        }
+            .accessibilityLabel(label)
     }
 }
 
