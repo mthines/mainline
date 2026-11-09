@@ -673,7 +673,7 @@ struct PRSnapshot: Codable, Equatable {
         if ciStatus != .success { return "CI hasn't passed" }
         if reviewDecision != .approved {
             // The row shows the Approved pill off `hasApproval`; say why Merge is still off.
-            return reviewDecision == nil && hasApproval
+            return reviewDecision == nil && (hasApproval || viewerHasApproved)
                 ? "GitHub reports no review decision for this repo"
                 : "not approved yet"
         }
@@ -923,6 +923,9 @@ enum PRClassificationChecks {
         assert(make(author: me, reviewDecision: nil, hasApproval: true).mergeBlockReason
                == "GitHub reports no review decision for this repo",
                "pill says Approved while Merge is off → the toast explains why")
+        assert(make(author: "someone", reviewDecision: nil, viewerHasApproved: true).mergeBlockReason
+               == "GitHub reports no review decision for this repo",
+               "only you approved on a no-decision repo → the toast explains why Merge is off")
         assert(!make(author: me, reviewDecision: nil, hasApproval: true).readyToMerge,
                "fallback approval never makes a PR ready to merge")
         assert(!make(author: me, mergeable: nil).hasMergeConflict,
