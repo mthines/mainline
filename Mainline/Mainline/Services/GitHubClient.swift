@@ -888,16 +888,18 @@ final class GitHubClient {
                 && ($0.state?.uppercased() == "APPROVED")
         } ?? false)
 
-        // Whether a reviewer other than the PR author or you has an APPROVED latest review
-        // and nobody has requested changes. Badge-only fallback for repos that leave
-        // `reviewDecision` null (see `PRSnapshot.approvalBadge`).
-        let otherReviews = (node.latestReviews?.nodes ?? []).filter {
-            let login = $0.author?.login ?? ""
-            return !PRSnapshot.loginsMatch(login, authorLogin)
-                && !PRSnapshot.loginsMatch(login, myLogin)   // your own approval stays "You approved"
+        // Whether a reviewer other than the PR author or you has an APPROVED latest
+        // review and nobody (you included) has requested changes. Badge-only fallback
+        // for repos that leave `reviewDecision` null (see `PRSnapshot.approvalBadge`);
+        // your own approval stays "You approved" via `viewerHasApproved`.
+        let nonAuthorReviews = (node.latestReviews?.nodes ?? []).filter {
+            !PRSnapshot.loginsMatch($0.author?.login ?? "", authorLogin)
         }
-        let hasApproval: Bool = otherReviews.contains { $0.state?.uppercased() == "APPROVED" }
-            && !otherReviews.contains { $0.state?.uppercased() == "CHANGES_REQUESTED" }
+        let hasApproval: Bool = nonAuthorReviews.contains {
+                $0.state?.uppercased() == "APPROVED"
+                    && !PRSnapshot.loginsMatch($0.author?.login ?? "", myLogin)
+            }
+            && !nonAuthorReviews.contains { $0.state?.uppercased() == "CHANGES_REQUESTED" }
 
         // Whether the viewer authored (or co-authored) one of the sampled commits —
         // the signal that a bot-opened PR is really yours. `myLogin` is already

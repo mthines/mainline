@@ -380,8 +380,9 @@ struct PRSnapshot: Codable, Equatable {
     /// transition for your own attention state).
     var viewerHasApproved: Bool
 
-    /// Whether a reviewer OTHER than the PR author has an APPROVED latest review
-    /// (from GraphQL `latestReviews`). Badge-only fallback for repos that don't
+    /// Whether a reviewer other than the PR author or the viewer has an APPROVED
+    /// latest review and nobody has requested changes (from GraphQL
+    /// `latestReviews`). Badge-only fallback for repos that don't
     /// require reviews, where GitHub leaves `reviewDecision` null so an approval
     /// would otherwise never show the Approved pill (see `approvalBadge`). Decoded
     /// with `decodeIfPresent` + default `false`. NOT compared in PRDiffEngine and
