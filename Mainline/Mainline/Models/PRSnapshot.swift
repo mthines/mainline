@@ -380,6 +380,14 @@ struct PRSnapshot: Codable, Equatable {
     /// transition for your own attention state).
     var viewerHasApproved: Bool
 
+    /// Whether a reviewer OTHER than the PR author has an APPROVED latest review
+    /// (from GraphQL `latestReviews`). Badge-only fallback for repos that don't
+    /// require reviews, where GitHub leaves `reviewDecision` null so an approval
+    /// would otherwise never show the Approved pill (see `approvalBadge`). Decoded
+    /// with `decodeIfPresent` + default `false`. NOT compared in PRDiffEngine and
+    /// deliberately NOT read by `readyToMerge` / `actionGroup`.
+    var hasApproval: Bool
+
     /// Whether the authenticated viewer authored (or co-authored) at least one of
     /// this PR's commits. Sourced from GraphQL `commits.authors`, matched against
     /// the viewer's login at map time. Lets a PR a bot opened ON YOUR BEHALF (e.g.
@@ -428,6 +436,7 @@ struct PRSnapshot: Codable, Equatable {
         labels: [String] = [],
         authorIsBot: Bool = false,
         viewerHasApproved: Bool = false,
+        hasApproval: Bool = false,
         viewerIsCommitter: Bool = false
     ) {
         self.nodeId = nodeId
@@ -466,6 +475,7 @@ struct PRSnapshot: Codable, Equatable {
         self.labels = labels
         self.authorIsBot = authorIsBot
         self.viewerHasApproved = viewerHasApproved
+        self.hasApproval = hasApproval
         self.viewerIsCommitter = viewerIsCommitter
     }
 
@@ -480,7 +490,7 @@ struct PRSnapshot: Codable, Equatable {
         case sensitivePathFlags, unresolvedThreadCount
         case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
         case vercelPreviewUrl, vercelPreviewCheckedAt
-        case labels, authorIsBot, viewerHasApproved, viewerIsCommitter
+        case labels, authorIsBot, viewerHasApproved, hasApproval, viewerIsCommitter
     }
 
     init(from decoder: Decoder) throws {
@@ -522,6 +532,7 @@ struct PRSnapshot: Codable, Equatable {
         labels                = try c.decodeIfPresent([String].self,   forKey: .labels) ?? []
         authorIsBot           = try c.decodeIfPresent(Bool.self,       forKey: .authorIsBot) ?? false
         viewerHasApproved     = try c.decodeIfPresent(Bool.self,       forKey: .viewerHasApproved) ?? false
+        hasApproval           = try c.decodeIfPresent(Bool.self,       forKey: .hasApproval) ?? false
         viewerIsCommitter     = try c.decodeIfPresent(Bool.self,       forKey: .viewerIsCommitter) ?? false
     }
 
@@ -609,7 +620,10 @@ struct PRSnapshot: Codable, Equatable {
     }
 
     /// Which approval pill (if any) a row shows. `.approved` = GitHub's aggregate
-    /// `reviewDecision` is APPROVED (the PR is cleared to merge as far as reviews go);
+    /// `reviewDecision` is APPROVED (the PR is cleared to merge as far as reviews go),
+    /// or — only when `reviewDecision` is null, i.e. the repo doesn't require reviews —
+    /// another reviewer's latest review is an approval (`hasApproval`); a
+    /// `REVIEW_REQUIRED` decision never takes that fallback;
     /// `.approvedByYou` = you approved but the aggregate isn't APPROVED yet (still
     /// waiting on other required reviewers). Merged/closed PRs show neither.
     /// Deliberately independent of CI / conflicts / threads: those render as their
@@ -619,6 +633,7 @@ struct PRSnapshot: Codable, Equatable {
     var approvalBadge: ApprovalBadgeKind? {
         guard !merged, !closed else { return nil }
         if reviewDecision == .approved { return .approved }
+        if reviewDecision == nil && hasApproval { return .approved }
         if viewerHasApproved { return .approvedByYou }
         return nil
     }
@@ -846,6 +861,7 @@ enum PRClassificationChecks {
         unresolvedThreadCount: Int = 0,
         isDraft: Bool = false,
         viewerHasApproved: Bool = false,
+        hasApproval: Bool = false,
         requestedReviewers: [String] = [],
         requestedTeams: [String] = [],
         viewerIsCommitter: Bool = false
@@ -858,6 +874,7 @@ enum PRClassificationChecks {
             requestedTeams: requestedTeams,
             mergeable: mergeable, unresolvedThreadCount: unresolvedThreadCount,
             viewerHasApproved: viewerHasApproved,
+            hasApproval: hasApproval,
             viewerIsCommitter: viewerIsCommitter
         )
     }
@@ -890,6 +907,15 @@ enum PRClassificationChecks {
                "awaiting review → no approval pill")
         assert(make(author: "someone", reviewDecision: .reviewRequired, viewerHasApproved: true).approvalBadge == .approvedByYou,
                "only you approved → You approved")
+        // Badge-only fallback: another reviewer's approval counts only when the repo
+        // reports no decision (reviews not required); never on REVIEW_REQUIRED, and it
+        // must not make the PR merge-ready.
+        assert(make(author: "someone", reviewDecision: nil, hasApproval: true).approvalBadge == .approved,
+               "no decision + teammate approval → Approved pill")
+        assert(make(author: "someone", reviewDecision: .reviewRequired, hasApproval: true).approvalBadge == nil,
+               "REVIEW_REQUIRED + partial approval → no Approved pill")
+        assert(!make(author: me, reviewDecision: nil, hasApproval: true).readyToMerge,
+               "fallback approval never makes a PR ready to merge")
         assert(!make(author: me, mergeable: nil).hasMergeConflict,
                "unknown mergeability is not a conflict")
 
