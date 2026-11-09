@@ -1,0 +1,12 @@
+# .agents/aw/environments.yml — where the suite runs. Committed; no secrets.
+# Mainline is a native macOS menu-bar app: no URL, no login (PAT lives in the Keychain), no preview deploys.
+version: 1
+environments:
+  local:
+    url: ""
+    stack:
+      driver: command
+      commands:
+        - { name: mainline, run: pnpm run dev, ready_process: Mainline }   # nx -> scripts/dev.sh (fswatch + xcodebuild + relaunch); needs `brew install fswatch`
+    auth:
+      strategy: none
