@@ -608,6 +608,27 @@ struct PRSnapshot: Codable, Equatable {
         }
     }
 
+    /// Which approval pill (if any) a row shows. `.approved` = GitHub's aggregate
+    /// `reviewDecision` is APPROVED (the PR is cleared to merge as far as reviews go);
+    /// `.approvedByYou` = you approved but the aggregate isn't APPROVED yet (still
+    /// waiting on other required reviewers). Merged/closed PRs show neither.
+    /// Deliberately independent of CI / conflicts / threads: those render as their
+    /// own signals next to it, so "approved but blocked" reads as pill + blocker.
+    enum ApprovalBadgeKind: Equatable { case approved, approvedByYou }
+
+    var approvalBadge: ApprovalBadgeKind? {
+        guard !merged, !closed else { return nil }
+        if reviewDecision == .approved { return .approved }
+        if viewerHasApproved { return .approvedByYou }
+        return nil
+    }
+
+    /// Open PR with a known merge conflict (`mergeable == false`). `nil` mergeability
+    /// ("GitHub still computing") is NOT a conflict.
+    var hasMergeConflict: Bool {
+        mergeable == false && !merged && !closed
+    }
+
     /// Whether the PR is eligible for a one-click inline Merge: approved, cleanly
     /// mergeable, green CI, and open (non-draft, not merged/closed). Gates the
     /// inline Merge button on PR rows. The button still routes through the same
@@ -858,6 +879,19 @@ enum PRClassificationChecks {
         // Author role — approved + clean + green → Ready to merge.
         assert(group(make(author: me, reviewDecision: .approved)) == .readyToMerge,
                "author + approved + clean → readyToMerge")
+
+        // Approval pill + conflict pill are independent of CI / threads.
+        assert(make(author: me, reviewDecision: .approved, ciStatus: .failure).approvalBadge == .approved,
+               "approved + failing CI still shows Approved")
+        assert(make(author: me, reviewDecision: .approved, mergeable: false).approvalBadge == .approved
+               && make(author: me, reviewDecision: .approved, mergeable: false).hasMergeConflict,
+               "approved + conflict → Approved pill AND Conflicts pill")
+        assert(make(author: me, reviewDecision: .reviewRequired).approvalBadge == nil,
+               "awaiting review → no approval pill")
+        assert(make(author: "someone", reviewDecision: .reviewRequired, viewerHasApproved: true).approvalBadge == .approvedByYou,
+               "only you approved → You approved")
+        assert(!make(author: me, mergeable: nil).hasMergeConflict,
+               "unknown mergeability is not a conflict")
 
         // Reviewer role — clean, no signals → Ready for review.
         assert(group(make(author: "someone")) == .readyForReview,
