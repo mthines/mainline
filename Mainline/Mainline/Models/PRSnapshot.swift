@@ -380,6 +380,15 @@ struct PRSnapshot: Codable, Equatable {
     /// transition for your own attention state).
     var viewerHasApproved: Bool
 
+    /// Whether a reviewer other than the PR author or the viewer has an APPROVED
+    /// latest review and nobody has requested changes (from GraphQL
+    /// `latestReviews`). Badge-only fallback for repos that don't
+    /// require reviews, where GitHub leaves `reviewDecision` null so an approval
+    /// would otherwise never show the Approved pill (see `approvalBadge`). Decoded
+    /// with `decodeIfPresent` + default `false`. NOT compared in PRDiffEngine and
+    /// deliberately NOT read by `readyToMerge` / `actionGroup`.
+    var hasApproval: Bool
+
     /// Whether the authenticated viewer authored (or co-authored) at least one of
     /// this PR's commits. Sourced from GraphQL `commits.authors`, matched against
     /// the viewer's login at map time. Lets a PR a bot opened ON YOUR BEHALF (e.g.
@@ -428,6 +437,7 @@ struct PRSnapshot: Codable, Equatable {
         labels: [String] = [],
         authorIsBot: Bool = false,
         viewerHasApproved: Bool = false,
+        hasApproval: Bool = false,
         viewerIsCommitter: Bool = false
     ) {
         self.nodeId = nodeId
@@ -466,6 +476,7 @@ struct PRSnapshot: Codable, Equatable {
         self.labels = labels
         self.authorIsBot = authorIsBot
         self.viewerHasApproved = viewerHasApproved
+        self.hasApproval = hasApproval
         self.viewerIsCommitter = viewerIsCommitter
     }
 
@@ -480,7 +491,7 @@ struct PRSnapshot: Codable, Equatable {
         case sensitivePathFlags, unresolvedThreadCount
         case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
         case vercelPreviewUrl, vercelPreviewCheckedAt
-        case labels, authorIsBot, viewerHasApproved, viewerIsCommitter
+        case labels, authorIsBot, viewerHasApproved, hasApproval, viewerIsCommitter
     }
 
     init(from decoder: Decoder) throws {
@@ -522,6 +533,7 @@ struct PRSnapshot: Codable, Equatable {
         labels                = try c.decodeIfPresent([String].self,   forKey: .labels) ?? []
         authorIsBot           = try c.decodeIfPresent(Bool.self,       forKey: .authorIsBot) ?? false
         viewerHasApproved     = try c.decodeIfPresent(Bool.self,       forKey: .viewerHasApproved) ?? false
+        hasApproval           = try c.decodeIfPresent(Bool.self,       forKey: .hasApproval) ?? false
         viewerIsCommitter     = try c.decodeIfPresent(Bool.self,       forKey: .viewerIsCommitter) ?? false
     }
 
@@ -608,6 +620,31 @@ struct PRSnapshot: Codable, Equatable {
         }
     }
 
+    /// Which approval pill (if any) a row shows. `.approved` = GitHub's aggregate
+    /// `reviewDecision` is APPROVED (the PR is cleared to merge as far as reviews go),
+    /// or — only when `reviewDecision` is null, i.e. the repo doesn't require reviews —
+    /// another reviewer's latest review is an approval (`hasApproval`); a
+    /// `REVIEW_REQUIRED` decision never takes that fallback;
+    /// `.approvedByYou` = you approved but the aggregate isn't APPROVED yet (still
+    /// waiting on other required reviewers). Merged/closed PRs show neither.
+    /// Deliberately independent of CI / conflicts / threads: those render as their
+    /// own signals next to it, so "approved but blocked" reads as pill + blocker.
+    enum ApprovalBadgeKind: Equatable { case approved, approvedByYou }
+
+    var approvalBadge: ApprovalBadgeKind? {
+        guard !merged, !closed else { return nil }
+        if reviewDecision == .approved { return .approved }
+        if reviewDecision == nil && hasApproval { return .approved }
+        if viewerHasApproved { return .approvedByYou }
+        return nil
+    }
+
+    /// Open PR with a known merge conflict (`mergeable == false`). `nil` mergeability
+    /// ("GitHub still computing") is NOT a conflict.
+    var hasMergeConflict: Bool {
+        mergeable == false && !merged && !closed
+    }
+
     /// Whether the PR is eligible for a one-click inline Merge: approved, cleanly
     /// mergeable, green CI, and open (non-draft, not merged/closed). Gates the
     /// inline Merge button on PR rows. The button still routes through the same
@@ -634,7 +671,12 @@ struct PRSnapshot: Codable, Equatable {
         if mergeable == false { return "has merge conflicts" }
         if mergeable == nil { return "GitHub is still checking mergeability" }
         if ciStatus != .success { return "CI hasn't passed" }
-        if reviewDecision != .approved { return "not approved yet" }
+        if reviewDecision != .approved {
+            // The row shows the Approved pill off `hasApproval`; say why Merge is still off.
+            return reviewDecision == nil && (hasApproval || viewerHasApproved)
+                ? "GitHub reports no review decision for this repo"
+                : "not approved yet"
+        }
         return nil
     }
 
@@ -825,6 +867,7 @@ enum PRClassificationChecks {
         unresolvedThreadCount: Int = 0,
         isDraft: Bool = false,
         viewerHasApproved: Bool = false,
+        hasApproval: Bool = false,
         requestedReviewers: [String] = [],
         requestedTeams: [String] = [],
         viewerIsCommitter: Bool = false
@@ -837,6 +880,7 @@ enum PRClassificationChecks {
             requestedTeams: requestedTeams,
             mergeable: mergeable, unresolvedThreadCount: unresolvedThreadCount,
             viewerHasApproved: viewerHasApproved,
+            hasApproval: hasApproval,
             viewerIsCommitter: viewerIsCommitter
         )
     }
@@ -858,6 +902,34 @@ enum PRClassificationChecks {
         // Author role — approved + clean + green → Ready to merge.
         assert(group(make(author: me, reviewDecision: .approved)) == .readyToMerge,
                "author + approved + clean → readyToMerge")
+
+        // Approval pill + conflict pill are independent of CI / threads.
+        assert(make(author: me, reviewDecision: .approved, ciStatus: .failure).approvalBadge == .approved,
+               "approved + failing CI still shows Approved")
+        assert(make(author: me, reviewDecision: .approved, mergeable: false).approvalBadge == .approved
+               && make(author: me, reviewDecision: .approved, mergeable: false).hasMergeConflict,
+               "approved + conflict → Approved pill AND Conflicts pill")
+        assert(make(author: me, reviewDecision: .reviewRequired).approvalBadge == nil,
+               "awaiting review → no approval pill")
+        assert(make(author: "someone", reviewDecision: .reviewRequired, viewerHasApproved: true).approvalBadge == .approvedByYou,
+               "only you approved → You approved")
+        // Badge-only fallback: another reviewer's approval counts only when the repo
+        // reports no decision (reviews not required); never on REVIEW_REQUIRED, and it
+        // must not make the PR merge-ready.
+        assert(make(author: "someone", reviewDecision: nil, hasApproval: true).approvalBadge == .approved,
+               "no decision + teammate approval → Approved pill")
+        assert(make(author: "someone", reviewDecision: .reviewRequired, hasApproval: true).approvalBadge == nil,
+               "REVIEW_REQUIRED + partial approval → no Approved pill")
+        assert(make(author: me, reviewDecision: nil, hasApproval: true).mergeBlockReason
+               == "GitHub reports no review decision for this repo",
+               "pill says Approved while Merge is off → the toast explains why")
+        assert(make(author: "someone", reviewDecision: nil, viewerHasApproved: true).mergeBlockReason
+               == "GitHub reports no review decision for this repo",
+               "only you approved on a no-decision repo → the toast explains why Merge is off")
+        assert(!make(author: me, reviewDecision: nil, hasApproval: true).readyToMerge,
+               "fallback approval never makes a PR ready to merge")
+        assert(!make(author: me, mergeable: nil).hasMergeConflict,
+               "unknown mergeability is not a conflict")
 
         // Reviewer role — clean, no signals → Ready for review.
         assert(group(make(author: "someone")) == .readyForReview,

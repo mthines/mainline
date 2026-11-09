@@ -175,6 +175,7 @@ private struct GraphQLNode: Decodable {
     let reviewThreads: GraphQLReviewThreads?
     let labels: GraphQLLabels?
     let latestReviews: GraphQLLatestReviews?
+    let latestOpinionatedReviews: GraphQLLatestReviews?   // excludes comment-only reviews
     let commitAuthors: GraphQLCommitAuthors?
 }
 
@@ -888,6 +889,21 @@ final class GitHubClient {
                 && ($0.state?.uppercased() == "APPROVED")
         } ?? false)
 
+        // Whether a reviewer other than the PR author or you has an APPROVED latest
+        // review and nobody (you included) has requested changes. Badge-only fallback
+        // for repos that leave `reviewDecision` null (see `PRSnapshot.approvalBadge`);
+        // your own approval stays "You approved" via `viewerHasApproved`.
+        // `latestOpinionatedReviews` skips comment-only reviews, so a later plain comment
+        // can't hide an earlier CHANGES_REQUESTED the way it would in `latestReviews`.
+        let nonAuthorReviews = (node.latestOpinionatedReviews?.nodes ?? node.latestReviews?.nodes ?? []).filter {
+            !PRSnapshot.loginsMatch($0.author?.login ?? "", authorLogin)
+        }
+        let hasApproval: Bool = nonAuthorReviews.contains {
+                $0.state?.uppercased() == "APPROVED"
+                    && !PRSnapshot.loginsMatch($0.author?.login ?? "", myLogin)
+            }
+            && !nonAuthorReviews.contains { $0.state?.uppercased() == "CHANGES_REQUESTED" }
+
         // Whether the viewer authored (or co-authored) one of the sampled commits —
         // the signal that a bot-opened PR is really yours. `myLogin` is already
         // lowercased by the caller; `loginsMatch` makes the case rule explicit.
@@ -929,6 +945,7 @@ final class GitHubClient {
             labels:             labels,
             authorIsBot:        authorIsBot,
             viewerHasApproved:  viewerHasApproved,
+            hasApproval:        hasApproval,
             viewerIsCommitter:  viewerIsCommitter
         )
     }
@@ -984,6 +1001,9 @@ final class GitHubClient {
           nodes { isResolved }
         }
         latestReviews(first: 20) {
+          nodes { state author { __typename login } }
+        }
+        latestOpinionatedReviews(first: 20) {
           nodes { state author { __typename login } }
         }
         commits(last: 1) {
