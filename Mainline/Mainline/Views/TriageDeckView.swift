@@ -2509,8 +2509,8 @@ struct ApprovalBadge: View {
 }
 
 /// Orange "Conflicts" pill for an open PR GitHub reports as unmergeable. Shown for
-/// every role on open PRs (never merged or closed) — a conflict is the reason an approved PR has no Merge
-/// button, and it needs a rebase from the author.
+/// every role on open PRs (never merged or closed) — a conflict is the reason an
+/// approved PR has no Merge button, and it needs a rebase from the author.
 struct ConflictBadge: View {
     let pr: PRSnapshot
 
