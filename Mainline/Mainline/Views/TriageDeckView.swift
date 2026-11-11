@@ -320,8 +320,10 @@ struct TriageDeckView: View {
         )
         .onAppear { installScrollMonitor() }
         .onDisappear { removeScrollMonitor() }
-        // Entering search — or changing the query — focuses the top result, so the
-        // stale selection index from the full list can't point off the filtered set.
+        // Opening search, switching to/from the flat results, or changing the query
+        // focuses the top row, so a stale index can't point off-screen or off the set
+        // (Down from the field must land on row 0).
+        .onChange(of: searchActive) { if $0 { selectedIndex = 0 } }
         .onChange(of: searchMode) { _ in selectedIndex = 0 }
         .onChange(of: manager.searchQuery) { _ in if searchMode { selectedIndex = 0 } }
     }
