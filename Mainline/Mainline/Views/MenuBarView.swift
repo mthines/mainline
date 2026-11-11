@@ -752,8 +752,9 @@ struct MenuBarView: View {
     /// clamped — no NaN/∞/negative can reach the hosting view.
     @ViewBuilder
     private var scrollableBody: some View {
-        // While searching, always render the deck (it shows its own "No matching PRs"
-        // state) so a valid match isn't hidden by the tab-level empty short-circuit.
+        // While searching, always render the deck (with a query it shows its own
+        // "No matching PRs" state) so a valid match isn't hidden by the tab-level
+        // empty short-circuit.
         let isEmpty = !manager.hasToken || (!manager.searchActive && (
             settings.selectedTab == .inbox
                 ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty

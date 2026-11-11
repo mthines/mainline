@@ -228,7 +228,7 @@ struct TriageDeckView: View {
     var mutedPRs: [PRSnapshot] = []
     /// Whether the Inbox view is active (two role sections + Muted group).
     var inboxMode: Bool = false
-    /// Whether the in-app search is active. When true, `prs` is the already-filtered
+    /// Whether the search query is non-empty. When true, `prs` is the already-filtered
     /// search result set and the deck renders a single flat "Results" list (no
     /// actionability grouping, no Postponed/Done/Muted sections) so you can scan,
     /// J/K, and pin a specific PR. Overrides `inboxMode`.

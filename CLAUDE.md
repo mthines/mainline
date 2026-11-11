@@ -71,7 +71,7 @@ Mainline/Mainline/                     ← Source root
     ├── InboxSettingsView.swift   ← Inbox noise-filter settings: Review Readiness (four reviewer "not ready → Waiting" toggles: conflict / failing CI / unresolved threads / approved-by-me, all default ON), mute patterns, muteBotAuthors toggle, per-org Review Focus (org sub-blocks nested INSIDE the one Review Focus card via `orgFocusBlock`, each with a Remove button; authors+teams keyed by lowercased org, derived from `manager.knownOrgs` + saved config + an add-org field), muteLabels
     ├── KeyboardShortcutsView.swift ← Configurable deck/peek shortcuts UI: per-action `InAppShortcutRecorder`, clash detection, Reset All button
     ├── MenuBarIconView.swift     ← Dynamic badge: MenuBarBadge enum → SF Symbol + tint
-    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/E/M/T/R/S/N/X/V/D/Q/C/P/F/⌘Z) + TriageAction enum + per-row context menus (`rowContextMenu` for deck + Postponed rows, `doneRowContextMenu` for Done rows; see "Write actions") + hover-revealed section-header and stack-header copy button (`copyPRList` → `PRListExport`) + first-responder KeyCaptureView; deck keys are user-configurable via settings.shortcutBindings; Inbox mode: role sections (yourPRs / needsYourReview) + collapsed Muted group; Q toggles per-PR manual mute (settings.inboxMuteOverrides); T marks draft PR ready for review (draft-only, write-gated, plain toast); P pins/unpins the focused PR (floats it to the top of its group, `settings.pinnedNodeIds`); F opens the flat search-results view (`searchMode`)
+    ├── TriageDeckView.swift      ← Keyboard triage (J/K/Space/↵/E/M/T/R/S/N/X/V/D/Q/C/P/F/⌘Z) + TriageAction enum + per-row context menus (`rowContextMenu` for deck + Postponed rows, `doneRowContextMenu` for Done rows; see "Write actions") + hover-revealed section-header and stack-header copy button (`copyPRList` → `PRListExport`) + first-responder KeyCaptureView; deck keys are user-configurable via settings.shortcutBindings; Inbox mode: role sections (yourPRs / needsYourReview) + collapsed Muted group; Q toggles per-PR manual mute (settings.inboxMuteOverrides); T marks draft PR ready for review (draft-only, write-gated, plain toast); P pins/unpins the focused PR (floats it to the top of its group, `settings.pinnedNodeIds`); F opens the search bar (flat results view, `searchMode`, once a query is typed)
     ├── PRPeekView.swift          ← Space peek: instant glance card + async files list
     ├── UndoToastView.swift       ← Batched undo toast stack
     ├── TelemetryOptInBanner.swift← Dismissable Privacy-pane opt-in banner (consent-versioned)
@@ -397,8 +397,14 @@ unchanged pin doesn't fire `objectWillChange` every poll. Silent on failure — 
 never-cached pin just won't surface.
 
 **Search.** The `search` shortcut (default `F`) sets `PRManager.searchActive`, which makes
-`MenuBarView` render a search `TextField` and switch the deck into `searchMode`: a single FLAT
-"Results" list (no grouping, no Postponed/Done/Muted), pinned first. Focus is driven by
+`MenuBarView` render a search `TextField`. The deck stays on the normal grouped view while the
+query is EMPTY (an empty query matches every PR, and swapping to the flat list built a row per PR
+eagerly — a ~0.5–1s lag on open); only once something is typed (`MenuBarView.searchFiltering`)
+does it switch into `searchMode`: a single FLAT "Results" list (no grouping, no
+Postponed/Done/Muted), pinned first. `TriageDeckView.searchActive` (bar open) is distinct from
+`searchMode` (query non-empty) and drives focus-hiding, the Up-to-field handoff, and resetting
+`selectedIndex` to 0 on open. `KeyCaptureView` reclaims first responder when search closes —
+otherwise the removed field editor leaves nothing to take the next key and F beeps. Focus is driven by
 `searchFocusToken`; because the `TextField` is rendered conditionally on `searchActive`, both
 focus handlers (`searchFocusToken` bump AND `searchActive → true`) set `searchFieldFocused`
 inside `DispatchQueue.main.async` so the field exists in the tree before it is focused —
@@ -444,7 +450,7 @@ cursor stays put), and defers `searchFieldFocused = false` one runloop tick. It 
 the Down key — typing (incl. a bare `j` into the query), ←/→ cursor, Up, Return and Esc all
 pass through — and is torn down on blur / search-close / disappear (`removeSearchDownMonitor`).
 While the field holds focus, NO row shows the keyboard-focus highlight: `MenuBarView` passes
-`searchFieldFocused` into `TriageDeckView`, whose `showsKeyboardFocus` (`!(searchMode &&
+`searchFieldFocused` into `TriageDeckView`, whose `showsKeyboardFocus` (`!(searchActive &&
 searchFieldFocused)`) gates BOTH the visual (`deckRow`) and the `DeckRowKey` memo, so the top
 result isn't highlighted until Down actually moves focus into the list (and it hides again on
 the Up-from-first-row handoff back to the field).
