@@ -284,6 +284,16 @@ struct MenuBarView: View {
         manager.currentViewPRs.sorted(by: PRSnapshot.triageOrder)
     }
 
+    /// Whether the deck should swap to the flat results list. Only once the user has
+    /// typed something: an empty query matches EVERY PR, so swapping on open tore
+    /// down the grouped deck and eagerly built a flat row for each PR in a non-lazy
+    /// VStack — the 0.5–1s lag after pressing F. With an empty query the grouped
+    /// deck stays put and opening search is just the search bar appearing.
+    private var searchFiltering: Bool {
+        manager.searchActive
+            && !manager.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     /// The search matches for the current query, drawn from the whole tab
     /// (`searchBasePRs` — scope/draft independent) so a number/URL always resolves.
     /// The deck re-sorts these pinned-first; sorting here just gives a stable base.
@@ -777,11 +787,12 @@ struct MenuBarView: View {
             // "Needs attention" group (`ActionGroup.needsAttention`) is the single
             // "needs attention" concept — there is no separate top bucket.
             TriageDeckView(
-                prs: manager.searchActive ? searchResults : visiblePRs,
-                mutedPRs: (settings.selectedTab == .inbox && !manager.searchActive) ? manager.inboxMutedPRs : [],
-                inboxMode: settings.selectedTab == .inbox && !manager.searchActive,
-                searchMode: manager.searchActive,
+                prs: searchFiltering ? searchResults : visiblePRs,
+                mutedPRs: (settings.selectedTab == .inbox && !searchFiltering) ? manager.inboxMutedPRs : [],
+                inboxMode: settings.selectedTab == .inbox && !searchFiltering,
+                searchMode: searchFiltering,
                 searchFieldFocused: searchFieldFocused,
+                searchActive: manager.searchActive,
                 manager: manager,
                 settings: settings
             )

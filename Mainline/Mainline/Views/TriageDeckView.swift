@@ -239,6 +239,9 @@ struct TriageDeckView: View {
     /// The highlight appears once Down blurs the field (and hides again when Up on the
     /// first row returns focus to it).
     var searchFieldFocused: Bool = false
+    /// Search bar is open (even with an empty query, when the grouped deck is still
+    /// shown and `searchMode` is false). Drives focus-hiding and the Up-to-field handoff.
+    var searchActive: Bool = false
     @ObservedObject var manager: PRManager
     @ObservedObject var settings: MainlineSettings
 
@@ -311,7 +314,8 @@ struct TriageDeckView: View {
                     // rather than a stale search field.
                     manager.peekPR = nil
                     manager.closeSearch()
-                }
+                },
+                searchActive: searchActive
             )
         )
         .onAppear { installScrollMonitor() }
@@ -1091,7 +1095,7 @@ struct TriageDeckView: View {
     /// the user presses Down to enter the list. Both the visual (`deckRow`) and the
     /// memoization key (`DeckRowKey`) fold it in, so a focus change re-renders the row.
     private var showsKeyboardFocus: Bool {
-        !(searchMode && searchFieldFocused)
+        !(searchActive && searchFieldFocused)
     }
 
     private func memoizedDeckRow(pr: PRSnapshot, index: Int, stackBadge: String = "", stackCount: Int = 0) -> some View {
@@ -1890,7 +1894,7 @@ struct TriageDeckView: View {
             // In search, moving up from the first row returns focus to the search
             // field (it sits directly above the results). Bumping the token makes
             // MenuBarView refocus the field; the Down arrow there brings you back.
-            if searchMode, selectedIndex == 0 {
+            if searchActive, selectedIndex == 0 {
                 manager.searchFocusToken &+= 1
                 return nil
             }
@@ -2779,6 +2783,10 @@ private struct KeyCaptureView: NSViewRepresentable {
     /// closed. Used to dismiss transient overlays (the peek card) so they aren't
     /// still open when the popover is reopened.
     var onDismiss: (() -> Void)? = nil
+    /// Search bar open/closed. When it flips to closed the search TextField (and the
+    /// field editor holding first responder) is torn down, so the key view must
+    /// explicitly reclaim focus or the next keypress (e.g. F) goes nowhere → beep.
+    var searchActive: Bool = false
 
     func makeNSView(context: Context) -> KeyView {
         let view = KeyView()
@@ -2790,12 +2798,21 @@ private struct KeyCaptureView: NSViewRepresentable {
     func updateNSView(_ nsView: KeyView, context: Context) {
         nsView.handler = handler
         nsView.onDismiss = onDismiss
+        if nsView.lastSearchActive && !searchActive {
+            // Defer: the field is still in the tree during this update pass.
+            DispatchQueue.main.async { [weak nsView] in
+                guard let nsView, let window = nsView.window else { return }
+                window.makeFirstResponder(nsView)
+            }
+        }
+        nsView.lastSearchActive = searchActive
         nsView.reassertFocusIfIdle()
     }
 
     final class KeyView: NSView {
         var handler: ((NSEvent) -> NSEvent?)?
         var onDismiss: (() -> Void)?
+        var lastSearchActive = false
         private var resignObserver: NSObjectProtocol?
         override var acceptsFirstResponder: Bool { true }
 
