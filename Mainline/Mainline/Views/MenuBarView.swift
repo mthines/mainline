@@ -290,8 +290,11 @@ struct MenuBarView: View {
     /// VStack — the 0.5–1s lag after pressing F. With an empty query the grouped
     /// deck stays put and opening search is just the search bar appearing.
     private var searchFiltering: Bool {
-        manager.searchActive
-            && !manager.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        guard manager.searchActive else { return false }
+        // Same notion of "empty" as the matcher, so a whitespace/newline-only query
+        // (which matches every PR) never triggers the eager flat list.
+        if case .empty = PRSearchFilter.parse(manager.searchQuery) { return false }
+        return true
     }
 
     /// The search matches for the current query, drawn from the whole tab
