@@ -284,11 +284,9 @@ struct MenuBarView: View {
         manager.currentViewPRs.sorted(by: PRSnapshot.triageOrder)
     }
 
-    /// Whether the deck should swap to the flat results list. Only once the user has
-    /// typed something: an empty query matches EVERY PR, so swapping on open tore
-    /// down the grouped deck and eagerly built a flat row for each PR in a non-lazy
-    /// VStack — the 0.5–1s lag after pressing F. With an empty query the grouped
-    /// deck stays put and opening search is just the search bar appearing.
+    /// Swap to the flat results list only once something is typed: an empty query
+    /// matches every PR, and eagerly building a row for each was the 0.5–1s lag on
+    /// opening search.
     private var searchFiltering: Bool {
         guard manager.searchActive else { return false }
         // Same notion of "empty" as the matcher, so a whitespace/newline-only query
