@@ -284,6 +284,17 @@ struct MenuBarView: View {
         manager.currentViewPRs.sorted(by: PRSnapshot.triageOrder)
     }
 
+    /// Swap to the flat results list only once something is typed: an empty query
+    /// matches every PR, and eagerly building a row for each was the 0.5–1s lag on
+    /// opening search.
+    private var searchFiltering: Bool {
+        guard manager.searchActive else { return false }
+        // Same notion of "empty" as the matcher, so a whitespace/newline-only query
+        // (which matches every PR) never triggers the eager flat list.
+        if case .empty = PRSearchFilter.parse(manager.searchQuery) { return false }
+        return true
+    }
+
     /// The search matches for the current query, drawn from the whole tab
     /// (`searchBasePRs` — scope/draft independent) so a number/URL always resolves.
     /// The deck re-sorts these pinned-first; sorting here just gives a stable base.
@@ -742,8 +753,9 @@ struct MenuBarView: View {
     /// clamped — no NaN/∞/negative can reach the hosting view.
     @ViewBuilder
     private var scrollableBody: some View {
-        // While searching, always render the deck (it shows its own "No matching PRs"
-        // state) so a valid match isn't hidden by the tab-level empty short-circuit.
+        // While searching, always render the deck (with a query it shows its own
+        // "No matching PRs" state) so a valid match isn't hidden by the tab-level
+        // empty short-circuit.
         let isEmpty = !manager.hasToken || (!manager.searchActive && (
             settings.selectedTab == .inbox
                 ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty
@@ -777,11 +789,12 @@ struct MenuBarView: View {
             // "Needs attention" group (`ActionGroup.needsAttention`) is the single
             // "needs attention" concept — there is no separate top bucket.
             TriageDeckView(
-                prs: manager.searchActive ? searchResults : visiblePRs,
-                mutedPRs: (settings.selectedTab == .inbox && !manager.searchActive) ? manager.inboxMutedPRs : [],
-                inboxMode: settings.selectedTab == .inbox && !manager.searchActive,
-                searchMode: manager.searchActive,
+                prs: searchFiltering ? searchResults : visiblePRs,
+                mutedPRs: (settings.selectedTab == .inbox && !searchFiltering) ? manager.inboxMutedPRs : [],
+                inboxMode: settings.selectedTab == .inbox && !searchFiltering,
+                searchMode: searchFiltering,
                 searchFieldFocused: searchFieldFocused,
+                searchActive: manager.searchActive,
                 manager: manager,
                 settings: settings
             )
