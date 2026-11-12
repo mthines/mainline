@@ -2165,8 +2165,9 @@ struct TriageDeckView: View {
         case .copyBranch:
             copyBranch(pr)
         case .runPrompt:
-            // Whole stack by default (like pin / Later); Tab in the picker narrows it.
-            manager.promptPickerTarget = promptTarget(for: pr, wholeStack: true)
+            // The focused PR alone, even when stacked; Tab in the picker widens it to the
+            // whole stack. The stack header's menu is the entry point for a stack-wide run.
+            manager.promptPickerTarget = promptTarget(for: pr, wholeStack: false)
         case .togglePin:
             // Stack-aware: pinning any member pins the WHOLE stack so they stay
             // together and float to Pinned as one unit (and unpin together).
