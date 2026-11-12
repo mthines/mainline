@@ -2387,6 +2387,31 @@ struct TriageDeckView: View {
         PromptTarget(anchor: pr, members: members.count > 1 ? members : [pr], wholeStack: wholeStack)
     }
 
+    /// One template in the prompt menu: a button, or a submenu with one entry per harness
+    /// when the template runs on several.
+    @ViewBuilder
+    private func promptTemplateItem(_ template: PromptTemplate, on target: PromptTarget, starred: Bool) -> some View {
+        let config = manager.promptStore.config
+        let harnesses = PromptEngine.runnableHarnesses(template, config: config)
+        if harnesses.count > 1 {
+            Menu {
+                ForEach(harnesses, id: \.self) { key in
+                    Button(config.harnesses[key]?.label ?? key) {
+                        manager.runPromptTemplate(template.resolved(for: key), on: target)
+                    }
+                }
+            } label: {
+                if starred { Label(template.name, systemImage: "star.fill") } else { Text(template.name) }
+            }
+        } else {
+            Button {
+                manager.runPromptTemplate(template, on: target)
+            } label: {
+                if starred { Label(template.name, systemImage: "star.fill") } else { Text(template.name) }
+            }
+        }
+    }
+
     /// Submenu of prompt templates for `pr` at one scope: templates whose `when:` fits the
     /// target's state first (starred), then the rest, then the picker for a free prompt.
     @ViewBuilder
@@ -2400,17 +2425,11 @@ struct TriageDeckView: View {
         let others = ranked.filter { $0.reason == nil }
         Menu {
             ForEach(suggested, id: \.template.fileName) { entry in
-                Button {
-                    manager.runPromptTemplate(entry.template, on: target)
-                } label: {
-                    Label(entry.template.name, systemImage: "star.fill")
-                }
+                promptTemplateItem(entry.template, on: target, starred: true)
             }
             if !suggested.isEmpty && !others.isEmpty { Divider() }
             ForEach(others, id: \.template.fileName) { entry in
-                Button(entry.template.name) {
-                    manager.runPromptTemplate(entry.template, on: target)
-                }
+                promptTemplateItem(entry.template, on: target, starred: false)
             }
             if !ranked.isEmpty { Divider() }
             Button("Search / Custom Prompt…") {
