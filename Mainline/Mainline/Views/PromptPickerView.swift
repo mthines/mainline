@@ -34,7 +34,7 @@ struct PromptPickerView: View {
             .map(Item.template)
         let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return templates }
-        let custom = store.config.orderedHarnesses.map {
+        let custom = store.config.enabledHarnesses.map {
             Item.custom(harnessKey: $0.key, label: $0.value.label, text: typed)
         }
         return templates + custom

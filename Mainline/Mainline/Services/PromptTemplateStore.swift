@@ -159,7 +159,7 @@ final class PromptTemplateStore: ObservableObject {
         return PromptTemplate(
             fileName: PromptEngine.fileName(forName: name, existing: Set(templates.map(\.fileName))),
             name: name,
-            harness: config.orderedHarnesses.first?.key ?? "claude",
+            harness: config.enabledHarnesses.first?.key ?? "claude",
             checkout: false,
             body: "Review {{pr.url}}"
         )
@@ -174,6 +174,19 @@ final class PromptTemplateStore: ObservableObject {
 
     func delete(_ template: PromptTemplate) {
         try? FileManager.default.removeItem(at: promptsDirectory.appendingPathComponent(template.fileName))
+        reload()
+    }
+
+    /// Enables/disables a harness by rewriting `config.json`. Refuses while the file
+    /// can't be parsed — rewriting then would overwrite the user's hand edits.
+    func setHarnessEnabled(_ key: String, _ on: Bool) { apply(config.settingEnabled(key, on)) }
+
+    /// Moves a harness up (`-1`) or down (`+1`) in priority.
+    func moveHarness(_ key: String, by delta: Int) { apply(config.moving(key, by: delta)) }
+
+    private func apply(_ new: PromptConfig) {
+        guard configError == nil, new != config else { return }
+        writeConfig(new)
         reload()
     }
 

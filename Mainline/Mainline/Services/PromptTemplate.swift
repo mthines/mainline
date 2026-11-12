@@ -30,7 +30,10 @@ struct HarnessConfig: Codable, Equatable {
     var label: String
     var command: String?
     var url: String?
+    /// `false` hides the harness everywhere and refuses to run it. Absent = enabled.
+    var enabled: Bool?
 
+    var isEnabled: Bool { enabled != false }
     var isWeb: Bool { url != nil }
     /// The string the `{{prompt}}` placeholder lives in.
     var target: String { url ?? command ?? "" }
@@ -44,13 +47,17 @@ struct PromptConfig: Codable, Equatable {
     /// `owner/repo` → local clone path (`~` allowed). Harnesses start here.
     var repos: [String: String]
     var harnesses: [String: HarnessConfig]
+    /// Harness keys in priority order, first = default. Harnesses not listed come after,
+    /// sorted by label.
+    var order: [String]
 
-    enum CodingKeys: String, CodingKey { case checkout, repos, harnesses }
+    enum CodingKeys: String, CodingKey { case checkout, repos, harnesses, order }
 
-    init(checkout: String, repos: [String: String], harnesses: [String: HarnessConfig]) {
+    init(checkout: String, repos: [String: String], harnesses: [String: HarnessConfig], order: [String] = []) {
         self.checkout = checkout
         self.repos = repos
         self.harnesses = harnesses
+        self.order = order
     }
 
     /// Lenient: a hand-edited file that omits a section keeps that section's default
@@ -61,6 +68,7 @@ struct PromptConfig: Codable, Equatable {
         checkout = try c.decodeIfPresent(String.self, forKey: .checkout) ?? d.checkout
         repos = try c.decodeIfPresent([String: String].self, forKey: .repos) ?? [:]
         harnesses = try c.decodeIfPresent([String: HarnessConfig].self, forKey: .harnesses) ?? d.harnesses
+        order = try c.decodeIfPresent([String].self, forKey: .order) ?? d.order
     }
 
     static let `default` = PromptConfig(
@@ -73,13 +81,41 @@ struct PromptConfig: Codable, Equatable {
             "opencode": HarnessConfig(label: "opencode", command: "opencode --prompt {{prompt}}", url: nil),
             "agent0":   HarnessConfig(label: "Agent0 (web)", command: nil,
                                       url: "https://app.dash0.com/agent0?prompt={{prompt}}"),
-        ]
+        ],
+        order: ["claude", "codex", "amp", "opencode", "agent0"]
     )
 
-    /// Harnesses in a stable, human order (by label).
+    /// ALL harnesses (enabled or not) in priority order: `order` first, then the rest by label.
     var orderedHarnesses: [(key: String, value: HarnessConfig)] {
-        harnesses.sorted { $0.value.label.localizedCaseInsensitiveCompare($1.value.label) == .orderedAscending }
-            .map { (key: $0.key, value: $0.value) }
+        var rank: [String: Int] = [:]
+        for (i, key) in order.enumerated() where rank[key] == nil { rank[key] = i }
+        return harnesses.sorted { a, b in
+            let ra = rank[a.key] ?? Int.max, rb = rank[b.key] ?? Int.max
+            if ra != rb { return ra < rb }
+            return a.value.label.localizedCaseInsensitiveCompare(b.value.label) == .orderedAscending
+        }.map { (key: $0.key, value: $0.value) }
+    }
+
+    /// Enabled harnesses in priority order — what pickers offer; the first is the default.
+    var enabledHarnesses: [(key: String, value: HarnessConfig)] {
+        orderedHarnesses.filter { $0.value.isEnabled }
+    }
+
+    /// Moves a harness up (`-1`) or down (`+1`) in priority. Pure; no-op at the ends.
+    func moving(_ key: String, by delta: Int) -> PromptConfig {
+        var keys = orderedHarnesses.map(\.key)
+        guard let i = keys.firstIndex(of: key), keys.indices.contains(i + delta) else { return self }
+        keys.swapAt(i, i + delta)
+        var copy = self
+        copy.order = keys
+        return copy
+    }
+
+    /// Enables or disables a harness (enabled is stored as an absent field). Pure.
+    func settingEnabled(_ key: String, _ on: Bool) -> PromptConfig {
+        var copy = self
+        copy.harnesses[key]?.enabled = on ? nil : false
+        return copy
     }
 
     /// Local path for a repo (case-insensitive `owner/repo` match), `~` expanded.
@@ -124,6 +160,7 @@ enum PromptError: Error, Equatable, LocalizedError {
     case unknownPlaceholder(String)
     case harnessHasNoTarget(String)
     case placeholderInQuotes(String)
+    case harnessDisabled(String)
 
     var errorDescription: String? {
         switch self {
@@ -135,6 +172,8 @@ enum PromptError: Error, Equatable, LocalizedError {
             return "Unknown placeholder {{\(p)}}."
         case .harnessHasNoTarget(let h):
             return "Harness “\(h)” needs a `command` or a `url`."
+        case .harnessDisabled(let h):
+            return "Harness “\(h)” is disabled — turn it on in Settings → Prompts."
         case .placeholderInQuotes(let p):
             return "{{\(p)}} is inside quotes in a command — remove the quotes; Mainline already quotes it safely."
         }
@@ -232,6 +271,7 @@ enum PromptEngine {
 
     static func validate(harnessKey: String, config: PromptConfig) -> [PromptError] {
         guard let harness = config.harnesses[harnessKey] else { return [.unknownHarness(harnessKey)] }
+        if !harness.isEnabled { return [.harnessDisabled(harnessKey)] }
         if harness.target.isEmpty { return [.harnessHasNoTarget(harnessKey)] }
         if !harness.target.contains(promptToken) { return [.missingPromptPlaceholder(harness: harnessKey)] }
         if let command = harness.command, let bad = quotedPlaceholders(in: command).first {
@@ -414,6 +454,10 @@ enum PromptStarters {
         "claude": { "label": "Claude Code", "command": "claude {{prompt}}" }
         "agent0": { "label": "Agent0",      "url": "https://app.dash0.com/agent0?prompt={{prompt}}" }
 
+    "order" lists harness keys by priority (first = default: the one a free-typed
+    prompt asks first). Set "enabled": false on a harness to hide it and refuse to
+    run it. Settings → Prompts edits both with a toggle and up/down buttons.
+
     In a url, {{prompt}} is percent-encoded for you. In a command it expands to the
     prompt as a single shell argument.
 
@@ -526,6 +570,25 @@ enum PromptTemplateChecks {
         assert(PromptEngine.validate(wantsCheckout, config: quotedCheckout) == [.placeholderInQuotes("pr.branch")], "checkout step flagged")
         assert((try? PromptEngine.launch(prompt: "p", harnessKey: "claude", config: quotedCheckout, context: ctx,
                                          checkout: true, workingDirectory: "/tmp", promptFile: "/tmp/p")) == nil, "launch refuses a quoted checkout")
+
+        // Harness priority + enable/disable.
+        assert(cfg.orderedHarnesses.map(\.key) == ["claude", "codex", "amp", "opencode", "agent0"], "default priority order")
+        var custom = cfg
+        custom.harnesses["zed"] = HarnessConfig(label: "Zed", command: "zed {{prompt}}", url: nil)
+        custom.harnesses["aaa"] = HarnessConfig(label: "Aaa", command: "aaa {{prompt}}", url: nil)
+        assert(Array(custom.orderedHarnesses.map(\.key).suffix(2)) == ["aaa", "zed"], "unlisted harnesses follow, by label")
+        let promoted = custom.moving("agent0", by: -4)
+        assert(promoted.orderedHarnesses.first?.key == "agent0", "move to the top")
+        assert(promoted.moving("agent0", by: -1) == promoted, "no-op at the top")
+        assert(cfg.moving("opencode", by: 1).order.suffix(2) == ["agent0", "opencode"], "move down swaps with its neighbour")
+        let off = cfg.settingEnabled("claude", false)
+        assert(off.enabledHarnesses.first?.key == "codex", "disabled harness drops out; next is the default")
+        assert(off.orderedHarnesses.first?.key == "claude", "…but stays listed for Settings")
+        assert(PromptEngine.validate(harnessKey: "claude", config: off) == [.harnessDisabled("claude")], "disabled harness refuses to run")
+        assert(off.settingEnabled("claude", true) == cfg, "re-enabling restores the exact config")
+        assert((try? JSONDecoder().decode(PromptConfig.self, from: JSONEncoder().encode(off))) == off, "enabled/order survive JSON")
+        let noOrder = try? JSONDecoder().decode(PromptConfig.self, from: Data("{\"harnesses\":{\"b\":{\"label\":\"B\",\"command\":\"b {{prompt}}\"},\"a\":{\"label\":\"A\",\"command\":\"a {{prompt}}\",\"enabled\":false}}}".utf8))
+        assert(noOrder?.orderedHarnesses.map(\.key) == ["a", "b"] && noOrder?.enabledHarnesses.map(\.key) == ["b"], "order absent → by label; enabled:false honoured")
 
         // A hand-edited config missing sections keeps their defaults.
         let partial = try? JSONDecoder().decode(PromptConfig.self, from: Data("{\"repos\":{\"a/b\":\"~/x\"}}".utf8))

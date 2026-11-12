@@ -56,9 +56,14 @@ struct PromptsSettingsView: View {
         }
 
         Section("Harnesses & repositories") {
-            ForEach(store.config.orderedHarnesses, id: \.key) { entry in
-                harnessRow(key: entry.key, harness: entry.value)
+            let ordered = store.config.orderedHarnesses
+            ForEach(Array(ordered.enumerated()), id: \.element.key) { index, entry in
+                harnessRow(key: entry.key, harness: entry.value, index: index, count: ordered.count)
             }
+            Label("The first enabled harness is the default — a free-typed prompt that matches no template asks it first. Disabled harnesses are hidden from the picker and won't run.",
+                  systemImage: "info.circle")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if let error = store.configError {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
@@ -105,19 +110,36 @@ struct PromptsSettingsView: View {
         }
     }
 
-    private func harnessRow(key: String, harness: HarnessConfig) -> some View {
-        let problem = PromptEngine.validate(harnessKey: key, config: store.config).first
-        return HStack(alignment: .firstTextBaseline) {
-            Image(systemName: problem == nil ? "checkmark.circle" : "exclamationmark.triangle")
-                .foregroundStyle(problem == nil ? Color.green : Color.orange)
+    private func harnessRow(key: String, harness: HarnessConfig, index: Int, count: Int) -> some View {
+        // A disabled harness is not a problem — only a broken enabled one is.
+        let problem: PromptError? = harness.isEnabled
+            ? PromptEngine.validate(harnessKey: key, config: store.config).first : nil
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Toggle("", isOn: Binding(
+                get: { harness.isEnabled },
+                set: { store.setHarnessEnabled(key, $0) }
+            ))
+            .labelsHidden()
+            .help(harness.isEnabled ? "Enabled — click to disable" : "Disabled — click to enable")
             VStack(alignment: .leading, spacing: 1) {
-                Text("\(harness.label)  ·  \(key)")
+                HStack(spacing: 4) {
+                    Text("\(harness.label)  ·  \(key)")
+                    if problem != nil { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange) }
+                    if index == 0 && harness.isEnabled { Text("default").font(.caption2).foregroundStyle(.secondary) }
+                }
                 Text(harness.target).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)
                 if let problem {
                     Text(problem.localizedDescription).font(.caption).foregroundStyle(.orange)
                 }
             }
+            .opacity(harness.isEnabled ? 1 : 0.5)
+            Spacer(minLength: 0)
+            Button { store.moveHarness(key, by: -1) } label: { Image(systemName: "chevron.up") }
+                .disabled(index == 0).help("Higher priority")
+            Button { store.moveHarness(key, by: 1) } label: { Image(systemName: "chevron.down") }
+                .disabled(index == count - 1).help("Lower priority")
         }
+        .buttonStyle(.borderless)
     }
 
     // MARK: Editor
@@ -128,9 +150,13 @@ struct PromptsSettingsView: View {
         return Section(isNew ? "New template" : "Edit “\(current.name)”") {
             TextField("Name", text: binding.name)
             Picker("Harness", selection: binding.harness) {
-                ForEach(store.config.orderedHarnesses, id: \.key) { Text($0.value.label).tag($0.key) }
-                if store.config.harnesses[binding.wrappedValue.harness] == nil {
-                    Text("\(binding.wrappedValue.harness) (not configured)").tag(binding.wrappedValue.harness)
+                ForEach(store.config.enabledHarnesses, id: \.key) { Text($0.value.label).tag($0.key) }
+                // The template's current harness may be disabled or gone; keep it selectable
+                // (flagged) so the picker doesn't silently show a different one.
+                if !store.config.enabledHarnesses.contains(where: { $0.key == binding.wrappedValue.harness }) {
+                    let current = binding.wrappedValue.harness
+                    Text("\(store.config.harnesses[current]?.label ?? current) (\(store.config.harnesses[current] == nil ? "not configured" : "disabled"))")
+                        .tag(current)
                 }
             }
             Toggle("Check out the PR branch first", isOn: binding.checkout)
