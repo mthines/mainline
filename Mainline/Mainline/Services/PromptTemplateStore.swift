@@ -308,9 +308,18 @@ enum PromptLauncher {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             process.arguments = ["-n", app.path, "--args", "-e", script.path]
             try process.run()
+            // `open` hands off and exits at once, so waiting is brief; a non-zero status
+            // means the app never started, which must not read as "Started …".
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
         case .terminal, .iterm, .warp:
             guard let app = terminal.appURL else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
-            NSWorkspace.shared.open([script], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+            // The result arrives asynchronously, after `run` has returned its summary, so a
+            // failure can't change the toast — fall back to the system's `.command` handler
+            // instead of silently starting nothing.
+            NSWorkspace.shared.open([script], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if error != nil { NSWorkspace.shared.open(script) }
+            }
         }
     }
 
