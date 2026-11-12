@@ -9,16 +9,19 @@ import AppKit
 struct PromptPickerView: View {
     let pr: PRSnapshot
     @ObservedObject var store: PromptTemplateStore
+    /// `PromptState.active(pr:myLogin:)` — drives which templates are suggested first.
+    let activeStates: Set<String>
     let onRun: (Item) -> Void
     let onClose: () -> Void
 
     enum Item: Identifiable {
-        case template(PromptTemplate)
+        /// `reason` is why it is suggested for this PR (nil = not suggested).
+        case template(PromptTemplate, reason: String?)
         case custom(harnessKey: String, label: String, text: String)
 
         var id: String {
             switch self {
-            case .template(let t): return "t:\(t.fileName)"
+            case .template(let t, _): return "t:\(t.fileName)"
             case .custom(let key, _, _): return "c:\(key)"
             }
         }
@@ -30,8 +33,12 @@ struct PromptPickerView: View {
     @FocusState private var fieldFocused: Bool
 
     private var items: [Item] {
-        let templates = PromptEngine.filter(store.templates, query: query, config: store.config)
-            .map(Item.template)
+        // Filter by the query, then keep suggested-first order (so ↵ on an empty query
+        // runs the best fit for this PR's state).
+        let matching = Set(PromptEngine.filter(store.templates, query: query, config: store.config).map(\.fileName))
+        let templates = PromptState.ordered(store.templates, active: activeStates)
+            .filter { matching.contains($0.template.fileName) }
+            .map { Item.template($0.template, reason: $0.reason) }
         let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return templates }
         let custom = store.config.enabledHarnesses.map {
@@ -107,14 +114,16 @@ struct PromptPickerView: View {
     private func row(_ item: Item, isSelected: Bool) -> some View {
         HStack(spacing: 8) {
             switch item {
-            case .template(let t):
+            case .template(let t, let reason):
                 let problem = PromptEngine.validate(t, config: store.config).first
-                Image(systemName: problem == nil ? "text.quote" : "exclamationmark.triangle")
-                    .foregroundStyle(problem == nil ? Color.secondary : Color.orange)
+                Image(systemName: problem != nil ? "exclamationmark.triangle" : (reason != nil ? "star.fill" : "text.quote"))
+                    .foregroundStyle(problem != nil ? Color.orange : (reason != nil ? Color.accentColor : Color.secondary))
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(t.name).lineLimit(1)
-                    Text(problem?.localizedDescription ?? harnessLabel(t.harness) + (t.checkout ? " · checks out the PR branch" : ""))
+                    Text(problem?.localizedDescription
+                         ?? (reason.map { "Suggested: \($0) · " } ?? "")
+                            + harnessLabel(t.harness) + (t.checkout ? " · checks out the PR branch" : ""))
                         .font(.caption)
                         .foregroundStyle(problem == nil ? Color.secondary : Color.orange)
                         .lineLimit(1)

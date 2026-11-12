@@ -229,10 +229,11 @@ struct MenuBarView: View {
                     PromptPickerView(
                         pr: pr,
                         store: manager.promptStore,
+                        activeStates: PromptState.active(pr: pr, myLogin: settings.githubUsername),
                         onRun: { item in
                             manager.promptPickerPR = nil
                             switch item {
-                            case .template(let template):
+                            case .template(let template, _):
                                 manager.runPromptTemplate(template, on: pr)
                             case .custom(let harnessKey, _, let text):
                                 manager.runCustomPrompt(text, harnessKey: harnessKey, on: pr)

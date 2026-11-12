@@ -19,6 +19,11 @@ struct PromptTemplate: Identifiable, Equatable {
     /// Run `PromptConfig.checkout` in the repo's local path before the harness starts.
     var checkout: Bool
     var body: String
+    /// When the template is SUGGESTED for a PR — see `PromptState`. Empty = never
+    /// suggested (always available, but never floated to the top).
+    var when: String = ""
+    /// Orders suggested templates; higher first. Default 0.
+    var priority: Int = 0
 
     var id: String { fileName }
 }
@@ -151,6 +156,112 @@ struct PromptContext: Equatable {
                                    "pr.owner", "pr.branch", "pr.base", "pr.author"]
 }
 
+// MARK: - PR state → template suggestions
+
+/// Which templates fit a PR right now. A template's `when:` is a small expression over
+/// PR-state tokens: `,` separates alternatives (OR), `+` joins tokens inside one
+/// alternative (AND), `!` negates a token.
+///
+///     when: authored+conflict, authored+ci-failing   # either situation
+///     when: reviewing+!draft                         # someone else's, not a draft
+///
+/// Suggested templates float to the top of the picker and the menu, ordered by
+/// `priority` (higher first); the rest keep their usual order below them.
+enum PromptState {
+    /// token → what it means (drives validation, Settings help and the README).
+    static let tokens: [(name: String, meaning: String)] = [
+        ("ci-failing", "CI failed or errored"),
+        ("ci-passing", "CI is green"),
+        ("ci-pending", "CI is still running"),
+        ("conflict", "has a merge conflict"),
+        ("changes-requested", "a reviewer requested changes"),
+        ("approved", "approved"),
+        ("review-required", "still needs a review"),
+        ("unresolved-threads", "has unresolved review threads"),
+        ("draft", "is a draft"),
+        ("ready", "open and not a draft"),
+        ("ready-to-merge", "approved, green and mergeable"),
+        ("open", "not merged or closed"),
+        ("merged", "merged"),
+        ("closed", "closed without merging"),
+        ("authored", "you opened it (or committed to it)"),
+        ("reviewing", "someone else's PR"),
+    ]
+    static var tokenNames: [String] { tokens.map(\.name) }
+
+    /// The tokens that hold for `pr`.
+    static func active(pr: PRSnapshot, myLogin: String) -> Set<String> {
+        var s = Set<String>()
+        if pr.ciStatus == .failure || pr.ciStatus == .error { s.insert("ci-failing") }
+        if pr.ciStatus == .success { s.insert("ci-passing") }
+        if pr.ciStatus == .pending { s.insert("ci-pending") }
+        if pr.mergeable == false { s.insert("conflict") }
+        if pr.reviewDecision == .changesRequested { s.insert("changes-requested") }
+        if pr.reviewDecision == .approved { s.insert("approved") }
+        if pr.reviewDecision == .reviewRequired { s.insert("review-required") }
+        if pr.unresolvedThreadCount > 0 { s.insert("unresolved-threads") }
+        let isOpen = !pr.closed && !pr.merged
+        if pr.isDraft { s.insert("draft") }
+        if isOpen { s.insert("open"); if !pr.isDraft { s.insert("ready") } }
+        if pr.readyToMerge { s.insert("ready-to-merge") }
+        if pr.merged { s.insert("merged") }
+        if pr.closed && !pr.merged { s.insert("closed") }
+        s.insert(PRSnapshot.loginsMatch(pr.author, myLogin) || pr.viewerIsCommitter ? "authored" : "reviewing")
+        return s
+    }
+
+    typealias Term = (token: String, negated: Bool)
+
+    /// Parses an expression into OR-alternatives of AND-terms, and the unknown tokens.
+    static func parse(_ expression: String) -> (alternatives: [[Term]], unknown: [String]) {
+        var alternatives: [[Term]] = []
+        var unknown: [String] = []
+        for alt in expression.split(separator: ",") {
+            var terms: [Term] = []
+            for raw in alt.split(separator: "+") {
+                var t = raw.trimmingCharacters(in: .whitespaces).lowercased()
+                guard !t.isEmpty else { continue }
+                let negated = t.hasPrefix("!")
+                if negated { t = String(t.dropFirst()).trimmingCharacters(in: .whitespaces) }
+                if !tokenNames.contains(t) { unknown.append(t) }
+                terms.append((token: t, negated: negated))
+            }
+            if !terms.isEmpty { alternatives.append(terms) }
+        }
+        return (alternatives, unknown)
+    }
+
+    /// The first alternative that holds, rendered for display ("authored + ci-failing");
+    /// nil when none does or the expression is empty/invalid.
+    static func matchedAlternative(_ expression: String, active: Set<String>) -> String? {
+        let parsed = parse(expression)
+        guard parsed.unknown.isEmpty else { return nil }
+        for alt in parsed.alternatives where alt.allSatisfy({ active.contains($0.token) != $0.negated }) {
+            return alt.map { ($0.negated ? "not " : "") + $0.token }.joined(separator: " + ")
+        }
+        return nil
+    }
+
+    struct Ranked: Equatable {
+        var template: PromptTemplate
+        /// Why it is suggested; nil = not suggested.
+        var reason: String?
+    }
+
+    /// Suggested templates first (priority high → low, ties keep file order), then the
+    /// rest in file order. Stable, so the unsuggested list never reshuffles.
+    static func ordered(_ templates: [PromptTemplate], active: Set<String>) -> [Ranked] {
+        let ranked = templates.map { Ranked(template: $0, reason: matchedAlternative($0.when, active: active)) }
+        let suggested = ranked.enumerated().filter { $0.element.reason != nil }
+            .sorted { a, b in
+                a.element.template.priority != b.element.template.priority
+                    ? a.element.template.priority > b.element.template.priority
+                    : a.offset < b.offset
+            }.map(\.element)
+        return suggested + ranked.filter { $0.reason == nil }
+    }
+}
+
 // MARK: - Engine (pure)
 
 enum PromptError: Error, Equatable, LocalizedError {
@@ -160,6 +271,7 @@ enum PromptError: Error, Equatable, LocalizedError {
     case harnessHasNoTarget(String)
     case placeholderInQuotes(String)
     case harnessDisabled(String)
+    case unknownStateToken(String)
 
     var errorDescription: String? {
         switch self {
@@ -171,6 +283,8 @@ enum PromptError: Error, Equatable, LocalizedError {
             return "Unknown placeholder {{\(p)}}."
         case .harnessHasNoTarget(let h):
             return "Harness “\(h)” needs a `command` or a `url`."
+        case .unknownStateToken(let t):
+            return "Unknown state “\(t)” in `when:` — known: \(PromptState.tokenNames.joined(separator: ", "))."
         case .harnessDisabled(let h):
             return "Harness “\(h)” is disabled — turn it on in Settings → Prompts."
         case .placeholderInQuotes(let p):
@@ -225,7 +339,9 @@ enum PromptEngine {
             name: name,
             harness: meta["harness"] ?? "claude",
             checkout: checkout,
-            body: body.trimmingCharacters(in: .whitespacesAndNewlines)
+            body: body.trimmingCharacters(in: .whitespacesAndNewlines),
+            when: meta["when"] ?? "",
+            priority: Int(meta["priority"] ?? "") ?? 0
         )
     }
 
@@ -235,7 +351,7 @@ enum PromptEngine {
         name: \(t.name)
         harness: \(t.harness)
         checkout: \(t.checkout ? "true" : "false")
-        ---
+        \(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")---
         \(t.body)
 
         """
@@ -262,6 +378,7 @@ enum PromptEngine {
         for name in placeholders(in: template.body) where !PromptContext.placeholderNames.contains(name) {
             errors.append(.unknownPlaceholder(name))
         }
+        errors.append(contentsOf: PromptState.parse(template.when).unknown.map(PromptError.unknownStateToken))
         if template.checkout, let bad = quotedPlaceholders(in: config.checkout).first {
             errors.append(.placeholderInQuotes(bad))
         }
@@ -443,6 +560,18 @@ enum PromptStarters {
         Your prompt. Placeholders: {{pr.url}} {{pr.number}} {{pr.title}} {{pr.repo}}
         {{pr.owner}} {{pr.branch}} {{pr.base}} {{pr.author}}
 
+    Suggesting templates by PR state
+    --------------------------------
+    Add `when:` to float a template to the top of the picker and the right-click menu
+    when the PR is in that state, and `priority:` to order templates that match at once
+    (higher first; default 0). Templates without `when:` stay available, just never
+    floated. Syntax: `,` = or, `+` = and, `!` = not:
+
+        when: authored+conflict, authored+ci-failing     # either situation
+        when: reviewing+ready                            # someone else's PR, not a draft
+
+    States: \(PromptState.tokenNames.joined(separator: " "))
+
     config.json
     -----------
     "harnesses" maps a key to either a `command` (run in your terminal) or a `url`
@@ -491,6 +620,12 @@ enum PromptStarters {
         # checkout: true runs config.json's "checkout" step in the repo's local clone first.
         #           Needs the repo listed under "repos" in config.json.
         checkout: true
+        # when: float this template to the top when the PR is in this state. `,` = or, `+` = and,
+        #       `!` = not. States: ci-failing ci-passing ci-pending conflict changes-requested approved
+        #       review-required unresolved-threads draft ready ready-to-merge open merged closed authored reviewing
+        when: reviewing+ready
+        # priority: orders templates that are suggested at once (higher first). Default 0.
+        priority: 10
         # Everything below the closing --- is the prompt, sent as-is, with these filled in:
         # {{pr.url}} {{pr.number}} {{pr.title}} {{pr.repo}} {{pr.owner}} {{pr.branch}} {{pr.base}} {{pr.author}}
         ---
@@ -506,26 +641,45 @@ enum PromptStarters {
             Review {{pr.url}} — "{{pr.title}}" ({{pr.branch}} → {{pr.base}}).
             Focus on correctness, missed edge cases and unresolved review threads.
             Report findings ranked by severity; don't change any code.
-            """),
+            """,
+            when: "reviewing+ready", priority: 10),
+        PromptTemplate(
+            fileName: "resolve-conflicts.md", name: "Resolve merge conflicts", harness: "claude", checkout: true,
+            body: """
+            {{pr.url}} ({{pr.branch}}) has merge conflicts with {{pr.base}}. Merge or
+            rebase {{pr.base}} into the branch, resolve the conflicts keeping both sides'
+            intent, run the tests, and push.
+            """,
+            when: "authored+conflict", priority: 30),
+        PromptTemplate(
+            fileName: "fix-ci.md", name: "Fix failing CI", harness: "claude", checkout: true,
+            body: """
+            CI is failing on {{pr.url}} ({{pr.branch}}). Read the failing job logs, find the
+            cause, fix it on this branch, verify locally and push. Never weaken a test.
+            """,
+            when: "authored+ci-failing", priority: 20),
         PromptTemplate(
             fileName: "address-feedback.md", name: "Address review feedback", harness: "claude", checkout: true,
             body: """
             Read the review comments on {{pr.url}} and address each unresolved thread
             on this branch ({{pr.branch}}). Commit each fix separately.
-            """),
+            """,
+            when: "authored+changes-requested, authored+unresolved-threads", priority: 15),
         PromptTemplate(
             fileName: "analyse-telemetry.md", name: "Analyse telemetry", harness: "agent0", checkout: false,
             body: """
             Look at the telemetry for the services {{pr.url}} ("{{pr.title}}") touches in
             {{pr.repo}}. Has error rate, latency or log volume changed since it was
             deployed? Report what you find and what it points to.
-            """),
+            """,
+            when: "merged", priority: 5),
         PromptTemplate(
             fileName: "verify-preview.md", name: "Verify preview", harness: "agent0", checkout: false,
             body: """
             Verify the preview deployment of {{pr.url}} ("{{pr.title}}"): exercise the
             change, then check the telemetry from that traffic for errors and slow paths.
-            """),
+            """,
+            when: "authored+ready+ci-passing", priority: 5),
     ]
 }
 
@@ -580,6 +734,43 @@ enum PromptTemplateChecks {
         assert(PromptEngine.validate(wantsCheckout, config: quotedCheckout) == [.placeholderInQuotes("pr.branch")], "checkout step flagged")
         assert((try? PromptEngine.launch(prompt: "p", harnessKey: "claude", config: quotedCheckout, context: ctx,
                                          checkout: true, workingDirectory: "/tmp", promptFile: "/tmp/p")) == nil, "launch refuses a quoted checkout")
+
+        // PR-state suggestions.
+        func pr(author: String = "me", draft: Bool = false, ci: CIStatus = .success, mergeable: Bool? = true,
+                decision: ReviewDecision? = nil, threads: Int = 0, merged: Bool = false) -> PRSnapshot {
+            PRSnapshot(nodeId: "n", number: 1, title: "t", htmlUrl: "https://github.com/o/r/pull/1",
+                       repoFullName: "o/r", isDraft: draft, state: merged ? "closed" : "open",
+                       merged: merged, closed: merged, reviewDecision: decision, ciStatus: ci,
+                       reviewState: .approved, commentCount: 0, updatedAt: "", author: author,
+                       requestedReviewers: [], mergeable: mergeable, unresolvedThreadCount: threads)
+        }
+        let failing = PromptState.active(pr: pr(ci: .failure, mergeable: false, threads: 2), myLogin: "ME")
+        assert(failing.isSuperset(of: ["ci-failing", "conflict", "unresolved-threads", "authored", "ready", "open"]), "state tokens (login case-insensitive)")
+        assert(!failing.contains("reviewing") && !failing.contains("ci-passing"), "…and only those")
+        let theirs = PromptState.active(pr: pr(author: "other", draft: true), myLogin: "me")
+        assert(theirs.isSuperset(of: ["reviewing", "draft", "open"]) && !theirs.contains("ready"), "draft is not ready")
+        assert(PromptState.active(pr: pr(decision: .approved), myLogin: "me").contains("ready-to-merge"), "ready-to-merge")
+        assert(PromptState.active(pr: pr(merged: true), myLogin: "me").isSuperset(of: ["merged"]), "merged")
+        assert(PromptState.parse("authored+conflict, !draft").alternatives.count == 2, "OR of alternatives")
+        assert(PromptState.parse("authored+nope").unknown == ["nope"], "unknown token reported")
+        assert(PromptState.matchedAlternative("authored+conflict, !draft", active: failing) == "authored + conflict", "first matching alternative")
+        assert(PromptState.matchedAlternative("!draft", active: failing) == "not draft", "negation")
+        assert(PromptState.matchedAlternative("reviewing+ready", active: failing) == nil, "AND needs every term")
+        assert(PromptState.matchedAlternative("", active: failing) == nil, "empty when is never suggested")
+        assert(PromptState.matchedAlternative("authored+nope", active: failing) == nil, "invalid expression never matches")
+        let starters = PromptStarters.templates
+        let mine = PromptState.ordered(starters, active: failing).map(\.template.fileName)
+        assert(Array(mine.prefix(3)) == ["resolve-conflicts.md", "fix-ci.md", "address-feedback.md"], "conflict (30) > CI (20) > feedback (15)")
+        let rest = PromptState.ordered(starters, active: failing).filter { $0.reason == nil }.map(\.template.fileName)
+        assert(rest == starters.map(\.fileName).filter { !Array(mine.prefix(3)).contains($0) }, "unsuggested keep file order")
+        assert(PromptState.ordered(starters, active: PromptState.active(pr: pr(author: "other"), myLogin: "me")).first?.template.fileName == "review-pr.md", "someone else's ready PR → review first")
+        assert(PromptState.ordered(starters, active: PromptState.active(pr: pr(merged: true), myLogin: "me")).first?.template.fileName == "analyse-telemetry.md", "merged → telemetry first")
+        assert(PromptState.ordered(starters, active: []).map(\.template.fileName) == starters.map(\.fileName), "no state → file order")
+        var withWhen = tpl0; withWhen.when = "authored+nope"
+        assert(PromptEngine.validate(withWhen, config: cfg) == [.unknownStateToken("nope")], "validate flags unknown state")
+        var rt = tpl0; rt.when = "authored+conflict"; rt.priority = 7
+        assert(PromptEngine.parse(fileName: "q.md", text: PromptEngine.serialize(rt)) == rt, "when/priority round-trip")
+        assert(PromptEngine.parse(fileName: "q.md", text: PromptEngine.serialize(tpl0))?.priority == 0, "default priority 0")
 
         // Harness priority + enable/disable.
         assert(cfg.orderedHarnesses.map(\.key) == ["claude", "agent0"], "default priority: Claude Code, then Agent0")

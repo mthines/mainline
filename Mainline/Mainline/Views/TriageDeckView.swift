@@ -1501,10 +1501,21 @@ struct TriageDeckView: View {
         // Agent harnesses: one entry per template in ~/.config/mainline/prompts, plus
         // the picker (type-to-filter, or a free-typed prompt).
         Menu {
-            ForEach(manager.promptStore.templates) { template in
-                Button(template.name) { manager.runPromptTemplate(template, on: pr) }
+            // Templates whose `when:` fits this PR's state come first, starred.
+            let ranked = PromptState.ordered(manager.promptStore.templates,
+                                             active: PromptState.active(pr: pr, myLogin: settings.githubUsername))
+            let suggested = ranked.filter { $0.reason != nil }
+            let others = ranked.filter { $0.reason == nil }
+            ForEach(suggested, id: \.template.fileName) { entry in
+                Button { manager.runPromptTemplate(entry.template, on: pr) } label: {
+                    Label(entry.template.name, systemImage: "star.fill")
+                }
             }
-            if !manager.promptStore.templates.isEmpty { Divider() }
+            if !suggested.isEmpty && !others.isEmpty { Divider() }
+            ForEach(others, id: \.template.fileName) { entry in
+                Button(entry.template.name) { manager.runPromptTemplate(entry.template, on: pr) }
+            }
+            if !ranked.isEmpty { Divider() }
             Button("Search / Custom Prompt…") { handleTriageAction(.runPrompt, on: pr) }
         } label: {
             Label("Run Prompt", systemImage: "terminal")

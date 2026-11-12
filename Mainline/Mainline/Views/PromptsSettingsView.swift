@@ -101,7 +101,8 @@ struct PromptsSettingsView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(template.name)
                 Text(problem?.localizedDescription
-                     ?? (store.config.harnesses[template.harness]?.label ?? template.harness))
+                     ?? ((store.config.harnesses[template.harness]?.label ?? template.harness)
+                         + (template.when.isEmpty ? "" : " · suggested when \(template.when)")))
                     .font(.caption)
                     .foregroundStyle(problem == nil ? Color.secondary : Color.orange)
             }
@@ -160,6 +161,11 @@ struct PromptsSettingsView: View {
                 }
             }
             Toggle("Check out the PR branch first", isOn: binding.checkout)
+            TextField("Suggest when", text: binding.when, prompt: Text("e.g. authored+conflict, authored+ci-failing"))
+            Stepper("Priority: \(binding.wrappedValue.priority)", value: binding.priority, in: -100...100)
+            Text("Suggested templates float to the top of the picker and menu, higher priority first. `,` = or, `+` = and, `!` = not. States: "
+                 + PromptState.tokens.map { "\($0.name) (\($0.meaning))" }.joined(separator: ", "))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Prompt").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: binding.body)
