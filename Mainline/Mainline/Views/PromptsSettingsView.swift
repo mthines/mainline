@@ -151,7 +151,17 @@ struct PromptsSettingsView: View {
         let problems = PromptEngine.validate(binding.wrappedValue, config: store.config)
         return Section(isNew ? "New template" : "Edit “\(current.name)”") {
             TextField("Name", text: binding.name)
-            Picker("Harness", selection: binding.harness) {
+            Picker("Harness", selection: Binding(
+                get: { binding.wrappedValue.harness },
+                set: { new in
+                    var t = binding.wrappedValue
+                    t.harness = new
+                    // The new default can't also be an extra; drop its per-harness body too.
+                    t.extraHarnesses.removeAll { $0 == new }
+                    t.harnessBodies[new] = nil
+                    binding.wrappedValue = t
+                }
+            )) {
                 ForEach(store.config.enabledHarnesses, id: \.key) { Text($0.value.label).tag($0.key) }
                 // The template's current harness may be disabled or gone; keep it selectable
                 // (flagged) so the picker doesn't silently show a different one.
