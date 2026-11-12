@@ -921,6 +921,10 @@ struct MenuBarView: View {
             "\(g(.merge)) merge",
             "\(g(.snooze)) later",
         ]
+        // Right after "pin"; hidden while unbound (an upgrade whose default "a" was taken).
+        if !b.runPrompt.key.isEmpty, let pinIndex = parts.firstIndex(where: { $0.hasSuffix(" pin") }) {
+            parts.insert("\(g(.runPrompt)) agent", at: pinIndex + 1)
+        }
         if settings.selectedTab == .inbox {
             parts.append("\(g(.toggleMute)) mute")
         }

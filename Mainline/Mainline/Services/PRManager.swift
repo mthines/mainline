@@ -1071,6 +1071,11 @@ final class PRManager: ObservableObject {
         guard !didStart else { return }
         didStart = true
         promptStore.start()
+        // The store is a `let`, so forward its changes: the deck re-renders (and its
+        // row key picks up `promptStore.revision`) when a template is edited on disk.
+        promptStore.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
 
         // Notification authorization runs OFF the critical path, in its own task.
         // The system prompt does not return until the user answers it, and nothing

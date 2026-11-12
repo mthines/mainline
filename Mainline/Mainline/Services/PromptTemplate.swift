@@ -45,6 +45,24 @@ struct PromptConfig: Codable, Equatable {
     var repos: [String: String]
     var harnesses: [String: HarnessConfig]
 
+    enum CodingKeys: String, CodingKey { case checkout, repos, harnesses }
+
+    init(checkout: String, repos: [String: String], harnesses: [String: HarnessConfig]) {
+        self.checkout = checkout
+        self.repos = repos
+        self.harnesses = harnesses
+    }
+
+    /// Lenient: a hand-edited file that omits a section keeps that section's default
+    /// instead of being rejected whole (which would silently leave the defaults active).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = PromptConfig.default
+        checkout = try c.decodeIfPresent(String.self, forKey: .checkout) ?? d.checkout
+        repos = try c.decodeIfPresent([String: String].self, forKey: .repos) ?? [:]
+        harnesses = try c.decodeIfPresent([String: HarnessConfig].self, forKey: .harnesses) ?? d.harnesses
+    }
+
     static let `default` = PromptConfig(
         checkout: "gh pr checkout {{pr.number}}",
         repos: [:],
@@ -105,6 +123,7 @@ enum PromptError: Error, Equatable, LocalizedError {
     case unknownHarness(String)
     case unknownPlaceholder(String)
     case harnessHasNoTarget(String)
+    case placeholderInQuotes(String)
 
     var errorDescription: String? {
         switch self {
@@ -116,6 +135,8 @@ enum PromptError: Error, Equatable, LocalizedError {
             return "Unknown placeholder {{\(p)}}."
         case .harnessHasNoTarget(let h):
             return "Harness “\(h)” needs a `command` or a `url`."
+        case .placeholderInQuotes(let p):
+            return "{{\(p)}} is inside quotes in a command — remove the quotes; Mainline already quotes it safely."
         }
     }
 }
@@ -150,10 +171,9 @@ enum PromptEngine {
                     if trimmed.hasPrefix("#") { continue }
                     guard let colon = trimmed.firstIndex(of: ":") else { continue }
                     let key = trimmed[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
-                    var value = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-                    // Trailing `  # comment` on a value line.
-                    if let hash = value.range(of: " #") { value = String(value[..<hash.lowerBound]).trimmingCharacters(in: .whitespaces) }
-                    meta[key] = value
+                    // Whole-line `#` comments only: a trailing ` #` would cut a name like
+                    // "Fix #123 regressions" short.
+                    meta[key] = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
                 }
             }
         }
@@ -204,6 +224,9 @@ enum PromptEngine {
         for name in placeholders(in: template.body) where !PromptContext.placeholderNames.contains(name) {
             errors.append(.unknownPlaceholder(name))
         }
+        if template.checkout, let bad = quotedPlaceholders(in: config.checkout).first {
+            errors.append(.placeholderInQuotes(bad))
+        }
         return errors
     }
 
@@ -211,7 +234,42 @@ enum PromptEngine {
         guard let harness = config.harnesses[harnessKey] else { return [.unknownHarness(harnessKey)] }
         if harness.target.isEmpty { return [.harnessHasNoTarget(harnessKey)] }
         if !harness.target.contains(promptToken) { return [.missingPromptPlaceholder(harness: harnessKey)] }
+        if let command = harness.command, let bad = quotedPlaceholders(in: command).first {
+            return [.placeholderInQuotes(bad)]
+        }
         return []
+    }
+
+    /// Placeholders that sit inside shell quotes in `command`: any `{{pr.*}}` (its value
+    /// is single-quoted on substitution, which only protects it OUTSIDE quotes — inside
+    /// double quotes a PR title like `$(…)` would still run) and `{{prompt}}` inside
+    /// single quotes (it expands to a double-quoted `"$(cat …)"`).
+    static func quotedPlaceholders(in command: String) -> [String] {
+        var found: [String] = []
+        var quote: Character?
+        var i = command.startIndex
+        while i < command.endIndex {
+            let c = command[i]
+            if c == "\\" && quote != "'" {            // an escaped character is never a quote
+                i = command.index(after: i)
+                if i < command.endIndex { i = command.index(after: i) }
+                continue
+            }
+            if quote == nil {
+                if c == "'" || c == "\"" { quote = c }
+            } else if c == quote {
+                quote = nil
+            } else if c == "{", command[i...].hasPrefix("{{"),
+                      let close = command.range(of: "}}", range: i..<command.endIndex) {
+                let name = command[command.index(i, offsetBy: 2)..<close.lowerBound]
+                    .trimmingCharacters(in: .whitespaces)
+                if name.hasPrefix("pr.") || (name == "prompt" && quote == "'") { found.append(name) }
+                i = close.upperBound
+                continue
+            }
+            i = command.index(after: i)
+        }
+        return found
     }
 
     /// Names inside `{{…}}`, in order.
@@ -296,6 +354,7 @@ enum PromptEngine {
         var lines = ["#!/bin/zsh -il"]
         if let dir = workingDirectory { lines.append("cd \(shellQuote(dir)) || exit 1") }
         if checkout, workingDirectory != nil {
+            if let bad = quotedPlaceholders(in: config.checkout).first { throw PromptError.placeholderInQuotes(bad) }
             let pre = try substitute(config.checkout, context: context, transform: shellQuote)
             if !pre.trimmingCharacters(in: .whitespaces).isEmpty {
                 lines.append(pre + " || echo '⚠︎ checkout failed — continuing on the current branch'")
@@ -337,9 +396,10 @@ enum PromptStarters {
     File format
     -----------
         ---
-        name: Review PR          # shown in the picker
-        harness: claude          # a key from ../config.json "harnesses"
-        checkout: true           # run config.json "checkout" in the repo first
+        # Whole-line comments like this one are ignored (not trailing ones).
+        name: Review PR
+        harness: claude
+        checkout: true
         ---
         Your prompt. Placeholders: {{pr.url}} {{pr.number}} {{pr.title}} {{pr.repo}}
         {{pr.owner}} {{pr.branch}} {{pr.base}} {{pr.author}}
@@ -364,6 +424,10 @@ enum PromptStarters {
     "checkout" is the command a template runs first when it sets `checkout: true`
     (default: gh pr checkout {{pr.number}}; e.g. `gw checkout {{pr.branch}}`).
     Without a repos entry a CLI harness starts in ~ and the checkout is skipped.
+
+    Don't wrap {{pr.*}} placeholders in quotes inside a command or checkout step:
+    Mainline already quotes each value safely, and extra quotes would defeat that
+    (a PR title is untrusted text). Mainline refuses to run such a command.
     """
 
     /// The first starter is written WITH comments so opening it teaches the format;
@@ -421,10 +485,11 @@ enum PromptTemplateChecks {
             "pr.repo": "o/r", "pr.owner": "o", "pr.branch": "feat/x", "pr.base": "main", "pr.author": "me",
         ])
         let cfg = PromptConfig.default
+        let tpl0 = PromptTemplate(fileName: "q.md", name: "q", harness: "claude", checkout: false, body: "x")
 
         // Parse: frontmatter, comments, fallback name.
-        let t = PromptEngine.parse(fileName: "a.md", text: "---\nname: Hi # c\n# note\nharness: codex\ncheckout: true\n---\nBody {{pr.url}}\n")!
-        assert(t.name == "Hi" && t.harness == "codex" && t.checkout && t.body == "Body {{pr.url}}", "frontmatter parse")
+        let t = PromptEngine.parse(fileName: "a.md", text: "---\nname: Fix #123 regressions\n# note\nharness: codex\ncheckout: true\n---\nBody {{pr.url}}\n")!
+        assert(t.name == "Fix #123 regressions" && t.harness == "codex" && t.checkout && t.body == "Body {{pr.url}}", "frontmatter parse")
         let bare = PromptEngine.parse(fileName: "plain-one.md", text: "just text")!
         assert(bare.name == "plain-one" && bare.harness == "claude" && !bare.checkout && bare.body == "just text", "no frontmatter")
         assert(PromptEngine.parse(fileName: "r.md", text: PromptEngine.serialize(t)) == PromptTemplate(
@@ -444,6 +509,27 @@ enum PromptTemplateChecks {
         var withBadPlaceholder = t; withBadPlaceholder.body = "{{pr.nope}}"; withBadPlaceholder.harness = "claude"
         assert(PromptEngine.validate(withBadPlaceholder, config: cfg) == [.unknownPlaceholder("pr.nope")], "unknown placeholder")
         for h in cfg.harnesses.keys { assert(PromptEngine.validate(harnessKey: h, config: cfg).isEmpty, "default harness \(h) has {{prompt}}") }
+
+        // Placeholders inside shell quotes are rejected (injection via a PR title/branch).
+        assert(PromptEngine.quotedPlaceholders(in: "gw checkout \"{{pr.branch}}\"") == ["pr.branch"], "double-quoted pr value")
+        assert(PromptEngine.quotedPlaceholders(in: "echo '{{pr.title}}'") == ["pr.title"], "single-quoted pr value")
+        assert(PromptEngine.quotedPlaceholders(in: "claude \"x {{prompt}}\"").isEmpty, "{{prompt}} in double quotes is fine")
+        assert(PromptEngine.quotedPlaceholders(in: "claude '{{prompt}}'") == ["prompt"], "{{prompt}} in single quotes breaks")
+        assert(PromptEngine.quotedPlaceholders(in: "claude {{prompt}} --x {{pr.url}}").isEmpty, "unquoted is fine")
+        assert(PromptEngine.quotedPlaceholders(in: "echo \\\"{{pr.title}}").isEmpty, "escaped quote opens nothing")
+        var quotedHarness = cfg
+        quotedHarness.harnesses["claude"] = HarnessConfig(label: "C", command: "claude --t \"{{pr.title}}\" {{prompt}}", url: nil)
+        assert(PromptEngine.validate(harnessKey: "claude", config: quotedHarness) == [.placeholderInQuotes("pr.title")], "validate flags it")
+        var quotedCheckout = cfg
+        quotedCheckout.checkout = "gw checkout \"{{pr.branch}}\""
+        var wantsCheckout = tpl0; wantsCheckout.checkout = true
+        assert(PromptEngine.validate(wantsCheckout, config: quotedCheckout) == [.placeholderInQuotes("pr.branch")], "checkout step flagged")
+        assert((try? PromptEngine.launch(prompt: "p", harnessKey: "claude", config: quotedCheckout, context: ctx,
+                                         checkout: true, workingDirectory: "/tmp", promptFile: "/tmp/p")) == nil, "launch refuses a quoted checkout")
+
+        // A hand-edited config missing sections keeps their defaults.
+        let partial = try? JSONDecoder().decode(PromptConfig.self, from: Data("{\"repos\":{\"a/b\":\"~/x\"}}".utf8))
+        assert(partial?.repos == ["a/b": "~/x"] && partial?.checkout == cfg.checkout && partial?.harnesses == cfg.harnesses, "lenient config decode")
 
         // Rendering.
         let tpl = PromptTemplate(fileName: "x.md", name: "x", harness: "claude", checkout: false, body: "See {{ pr.url }} on {{pr.branch}}")

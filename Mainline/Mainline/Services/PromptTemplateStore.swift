@@ -53,6 +53,9 @@ final class PromptTemplateStore: ObservableObject {
     @Published private(set) var config: PromptConfig = .default
     /// Why `config.json` could not be used (the last good config stays active).
     @Published private(set) var configError: String?
+    /// Bumped whenever the loaded templates or config change. Folded into the deck's
+    /// memoized row key so a row's right-click "Run Prompt" menu never goes stale.
+    @Published private(set) var revision = 0
 
     let directory: URL
     var promptsDirectory: URL { directory.appendingPathComponent("prompts", isDirectory: true) }
@@ -130,7 +133,7 @@ final class PromptTemplateStore: ObservableObject {
         if let data = try? Data(contentsOf: configURL) {
             do {
                 let decoded = try JSONDecoder().decode(PromptConfig.self, from: data)
-                if decoded != config { config = decoded }
+                if decoded != config { config = decoded; revision &+= 1 }
                 configError = nil
             } catch {
                 configError = "config.json: \(error.localizedDescription)"
@@ -145,7 +148,7 @@ final class PromptTemplateStore: ObservableObject {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
             return PromptEngine.parse(fileName: url.lastPathComponent, text: text)
         }
-        if loaded != templates { templates = loaded }
+        if loaded != templates { templates = loaded; revision &+= 1 }
     }
 
     // MARK: Editing (Settings)

@@ -1121,7 +1121,8 @@ struct TriageDeckView: View {
             showPeek: showPeek,
             compact: settings.compactRows,
             stackBadge: stackBadge,
-            stackCount: stackCount
+            stackCount: stackCount,
+            promptRevision: manager.promptStore.revision
         )) {
             deckRow(pr: pr, index: index, stackBadge: stackBadge, stackCount: stackCount)
         }
@@ -2637,6 +2638,9 @@ private struct DeckRowKey: Equatable {
     /// > 0 when this row is the collapsed representative of a stack of that size —
     /// draws the stack glyph + count chip. Part of the key so it re-renders on change.
     let stackCount: Int
+    /// `PromptTemplateStore.revision` — the row's context menu lists the templates, so
+    /// editing one must re-render rows that are otherwise unchanged.
+    let promptRevision: Int
 }
 
 /// Memoizing wrapper: re-evaluates `content()` only when `key` changes. Paired

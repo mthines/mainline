@@ -14,7 +14,7 @@ struct PromptsSettingsView: View {
 
     var body: some View {
         Section("How it works") {
-            Label("Right-click a PR → Run Prompt, or press \(runPromptKeyLabel) in the deck, to start an agent session from a template. In the picker, type to filter, ↑/↓ to choose, ↵ to run — or just write a prompt and pick a harness to ask it directly.",
+            Label("Right-click a PR → Run Prompt, or \(runPromptKeyHint), to start an agent session from a template. In the picker, type to filter, ↑/↓ to choose, ↵ to run — or just write a prompt and pick a harness to ask it directly.",
                   systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -77,8 +77,13 @@ struct PromptsSettingsView: View {
         .onAppear { store.reload() }
     }
 
-    private var runPromptKeyLabel: String {
-        "“\(settings.shortcutBindings.runPrompt.key.uppercased())”"
+    /// "press “A” in the deck" — or, when an upgrade left the key unbound because its
+    /// default was already taken, a pointer to where to assign one.
+    private var runPromptKeyHint: String {
+        let key = settings.shortcutBindings.runPrompt.key
+        return key.isEmpty
+            ? "assign a key under Settings → Keyboard (“Run Prompt Template” is unbound)"
+            : "press “\(key.uppercased())” in the deck"
     }
 
     // MARK: Rows

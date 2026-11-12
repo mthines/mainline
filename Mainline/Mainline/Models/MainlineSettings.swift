@@ -748,11 +748,12 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(writeActionsEnabled, forKey: Keys.writeActionsEnabled) }
     }
 
-    /// The user's preferred merge method for in-app merges. Default `.auto`.
     /// Terminal app CLI prompt-template harnesses open in (Settings → Prompts).
     @Published var promptTerminal: PromptTerminal {
         didSet { defaults.set(promptTerminal.rawValue, forKey: Keys.promptTerminal) }
     }
+
+    /// The user's preferred merge method for in-app merges. Default `.auto`.
 
     @Published var mergeMethodPreference: MergeMethodPreference {
         didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
