@@ -47,6 +47,10 @@
 		HP000000000000000000000B1 /* HelpSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = HP000000000000000000000A1 /* HelpSettingsView.swift */; };
 		LG000000000000000000000B1 /* LaunchAtLoginService.swift in Sources */ = {isa = PBXBuildFile; fileRef = LG000000000000000000000A1 /* LaunchAtLoginService.swift */; };
 		PS000000000000000000000B1 /* PRSearchFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = PS000000000000000000000A1 /* PRSearchFilter.swift */; };
+		PC000000000000000000A901 /* PromptTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A901 /* PromptTemplate.swift */; };
+		PC000000000000000000A902 /* PromptTemplateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A902 /* PromptTemplateStore.swift */; };
+		PC000000000000000000A903 /* PromptPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A903 /* PromptPickerView.swift */; };
+		PC000000000000000000A904 /* PromptsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A904 /* PromptsSettingsView.swift */; };
 		PX000000000000000000000B1 /* PRListExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = PX000000000000000000000A1 /* PRListExport.swift */; };
 /* End PBXBuildFile section */
 
@@ -90,6 +94,10 @@
 		HP000000000000000000000A1 /* HelpSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpSettingsView.swift; sourceTree = "<group>"; };
 		LG000000000000000000000A1 /* LaunchAtLoginService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginService.swift; sourceTree = "<group>"; };
 		PS000000000000000000000A1 /* PRSearchFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRSearchFilter.swift; sourceTree = "<group>"; };
+		PF000000000000000000A901 /* PromptTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTemplate.swift; sourceTree = "<group>"; };
+		PF000000000000000000A902 /* PromptTemplateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTemplateStore.swift; sourceTree = "<group>"; };
+		PF000000000000000000A903 /* PromptPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptPickerView.swift; sourceTree = "<group>"; };
+		PF000000000000000000A904 /* PromptsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptsSettingsView.swift; sourceTree = "<group>"; };
 		PX000000000000000000000A1 /* PRListExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRListExport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -161,6 +169,8 @@
 				LG000000000000000000000A1 /* LaunchAtLoginService.swift */,
 				PS000000000000000000000A1 /* PRSearchFilter.swift */,
 				PX000000000000000000000A1 /* PRListExport.swift */,
+				PF000000000000000000A902 /* PromptTemplateStore.swift */,
+				PF000000000000000000A901 /* PromptTemplate.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -175,6 +185,8 @@
 				PF000000000000000000001A /* PRPeekView.swift */,
 				PF000000000000000000001C /* UndoToastView.swift */,
 				PF0000000000000000000020 /* KeyboardShortcutsView.swift */,
+				PF000000000000000000A904 /* PromptsSettingsView.swift */,
+				PF000000000000000000A903 /* PromptPickerView.swift */,
 				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
 				OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */,
 				IB000000000000000000000A2 /* InboxSettingsView.swift */,
@@ -303,6 +315,10 @@
 				LG000000000000000000000B1 /* LaunchAtLoginService.swift in Sources */,
 				PS000000000000000000000B1 /* PRSearchFilter.swift in Sources */,
 				PX000000000000000000000B1 /* PRListExport.swift in Sources */,
+				PC000000000000000000A904 /* PromptsSettingsView.swift in Sources */,
+				PC000000000000000000A903 /* PromptPickerView.swift in Sources */,
+				PC000000000000000000A902 /* PromptTemplateStore.swift in Sources */,
+				PC000000000000000000A901 /* PromptTemplate.swift in Sources */,
 				OT00000000000000000000B1 /* TelemetryService.swift in Sources */,
 				OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */,
 				OT00000000000000000000B3 /* TelemetryDetailsSheet.swift in Sources */,

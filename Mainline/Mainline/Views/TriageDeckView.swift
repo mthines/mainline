@@ -25,6 +25,7 @@ enum TriageAction: Identifiable {
     case copyLink
     case copyBranch
     case togglePin
+    case runPrompt
 
     var id: String { label }
 
@@ -49,6 +50,7 @@ enum TriageAction: Identifiable {
         case .copyLink:           return "Copy Link"
         case .copyBranch:         return "Copy Branch Name"
         case .togglePin:          return "Pin / Unpin"
+        case .runPrompt:          return "Run Prompt…"
         }
     }
 
@@ -73,6 +75,7 @@ enum TriageAction: Identifiable {
         case .copyLink:        return "link"
         case .copyBranch:      return "doc.on.doc"
         case .togglePin:       return "pin"
+        case .runPrompt:       return "terminal"
         }
     }
 
@@ -313,9 +316,12 @@ struct TriageDeckView: View {
                     // reopening the panel starts on the normal grouped deck
                     // rather than a stale search field.
                     manager.peekPR = nil
+                    manager.promptPickerPR = nil
                     manager.closeSearch()
                 },
-                searchActive: searchActive
+                // The picker's text field takes first responder like the search field,
+                // so the key view must reclaim it when either closes.
+                searchActive: searchActive || manager.promptPickerPR != nil
             )
         )
         .onAppear { installScrollMonitor() }
@@ -1489,6 +1495,20 @@ struct TriageDeckView: View {
             }
         }
 
+        Divider()
+
+        // Agent harnesses: one entry per template in ~/.config/mainline/prompts, plus
+        // the picker (type-to-filter, or a free-typed prompt).
+        Menu {
+            ForEach(manager.promptStore.templates) { template in
+                Button(template.name) { manager.runPromptTemplate(template, on: pr) }
+            }
+            if !manager.promptStore.templates.isEmpty { Divider() }
+            Button("Search / Custom Prompt…") { handleTriageAction(.runPrompt, on: pr) }
+        } label: {
+            Label("Run Prompt", systemImage: "terminal")
+        }
+
         // Close / reopen sit last and apart from everything else: they end (or
         // revive) the PR on GitHub. A closed-but-unmerged PR can still be on screen
         // here when it is pinned (pins survive a close), so it gets Reopen instead.
@@ -2022,6 +2042,12 @@ struct TriageDeckView: View {
             return nil
         }
 
+        // Open the prompt-template picker for the focused PR (start an agent session).
+        if shortcutMatches(.runPrompt, event: event) {
+            if let pr = focusedPR { handleTriageAction(.runPrompt, on: pr) }
+            return nil
+        }
+
         // Open the in-app search field. `openSearch` also requests keyboard focus
         // on the field (via a focus token) so pressing it again while search is
         // already open re-focuses the field for editing.
@@ -2130,6 +2156,8 @@ struct TriageDeckView: View {
             copyLink(pr)
         case .copyBranch:
             copyBranch(pr)
+        case .runPrompt:
+            manager.promptPickerPR = pr
         case .togglePin:
             // Stack-aware: pinning any member pins the WHOLE stack so they stay
             // together and float to Pinned as one unit (and unpin together).
