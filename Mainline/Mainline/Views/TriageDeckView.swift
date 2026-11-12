@@ -1502,8 +1502,10 @@ struct TriageDeckView: View {
         // the picker (type-to-filter, or a free-typed prompt).
         Menu {
             // Templates whose `when:` fits this PR's state come first, starred.
+            let promptConfig = manager.promptStore.config
             let ranked = PromptState.ordered(manager.promptStore.templates,
-                                             active: PromptState.active(pr: pr, myLogin: settings.githubUsername))
+                                             active: PromptState.active(pr: pr, myLogin: settings.githubUsername),
+                                             canRun: { PromptEngine.blockingErrors($0, config: promptConfig).isEmpty })
             let suggested = ranked.filter { $0.reason != nil }
             let others = ranked.filter { $0.reason == nil }
             ForEach(suggested, id: \.template.fileName) { entry in

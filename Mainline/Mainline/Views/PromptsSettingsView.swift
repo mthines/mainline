@@ -112,6 +112,7 @@ struct PromptsSettingsView: View {
     }
 
     private func harnessRow(key: String, harness: HarnessConfig, index: Int, count: Int) -> some View {
+        let isDefault = store.config.enabledHarnesses.first?.key == key
         // A disabled harness is not a problem — only a broken enabled one is.
         let problem: PromptError? = harness.isEnabled
             ? PromptEngine.validate(harnessKey: key, config: store.config).first : nil
@@ -126,7 +127,7 @@ struct PromptsSettingsView: View {
                 HStack(spacing: 4) {
                     Text("\(harness.label)  ·  \(key)")
                     if problem != nil { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange) }
-                    if index == 0 && harness.isEnabled { Text("default").font(.caption2).foregroundStyle(.secondary) }
+                    if isDefault { Text("default").font(.caption2).foregroundStyle(.secondary) }
                 }
                 Text(harness.target).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)
                 if let problem {

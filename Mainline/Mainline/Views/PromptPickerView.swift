@@ -36,7 +36,9 @@ struct PromptPickerView: View {
         // Filter by the query, then keep suggested-first order (so ↵ on an empty query
         // runs the best fit for this PR's state).
         let matching = Set(PromptEngine.filter(store.templates, query: query, config: store.config).map(\.fileName))
-        let templates = PromptState.ordered(store.templates, active: activeStates)
+        let config = store.config
+        let templates = PromptState.ordered(store.templates, active: activeStates,
+                                            canRun: { PromptEngine.blockingErrors($0, config: config).isEmpty })
             .filter { matching.contains($0.template.fileName) }
             .map { Item.template($0.template, reason: $0.reason) }
         let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)

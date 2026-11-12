@@ -162,8 +162,12 @@ struct PromptContext: Equatable {
 /// PR-state tokens: `,` separates alternatives (OR), `+` joins tokens inside one
 /// alternative (AND), `!` negates a token.
 ///
-///     when: authored+conflict, authored+ci-failing   # either situation
-///     when: reviewing+!draft                         # someone else's, not a draft
+///     # either situation
+///     when: authored+conflict, authored+ci-failing
+///     # someone else's, not a draft
+///     when: reviewing+!draft
+///
+/// A comment must sit on its own line — a trailing `# …` would become part of the value.
 ///
 /// Suggested templates float to the top of the picker and the menu, ordered by
 /// `priority` (higher first); the rest keep their usual order below them.
@@ -250,8 +254,13 @@ enum PromptState {
 
     /// Suggested templates first (priority high → low, ties keep file order), then the
     /// rest in file order. Stable, so the unsuggested list never reshuffles.
-    static func ordered(_ templates: [PromptTemplate], active: Set<String>) -> [Ranked] {
-        let ranked = templates.map { Ranked(template: $0, reason: matchedAlternative($0.when, active: active)) }
+    /// - Parameter canRun: templates that fail it (a disabled harness, a quoted placeholder…)
+    ///   are never suggested — starring something ↵ can only fail on is worse than silence.
+    static func ordered(_ templates: [PromptTemplate], active: Set<String>,
+                        canRun: (PromptTemplate) -> Bool = { _ in true }) -> [Ranked] {
+        let ranked = templates.map {
+            Ranked(template: $0, reason: canRun($0) ? matchedAlternative($0.when, active: active) : nil)
+        }
         let suggested = ranked.enumerated().filter { $0.element.reason != nil }
             .sorted { a, b in
                 a.element.template.priority != b.element.template.priority
@@ -385,6 +394,14 @@ enum PromptEngine {
         return errors
     }
 
+    /// `validate` minus what must not stop a run: a bad `when:` only affects suggestions.
+    static func blockingErrors(_ template: PromptTemplate, config: PromptConfig) -> [PromptError] {
+        validate(template, config: config).filter {
+            if case .unknownStateToken = $0 { return false }
+            return true
+        }
+    }
+
     static func validate(harnessKey: String, config: PromptConfig) -> [PromptError] {
         guard let harness = config.harnesses[harnessKey] else { return [.unknownHarness(harnessKey)] }
         if !harness.isEnabled { return [.harnessDisabled(harnessKey)] }
@@ -398,8 +415,9 @@ enum PromptEngine {
 
     /// Placeholders that sit inside shell quotes in `command`: any `{{pr.*}}` (its value
     /// is single-quoted on substitution, which only protects it OUTSIDE quotes — inside
-    /// double quotes a PR title like `$(…)` would still run) and `{{prompt}}` inside
-    /// single quotes (it expands to a double-quoted `"$(cat …)"`).
+    /// double quotes a PR title like `$(…)` would still run) and `{{prompt}}` (it expands
+    /// to its own double-quoted `"$(cat …)"`, so inside either kind of quote that
+    /// substitution leaves the `$(…)` unquoted and the prompt splits into many arguments).
     static func quotedPlaceholders(in command: String) -> [String] {
         var found: [String] = []
         var quote: Character?
@@ -419,7 +437,7 @@ enum PromptEngine {
                       let close = command.range(of: "}}", range: i..<command.endIndex) {
                 let name = command[command.index(i, offsetBy: 2)..<close.lowerBound]
                     .trimmingCharacters(in: .whitespaces)
-                if name.hasPrefix("pr.") || (name == "prompt" && quote == "'") { found.append(name) }
+                if name.hasPrefix("pr.") || name == "prompt" { found.append(name) }
                 i = close.upperBound
                 continue
             }
@@ -567,8 +585,13 @@ enum PromptStarters {
     (higher first; default 0). Templates without `when:` stay available, just never
     floated. Syntax: `,` = or, `+` = and, `!` = not:
 
-        when: authored+conflict, authored+ci-failing     # either situation
-        when: reviewing+ready                            # someone else's PR, not a draft
+        # either situation
+        when: authored+conflict, authored+ci-failing
+        # someone else's PR, not a draft
+        when: reviewing+ready
+
+    Comments must be on their own line: a trailing "# …" would become part of the value.
+    A bad `when:` only switches the suggestion off — the template still runs.
 
     States: \(PromptState.tokenNames.joined(separator: " "))
 
@@ -721,7 +744,7 @@ enum PromptTemplateChecks {
         // Placeholders inside shell quotes are rejected (injection via a PR title/branch).
         assert(PromptEngine.quotedPlaceholders(in: "gw checkout \"{{pr.branch}}\"") == ["pr.branch"], "double-quoted pr value")
         assert(PromptEngine.quotedPlaceholders(in: "echo '{{pr.title}}'") == ["pr.title"], "single-quoted pr value")
-        assert(PromptEngine.quotedPlaceholders(in: "claude \"x {{prompt}}\"").isEmpty, "{{prompt}} in double quotes is fine")
+        assert(PromptEngine.quotedPlaceholders(in: "claude \"x {{prompt}}\"") == ["prompt"], "{{prompt}} in double quotes splits into many args")
         assert(PromptEngine.quotedPlaceholders(in: "claude '{{prompt}}'") == ["prompt"], "{{prompt}} in single quotes breaks")
         assert(PromptEngine.quotedPlaceholders(in: "claude {{prompt}} --x {{pr.url}}").isEmpty, "unquoted is fine")
         assert(PromptEngine.quotedPlaceholders(in: "echo \\\"{{pr.title}}").isEmpty, "escaped quote opens nothing")
@@ -734,6 +757,14 @@ enum PromptTemplateChecks {
         assert(PromptEngine.validate(wantsCheckout, config: quotedCheckout) == [.placeholderInQuotes("pr.branch")], "checkout step flagged")
         assert((try? PromptEngine.launch(prompt: "p", harnessKey: "claude", config: quotedCheckout, context: ctx,
                                          checkout: true, workingDirectory: "/tmp", promptFile: "/tmp/p")) == nil, "launch refuses a quoted checkout")
+
+        // A bad `when:` never blocks a run; a disabled harness does, and is never suggested.
+        var badWhen = tpl0; badWhen.when = "nope"
+        assert(PromptEngine.blockingErrors(badWhen, config: cfg).isEmpty && !PromptEngine.validate(badWhen, config: cfg).isEmpty, "unknown state is not blocking")
+        assert(PromptEngine.blockingErrors(tpl0, config: cfg.settingEnabled("claude", false)) == [.harnessDisabled("claude")], "disabled harness blocks")
+        var conflicted = tpl0; conflicted.when = "conflict"
+        assert(PromptState.ordered([conflicted], active: ["conflict"]).first?.reason != nil, "suggested when it fits")
+        assert(PromptState.ordered([conflicted], active: ["conflict"], canRun: { _ in false }).first?.reason == nil, "unrunnable is never suggested")
 
         // PR-state suggestions.
         func pr(author: String = "me", draft: Bool = false, ci: CIStatus = .success, mergeable: Bool? = true,

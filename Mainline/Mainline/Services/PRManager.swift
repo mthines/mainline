@@ -146,7 +146,7 @@ final class PRManager: ObservableObject {
     func runPromptTemplate(_ template: PromptTemplate, on pr: PRSnapshot) {
         let config = promptStore.config
         do {
-            if let error = PromptEngine.validate(template, config: config).first { throw error }
+            if let error = PromptEngine.blockingErrors(template, config: config).first { throw error }
             let prompt = try PromptEngine.renderBody(template, context: PromptContext(pr: pr))
             let summary = try PromptLauncher.run(
                 prompt: prompt, harnessKey: template.harness, checkout: template.checkout,

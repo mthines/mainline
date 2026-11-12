@@ -179,14 +179,47 @@ final class PromptTemplateStore: ObservableObject {
 
     /// Enables/disables a harness by rewriting `config.json`. Refuses while the file
     /// can't be parsed — rewriting then would overwrite the user's hand edits.
-    func setHarnessEnabled(_ key: String, _ on: Bool) { apply(config.settingEnabled(key, on)) }
+    func setHarnessEnabled(_ key: String, _ on: Bool) {
+        patchConfigFile { raw, _ in
+            var harnesses = raw["harnesses"] as? [String: Any] ?? [:]
+            guard var harness = harnesses[key] as? [String: Any] else { return false }
+            if on { harness.removeValue(forKey: "enabled") } else { harness["enabled"] = false }
+            harnesses[key] = harness
+            raw["harnesses"] = harnesses
+            return true
+        }
+    }
 
     /// Moves a harness up (`-1`) or down (`+1`) in priority.
-    func moveHarness(_ key: String, by delta: Int) { apply(config.moving(key, by: delta)) }
+    func moveHarness(_ key: String, by delta: Int) {
+        patchConfigFile { raw, current in
+            let moved = current.moving(key, by: delta)
+            guard moved.order != current.order else { return false }
+            raw["order"] = moved.order
+            return true
+        }
+    }
 
-    private func apply(_ new: PromptConfig) {
-        guard configError == nil, new != config else { return }
-        writeConfig(new)
+    /// Changes ONLY the fields a Settings control owns, in the file's own JSON: keys
+    /// this app doesn't know (notes, per-harness extras) survive, and the file is re-read
+    /// first so a hand edit saved a moment ago isn't overwritten from a stale copy.
+    /// Refuses while the file can't be parsed. `mutate` returns false for "nothing to do".
+    private func patchConfigFile(_ mutate: (inout [String: Any], PromptConfig) -> Bool) {
+        reloadIfChanged()
+        guard configError == nil,
+              let data = try? Data(contentsOf: configURL),
+              var raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        // A file that omits a section (lenient decode) still needs it written out in full
+        // before one of its entries can be edited.
+        if raw["harnesses"] == nil,
+           let encoded = try? JSONEncoder().encode(config),
+           let obj = (try? JSONSerialization.jsonObject(with: encoded)) as? [String: Any] {
+            raw["harnesses"] = obj["harnesses"]
+        }
+        guard mutate(&raw, config),
+              let out = try? JSONSerialization.data(
+                withJSONObject: raw, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) else { return }
+        try? out.write(to: configURL, options: .atomic)
         reload()
     }
 
