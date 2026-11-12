@@ -3,7 +3,7 @@
 Every setting Mainline exposes, grouped by its pane in the Settings window.
 Open Settings from the panel or with the standard `⌘,` shortcut.
 
-The panes are **GitHub**, **Notifications**, **Inbox**, **Menu Bar**, **Appearance**, **Keyboard**, **Privacy**, and **Help**.
+The panes are **GitHub**, **Notifications**, **Inbox**, **Menu Bar**, **Appearance**, **Prompts**, **Keyboard**, **Privacy**, and **Help**.
 
 ## GitHub
 
@@ -72,6 +72,17 @@ See [The panel](./the-panel.md).
 | Conflicts need a human | Off     | Route merge conflicts into Needs attention.             |
 | Minimum panel height   | 600     | The panel never shrinks below this.                     |
 | Maximum panel height   | 1600    | The panel never grows past this, capped to the display. |
+
+## Prompts
+
+Start an agent session from a PR: right-click → **Run Prompt**, or press `A`.
+Templates are Markdown files in `~/.config/mainline/prompts/`; harnesses, repo paths and the checkout step live in `~/.config/mainline/config.json`.
+
+| Setting          | Default | Notes                                                                 |
+| ---------------- | ------- | --------------------------------------------------------------------- |
+| Terminal         | Auto    | Where CLI harnesses open: Terminal, iTerm, Ghostty or Warp.           |
+| Templates        | Starters | Add, edit or delete; a template's `when:` / `priority:` float it to the top for matching PR states. |
+| Harnesses        | Claude Code, Agent0 | Enable or disable each and order them; the first enabled one is the default. Every command or URL must contain `{{prompt}}`. |
 
 ## Keyboard
 

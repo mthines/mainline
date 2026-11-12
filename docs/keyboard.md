@@ -16,6 +16,7 @@ A key acts on the focused row unless noted.
 | `Space`    | Peek             | Opens the glance card. See [Peek](#peek).                         |
 | `↩`        | Open             | Opens the PR in the browser (or Linear — see [Integrations](./integrations.md)). |
 | `E`        | Open preview     | Opens the PR's preview deployment. Silent no-op if none.        |
+| `A`        | Run prompt       | Opens the prompt-template picker for the focused PR (or its whole stack). See [Prompt templates](./settings.md#prompts). |
 | `N`        | Mark seen        | Clears the unread state.                                          |
 | `S`        | Postpone / resume | Postpones with your default duration, or resumes if already postponed. |
 | `X`        | Dismiss          | Removes the PR from the view.                                     |
@@ -78,7 +79,7 @@ The menu carries every action for that PR, in this order:
 
 1. **GitHub write actions** — approve, merge, request changes, and mark ready for review (drafts) or convert to draft (open, non-draft PRs).
 2. **Triage** — later (every snooze duration), mark seen, dismiss, and mute (Inbox only).
-3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), and pin / unpin.
+3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), pin / unpin, and **Run Prompt** (on a stacked PR: on the stack or on just that PR).
 4. **Copy** — copy link (the GitHub URL) and copy branch name.
 5. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
 
