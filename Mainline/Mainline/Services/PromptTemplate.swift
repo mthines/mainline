@@ -75,14 +75,13 @@ struct PromptConfig: Codable, Equatable {
         checkout: "gh pr checkout {{pr.number}}",
         repos: [:],
         harnesses: [
-            "claude":   HarnessConfig(label: "Claude Code", command: "claude {{prompt}}", url: nil),
-            "codex":    HarnessConfig(label: "Codex", command: "codex {{prompt}}", url: nil),
-            "amp":      HarnessConfig(label: "Amp", command: "amp {{prompt}}", url: nil),
-            "opencode": HarnessConfig(label: "opencode", command: "opencode --prompt {{prompt}}", url: nil),
-            "agent0":   HarnessConfig(label: "Agent0 (web)", command: nil,
-                                      url: "https://app.dash0.com/agent0?prompt={{prompt}}"),
+            // Development: runs in your terminal, in the repo's local clone.
+            "claude": HarnessConfig(label: "Claude Code", command: "claude {{prompt}}", url: nil),
+            // Analysing telemetry and verifying previews: opens in the browser.
+            "agent0": HarnessConfig(label: "Agent0", command: nil,
+                                    url: "https://app.dash0.com/goto/agent0?auto_submit=true&initial_prompt={{prompt}}"),
         ],
-        order: ["claude", "codex", "amp", "opencode", "agent0"]
+        order: ["claude", "agent0"]
     )
 
     /// ALL harnesses (enabled or not) in priority order: `order` first, then the rest by label.
@@ -452,7 +451,11 @@ enum PromptStarters {
     control how the prompt is passed:
 
         "claude": { "label": "Claude Code", "command": "claude {{prompt}}" }
-        "agent0": { "label": "Agent0",      "url": "https://app.dash0.com/agent0?prompt={{prompt}}" }
+        "agent0": { "label": "Agent0",      "url": "https://app.dash0.com/goto/agent0?auto_submit=true&initial_prompt={{prompt}}" }
+
+    Defaults: Claude Code (development, in your terminal) and Agent0 (analysing
+    telemetry and verifying previews, in your browser), in that priority. Add more
+    harnesses the same way, e.g. "codex": { "label": "Codex", "command": "codex {{prompt}}" }
 
     "order" lists harness keys by priority (first = default: the one a free-typed
     prompt asks first). Set "enabled": false on a harness to hide it and refuse to
@@ -483,7 +486,7 @@ enum PromptStarters {
         # Each *.md file in this folder is one template (see README.txt).
         # name: what the picker and the right-click menu show.
         name: \(t.name)
-        # harness: a key from ../config.json "harnesses" (claude, codex, amp, opencode, agent0, or your own).
+        # harness: a key from ../config.json "harnesses" (claude, agent0, or your own).
         harness: \(t.harness)
         # checkout: true runs config.json's "checkout" step in the repo's local clone first.
         #           Needs the repo listed under "repos" in config.json.
@@ -505,16 +508,23 @@ enum PromptStarters {
             Report findings ranked by severity; don't change any code.
             """),
         PromptTemplate(
-            fileName: "address-feedback.md", name: "Address review feedback", harness: "codex", checkout: true,
+            fileName: "address-feedback.md", name: "Address review feedback", harness: "claude", checkout: true,
             body: """
             Read the review comments on {{pr.url}} and address each unresolved thread
             on this branch ({{pr.branch}}). Commit each fix separately.
             """),
         PromptTemplate(
-            fileName: "investigate-ci.md", name: "Investigate failing CI", harness: "agent0", checkout: false,
+            fileName: "analyse-telemetry.md", name: "Analyse telemetry", harness: "agent0", checkout: false,
             body: """
-            CI is failing on {{pr.url}} ({{pr.repo}}#{{pr.number}}). Find the cause
-            and suggest a fix.
+            Look at the telemetry for the services {{pr.url}} ("{{pr.title}}") touches in
+            {{pr.repo}}. Has error rate, latency or log volume changed since it was
+            deployed? Report what you find and what it points to.
+            """),
+        PromptTemplate(
+            fileName: "verify-preview.md", name: "Verify preview", harness: "agent0", checkout: false,
+            body: """
+            Verify the preview deployment of {{pr.url}} ("{{pr.title}}"): exercise the
+            change, then check the telemetry from that traffic for errors and slow paths.
             """),
     ]
 }
@@ -572,17 +582,17 @@ enum PromptTemplateChecks {
                                          checkout: true, workingDirectory: "/tmp", promptFile: "/tmp/p")) == nil, "launch refuses a quoted checkout")
 
         // Harness priority + enable/disable.
-        assert(cfg.orderedHarnesses.map(\.key) == ["claude", "codex", "amp", "opencode", "agent0"], "default priority order")
+        assert(cfg.orderedHarnesses.map(\.key) == ["claude", "agent0"], "default priority: Claude Code, then Agent0")
         var custom = cfg
         custom.harnesses["zed"] = HarnessConfig(label: "Zed", command: "zed {{prompt}}", url: nil)
         custom.harnesses["aaa"] = HarnessConfig(label: "Aaa", command: "aaa {{prompt}}", url: nil)
         assert(Array(custom.orderedHarnesses.map(\.key).suffix(2)) == ["aaa", "zed"], "unlisted harnesses follow, by label")
-        let promoted = custom.moving("agent0", by: -4)
+        let promoted = custom.moving("agent0", by: -1)
         assert(promoted.orderedHarnesses.first?.key == "agent0", "move to the top")
         assert(promoted.moving("agent0", by: -1) == promoted, "no-op at the top")
-        assert(cfg.moving("opencode", by: 1).order.suffix(2) == ["agent0", "opencode"], "move down swaps with its neighbour")
+        assert(cfg.moving("claude", by: 1).order == ["agent0", "claude"], "move down swaps with its neighbour")
         let off = cfg.settingEnabled("claude", false)
-        assert(off.enabledHarnesses.first?.key == "codex", "disabled harness drops out; next is the default")
+        assert(off.enabledHarnesses.first?.key == "agent0", "disabled harness drops out; next is the default")
         assert(off.orderedHarnesses.first?.key == "claude", "…but stays listed for Settings")
         assert(PromptEngine.validate(harnessKey: "claude", config: off) == [.harnessDisabled("claude")], "disabled harness refuses to run")
         assert(off.settingEnabled("claude", true) == cfg, "re-enabling restores the exact config")
@@ -612,7 +622,7 @@ enum PromptTemplateChecks {
         // Web launch: the prompt is fully percent-encoded.
         if case .web(let url)? = try? PromptEngine.launch(prompt: "a&b=c #1 é", harnessKey: "agent0", config: cfg, context: ctx,
                                                            checkout: false, workingDirectory: nil, promptFile: "/tmp/p") {
-            assert(url.absoluteString == "https://app.dash0.com/agent0?prompt=a%26b%3Dc%20%231%20%C3%A9", "web url encoding")
+            assert(url.absoluteString == "https://app.dash0.com/goto/agent0?auto_submit=true&initial_prompt=a%26b%3Dc%20%231%20%C3%A9", "web url encoding")
         } else { assertionFailure("web launch") }
 
         // CLI launch: cd, checkout, prompt read from file, hostile values quoted.
@@ -639,8 +649,8 @@ enum PromptTemplateChecks {
         // Filtering.
         let all = PromptStarters.templates
         assert(PromptEngine.filter(all, query: "", config: cfg).count == all.count, "empty query keeps all")
-        assert(PromptEngine.filter(all, query: "REVIEW", config: cfg).map(\.fileName) == ["review-pr.md", "address-feedback.md"], "name match")
-        assert(PromptEngine.filter(all, query: "agent0", config: cfg).map(\.fileName) == ["investigate-ci.md"], "harness-label match")
+        assert(PromptEngine.filter(all, query: "REVIEW", config: cfg).map(\.fileName) == ["review-pr.md", "address-feedback.md", "verify-preview.md"], "name match (\"preview\" contains \"review\")")
+        assert(PromptEngine.filter(all, query: "agent0", config: cfg).map(\.fileName) == ["analyse-telemetry.md", "verify-preview.md"], "harness-label match")
 
         // The annotated starter parses to the same template and sends no comment text.
         let review = PromptStarters.templates[0]
