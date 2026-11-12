@@ -253,8 +253,9 @@ enum PromptState {
         for (index, pr) in prs.enumerated() {
             var tokens = single(pr: pr, myLogin: myLogin)
             // The session works on the BASE PR's branch (`{{pr.*}}` + checkout), so a problem
-            // only a later member has must not suggest a fix-it template aimed at the base.
-            if index > 0 { tokens.subtract(branchStateTokens) }
+            // only a later member has must not suggest a fix-it template aimed at the base —
+            // and the role is the base's too (a colleague's base under your PR is `reviewing`).
+            if index > 0 { tokens.subtract(branchStateTokens.union(["authored", "reviewing"])) }
             all.formUnion(tokens)
         }
         if stacked || prs.count > 1 { all.insert("stacked") }
@@ -687,7 +688,9 @@ enum PromptStarters {
 
     They work for a single PR too (size 1). A template that doesn't mention any {{stack.*}}
     gets the stack list appended automatically. A state holds for a stack when ANY of its
-    PRs has it, and `stacked` holds when the prompt targets a whole stack (not when a
+    PRs has it — except conflict, ci-failing, changes-requested, unresolved-threads and the
+    authored / reviewing role, which only the base PR counts (the session works on its
+    branch; run on a single PR to fix a later one) — and `stacked` holds when the prompt targets a whole stack (not when a
     stacked PR is run on its own).
 
     config.json
