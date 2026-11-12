@@ -101,7 +101,7 @@ struct PromptsSettingsView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(template.name)
                 Text(problem?.localizedDescription
-                     ?? ((store.config.harnesses[template.harness]?.label ?? template.harness)
+                     ?? (template.harnessKeys.map { store.config.harnesses[$0]?.label ?? $0 }.joined(separator: " · ")
                          + (template.when.isEmpty ? "" : " · suggested when \(template.when)")))
                     .font(.caption)
                     .foregroundStyle(problem == nil ? Color.secondary : Color.orange)
@@ -161,6 +161,25 @@ struct PromptsSettingsView: View {
                         .tag(current)
                 }
             }
+            let others = store.config.enabledHarnesses.filter { $0.key != binding.wrappedValue.harness }
+            if !others.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Also offer on").font(.caption).foregroundStyle(.secondary)
+                    ForEach(others, id: \.key) { entry in
+                        Toggle(entry.value.label, isOn: Binding(
+                            get: { binding.wrappedValue.extraHarnesses.contains(entry.key) },
+                            set: { on in
+                                var t = binding.wrappedValue
+                                t.extraHarnesses.removeAll { $0 == entry.key }
+                                if on { t.extraHarnesses.append(entry.key) }
+                                binding.wrappedValue = t
+                            }
+                        ))
+                    }
+                    Text("In the picker, ← / → switch between them. The first (above) is the default.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Toggle("Check out the PR branch first", isOn: binding.checkout)
             TextField("Suggest when", text: binding.when, prompt: Text("e.g. authored+conflict, authored+ci-failing"))
             Stepper("Priority: \(binding.wrappedValue.priority)", value: binding.priority, in: -100...100)
@@ -174,6 +193,18 @@ struct PromptsSettingsView: View {
                     .frame(minHeight: 120)
                 Text("Placeholders: " + PromptContext.placeholderNames.map { "{{\($0)}}" }.joined(separator: " "))
                     .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            ForEach(binding.wrappedValue.extraHarnesses, id: \.self) { key in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Prompt for \(store.config.harnesses[key]?.label ?? key) (empty = same as above)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: Binding(
+                        get: { binding.wrappedValue.harnessBodies[key] ?? "" },
+                        set: { binding.wrappedValue.harnessBodies[key] = $0 }
+                    ))
+                    .font(.body.monospaced())
+                    .frame(minHeight: 80)
+                }
             }
             ForEach(problems.map(\.localizedDescription), id: \.self) { message in
                 Label(message, systemImage: "exclamationmark.triangle")
@@ -192,6 +223,7 @@ struct PromptsSettingsView: View {
                     var toSave = binding.wrappedValue
                     toSave.name = toSave.name.trimmingCharacters(in: .whitespaces)
                     if toSave.name.isEmpty { toSave.name = "Untitled" }
+                    toSave.harnessBodies = toSave.harnessBodies.filter { toSave.harnessKeys.contains($0.key) }
                     store.save(toSave)
                     stopEditing()
                 }

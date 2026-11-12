@@ -3,7 +3,7 @@ import AppKit
 
 /// Type-to-filter picker for prompt templates, shown over the deck for one PR.
 ///
-/// ↑/↓ move, ↵ runs, Esc closes. Once something is typed, every configured harness
+/// ↑/↓ move, ←/→ pick the harness of a template that offers several, ↵ runs, Esc closes. Once something is typed, every configured harness
 /// also gets an "Ask …" row that sends the typed text itself as the prompt (about
 /// this PR) — so an arbitrary one-off session needs no template.
 struct PromptPickerView: View {
@@ -33,6 +33,8 @@ struct PromptPickerView: View {
     @State private var query = ""
     @State private var scopeOverride: Bool?
     @State private var selected = 0
+    /// The harness picked with ←/→, per template file; absent = the template's first runnable one.
+    @State private var harnessChoice: [String: String] = [:]
     @State private var keyMonitor: Any?
     @FocusState private var fieldFocused: Bool
 
@@ -57,6 +59,24 @@ struct PromptPickerView: View {
             Item.custom(harnessKey: $0.key, label: $0.value.label, text: typed)
         }
         return templates + custom
+    }
+
+    /// Harnesses ←/→ can pick for a template row (never empty: a broken template shows its one).
+    private func choices(_ t: PromptTemplate) -> [String] {
+        let runnable = PromptEngine.runnableHarnesses(t, config: store.config)
+        return runnable.isEmpty ? [t.harness] : runnable
+    }
+
+    private func chosenHarness(_ t: PromptTemplate) -> String {
+        let all = choices(t)
+        if let key = harnessChoice[t.fileName], all.contains(key) { return key }
+        return all[0]
+    }
+
+    /// The item as it will run: a template pinned to the harness chosen for it.
+    private func resolve(_ item: Item) -> Item {
+        guard case .template(let t, let reason) = item else { return item }
+        return .template(t.resolved(for: chosenHarness(t)), reason: reason)
     }
 
     var body: some View {
@@ -98,7 +118,7 @@ struct PromptPickerView: View {
                                 row(item, isSelected: index == selected)
                                     .id(item.id)
                                     .contentShape(Rectangle())
-                                    .onTapGesture { onRun(item, target) }
+                                    .onTapGesture { onRun(resolve(item), target) }
                             }
                         }
                     }
@@ -109,6 +129,9 @@ struct PromptPickerView: View {
                     }
                 }
             }
+
+            Divider()
+            keyHints(rows)
 
             if let error = store.configError {
                 Divider()
@@ -141,14 +164,18 @@ struct PromptPickerView: View {
                 Image(systemName: problem != nil ? "exclamationmark.triangle" : (reason != nil ? "star.fill" : "text.quote"))
                     .foregroundStyle(problem != nil ? Color.orange : (reason != nil ? Color.accentColor : Color.secondary))
                     .frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(t.name).lineLimit(1)
-                    Text(problem?.localizedDescription
-                         ?? (reason.map { "Suggested: \($0) · " } ?? "")
-                            + harnessLabel(t.harness) + (t.checkout ? " · checks out the PR branch" : ""))
+                VStack(alignment: .leading, spacing: 2) {
+                    // Name on the left, harness chips pinned right: chips never shrink,
+                    // the name gives way first, so a narrow panel can't squash the chips.
+                    HStack(spacing: 8) {
+                        Text(t.name).lineLimit(1).truncationMode(.tail)
+                        Spacer(minLength: 4)
+                        if problem == nil { harnessChips(t).fixedSize() }
+                    }
+                    Text(problem?.localizedDescription ?? subtitle(t, reason: reason))
                         .font(.caption)
                         .foregroundStyle(problem == nil ? Color.secondary : Color.orange)
-                        .lineLimit(1)
+                        .lineLimit(1).truncationMode(.tail)
                 }
             case .custom(_, let label, let text):
                 Image(systemName: "pencil.line").foregroundStyle(.secondary).frame(width: 18)
@@ -156,13 +183,58 @@ struct PromptPickerView: View {
                     Text("Ask \(label)").lineLimit(1)
                     Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 0)
-            if isSelected { Text("↵").font(.caption).foregroundStyle(.secondary) }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+    }
+
+    /// "Suggested: authored + ready · checks out the PR branch" — what is left once the chips
+    /// have their own place on the title line.
+    private func subtitle(_ t: PromptTemplate, reason: String?) -> String {
+        var parts: [String] = []
+        if let reason { parts.append("Suggested: \(reason)") }
+        if t.checkout { parts.append("checks out the PR branch") }
+        return parts.isEmpty ? "Runs on \(harnessLabel(chosenHarness(t)))" : parts.joined(separator: " · ")
+    }
+
+    /// One chip per harness the template can run on; the chosen one is highlighted, so a
+    /// single-harness template reads as its plain label.
+    @ViewBuilder
+    private func harnessChips(_ t: PromptTemplate) -> some View {
+        let all = choices(t)
+        let chosen = chosenHarness(t)
+        if all.count == 1 {
+            Text(harnessLabel(chosen)).font(.caption).foregroundStyle(.secondary)
+        } else {
+            ForEach(all, id: \.self) { key in
+                Text(harnessLabel(key))
+                    .font(.caption)
+                    .foregroundStyle(key == chosen ? Color.primary : Color.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(key == chosen ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08), in: Capsule())
+            }
+        }
+    }
+
+    /// Footer: the keys that work right now. ←/→ only appear while the highlighted row
+    /// is a template that offers more than one harness.
+    private func keyHints(_ rows: [Item]) -> some View {
+        var hints = ["↑↓ move"]
+        if rows.indices.contains(selected), case .template(let t, _) = rows[selected], choices(t).count > 1 {
+            hints.append("←→ harness")
+        }
+        hints += ["↵ run"]
+        if initialTarget.isStacked { hints.append("⇥ stack / PR") }
+        hints.append("esc close")
+        return Text(hints.joined(separator: "  ·  "))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1).minimumScaleFactor(0.8)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var emptyState: some View {
@@ -183,7 +255,18 @@ struct PromptPickerView: View {
 
     private func run(_ rows: [Item]) {
         guard rows.indices.contains(selected) else { return }
-        onRun(rows[selected], target)
+        onRun(resolve(rows[selected]), target)
+    }
+
+    /// ←/→ on a template that offers several harnesses: cycle which one ↵ runs.
+    /// Returns false when the selected row has nothing to cycle (the key then passes through).
+    private func cycleHarness(_ delta: Int) -> Bool {
+        let rows = items
+        guard rows.indices.contains(selected), case .template(let t, _) = rows[selected] else { return false }
+        let all = choices(t)
+        guard all.count > 1, let index = all.firstIndex(of: chosenHarness(t)) else { return false }
+        harnessChoice[t.fileName] = all[(index + delta + all.count) % all.count]
+        return true
     }
 
     private func toggleScope() {
@@ -201,6 +284,8 @@ struct PromptPickerView: View {
             switch event.keyCode {
             case 125: move(1);  return nil   // Down
             case 126: move(-1); return nil   // Up
+            case 123 where cycleHarness(-1): return nil   // Left: previous harness
+            case 124 where cycleHarness(1):  return nil   // Right: next harness
             case 48 where initialTarget.isStacked:   // Tab: whole stack ↔ this PR
                 toggleScope(); return nil
             default:  return event

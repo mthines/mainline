@@ -145,6 +145,9 @@ final class PRManager: ObservableObject {
     /// harness whose command/url lacks `{{prompt}}` — surface as a toast, never silently.
     func runPromptTemplate(_ template: PromptTemplate, on target: PromptTarget) {
         let config = promptStore.config
+        // A picker has already chosen a harness (`resolved(for:)`); otherwise use the default,
+        // falling back to the first harness that can run.
+        let template = PromptEngine.effective(template, config: config)
         do {
             if let error = PromptEngine.blockingErrors(template, config: config).first { throw error }
             let context = target.context
