@@ -165,9 +165,11 @@ final class PRManager: ObservableObject {
         do {
             if let error = PromptEngine.validate(harnessKey: harnessKey, config: config).first { throw error }
             let context = target.context
-            let body = PromptEngine.customBody(typed)
-            let prompt = PromptEngine.withStackContext(
-                try PromptEngine.substitute(body, context: context), source: body, context: context)
+            // Only the PR prefix is a template; the typed text is literal, so a question
+            // about a Helm / Jinja `{{ … }}` template launches instead of failing.
+            let prefix = PromptEngine.customBody("")
+            let rendered = try PromptEngine.substitute(prefix, context: context) + typed
+            let prompt = PromptEngine.withStackContext(rendered, source: prefix, context: context)
             let summary = try PromptLauncher.run(
                 prompt: prompt, harnessKey: harnessKey, checkout: false,
                 pr: target.primary, context: context, config: config, terminal: settings.promptTerminal)
