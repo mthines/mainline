@@ -7,11 +7,14 @@ import AppKit
 /// also gets an "Ask …" row that sends the typed text itself as the prompt (about
 /// this PR) — so an arbitrary one-off session needs no template.
 struct PromptPickerView: View {
-    let pr: PRSnapshot
+    /// What the picker opened for. When it is a stacked PR, Tab switches between the whole
+    /// stack and just that PR (`scopeOverride`).
+    let initialTarget: PromptTarget
     @ObservedObject var store: PromptTemplateStore
-    /// `PromptState.active(pr:myLogin:)` — drives which templates are suggested first.
-    let activeStates: Set<String>
-    let onRun: (Item) -> Void
+    /// Drives which templates are suggested first (`PromptTarget.state`).
+    let myLogin: String
+    /// The item to run, and the target as scoped when ↵ was pressed.
+    let onRun: (Item, PromptTarget) -> Void
     let onClose: () -> Void
 
     enum Item: Identifiable {
@@ -28,16 +31,23 @@ struct PromptPickerView: View {
     }
 
     @State private var query = ""
+    @State private var scopeOverride: Bool?
     @State private var selected = 0
     @State private var keyMonitor: Any?
     @FocusState private var fieldFocused: Bool
+
+    private var target: PromptTarget {
+        var t = initialTarget
+        if let scopeOverride { t.wholeStack = scopeOverride }
+        return t
+    }
 
     private var items: [Item] {
         // Filter by the query, then keep suggested-first order (so ↵ on an empty query
         // runs the best fit for this PR's state).
         let matching = Set(PromptEngine.filter(store.templates, query: query, config: store.config).map(\.fileName))
         let config = store.config
-        let templates = PromptState.ordered(store.templates, active: activeStates,
+        let templates = PromptState.ordered(store.templates, active: target.state(myLogin: myLogin),
                                             canRun: { PromptEngine.blockingErrors($0, config: config).isEmpty })
             .filter { matching.contains($0.template.fileName) }
             .map { Item.template($0.template, reason: $0.reason) }
@@ -54,12 +64,22 @@ struct PromptPickerView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "terminal").foregroundStyle(.secondary)
-                TextField("Run a prompt on #\(String(pr.number)) — type to filter, or write your own",
+                TextField("Run a prompt on \(target.title) — type to filter, or write your own",
                           text: $query)
                     .textFieldStyle(.plain)
                     .focused($fieldFocused)
                     .onSubmit { run(rows) }
                     .onExitCommand(perform: onClose)
+                if initialTarget.isStacked {
+                    Button(action: toggleScope) {
+                        Text(target.isStack ? "Stack ×\(target.prs.count)  ⇥" : "This PR  ⇥")
+                            .font(.caption2)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.quaternary, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Tab: run on the whole stack or just this PR")
+                }
                 Button(action: onClose) { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
@@ -78,7 +98,7 @@ struct PromptPickerView: View {
                                 row(item, isSelected: index == selected)
                                     .id(item.id)
                                     .contentShape(Rectangle())
-                                    .onTapGesture { onRun(item) }
+                                    .onTapGesture { onRun(item, target) }
                             }
                         }
                     }
@@ -163,7 +183,13 @@ struct PromptPickerView: View {
 
     private func run(_ rows: [Item]) {
         guard rows.indices.contains(selected) else { return }
-        onRun(rows[selected])
+        onRun(rows[selected], target)
+    }
+
+    private func toggleScope() {
+        guard initialTarget.isStacked else { return }
+        scopeOverride = !target.wholeStack
+        selected = 0
     }
 
     /// ↑/↓ must be intercepted: in a single-line `NSTextField` they move the cursor to
@@ -175,6 +201,8 @@ struct PromptPickerView: View {
             switch event.keyCode {
             case 125: move(1);  return nil   // Down
             case 126: move(-1); return nil   // Up
+            case 48 where initialTarget.isStacked:   // Tab: whole stack ↔ this PR
+                toggleScope(); return nil
             default:  return event
             }
         }

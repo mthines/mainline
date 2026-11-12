@@ -219,27 +219,27 @@ struct MenuBarView: View {
             }
         }
         // Prompt-template picker — panel level, like the peek card. The deck sets
-        // `manager.promptPickerPR`; running or closing clears it.
+        // `manager.promptPickerTarget`; running or closing clears it.
         .overlay {
-            if let pr = manager.promptPickerPR {
+            if let target = manager.promptPickerTarget {
                 ZStack(alignment: .top) {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
-                        .onTapGesture { manager.promptPickerPR = nil }
+                        .onTapGesture { manager.promptPickerTarget = nil }
                     PromptPickerView(
-                        pr: pr,
+                        initialTarget: target,
                         store: manager.promptStore,
-                        activeStates: PromptState.active(pr: pr, myLogin: settings.githubUsername),
-                        onRun: { item in
-                            manager.promptPickerPR = nil
+                        myLogin: settings.githubUsername,
+                        onRun: { item, scoped in
+                            manager.promptPickerTarget = nil
                             switch item {
                             case .template(let template, _):
-                                manager.runPromptTemplate(template, on: pr)
+                                manager.runPromptTemplate(template, on: scoped)
                             case .custom(let harnessKey, _, let text):
-                                manager.runCustomPrompt(text, harnessKey: harnessKey, on: pr)
+                                manager.runCustomPrompt(text, harnessKey: harnessKey, on: scoped)
                             }
                         },
-                        onClose: { manager.promptPickerPR = nil }
+                        onClose: { manager.promptPickerTarget = nil }
                     )
                     .padding(.horizontal, 12)
                     .padding(.top, 12)
@@ -248,7 +248,7 @@ struct MenuBarView: View {
                 .zIndex(11)
             }
         }
-        .animation(.easeInOut(duration: 0.12), value: manager.promptPickerPR != nil)
+        .animation(.easeInOut(duration: 0.12), value: manager.promptPickerTarget != nil)
         // Animate only the OPEN/CLOSE boundary (nil ↔ present), not PR-to-PR steps.
         // Keying on the node id animated every navigation and replayed the fade.
         .animation(.easeInOut(duration: 0.12), value: manager.peekPR != nil)

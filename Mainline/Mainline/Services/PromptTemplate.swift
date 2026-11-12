@@ -130,6 +130,37 @@ struct PromptConfig: Codable, Equatable {
     }
 }
 
+// MARK: - Target
+
+/// What a prompt runs on: one PR, or the whole stack it belongs to.
+struct PromptTarget: Equatable {
+    /// The PR the user acted on.
+    var anchor: PRSnapshot
+    /// Its stack, bottom → top (merge order); just `[anchor]` when it isn't stacked.
+    var members: [PRSnapshot]
+    /// Run on every member rather than just `anchor`. Ignored when not stacked.
+    var wholeStack: Bool
+
+    /// The PRs the prompt covers.
+    var prs: [PRSnapshot] { wholeStack && members.count > 1 ? members : [anchor] }
+    /// Whose repo, branch and checkout the session uses: a stack's base, else the PR.
+    var primary: PRSnapshot { prs[0] }
+    /// The anchor sits in a stack (so the scope can be switched, and `stacked` applies).
+    var isStacked: Bool { members.count > 1 }
+    var isStack: Bool { prs.count > 1 }
+
+    var context: PromptContext { PromptContext(prs: prs) }
+
+    func state(myLogin: String) -> Set<String> {
+        PromptState.active(prs: prs, myLogin: myLogin, stacked: isStacked)
+    }
+
+    /// "#123" or "stack #1 → #4 (4 PRs)".
+    var title: String {
+        isStack ? "stack #\(prs.first!.number) → #\(prs.last!.number) (\(prs.count) PRs)" : "#\(anchor.number)"
+    }
+}
+
 // MARK: - Context
 
 /// The PR facts available to `{{pr.*}}` placeholders.
@@ -138,7 +169,13 @@ struct PromptContext: Equatable {
 
     init(values: [String: String]) { self.values = values }
 
-    init(pr: PRSnapshot) {
+    init(pr: PRSnapshot) { self.init(prs: [pr]) }
+
+    /// `prs` is one PR, or a stack bottom → top. `{{pr.*}}` describes the FIRST one (the
+    /// stack's base: the repo and branch the agent works in); `{{stack.*}}` lists them all
+    /// and is defined for a single PR too (size 1), so one template works for both.
+    init(prs: [PRSnapshot]) {
+        let pr = prs[0]
         let owner = pr.repoFullName.split(separator: "/").first.map(String.init) ?? ""
         values = [
             "pr.url": pr.htmlUrl,
@@ -149,11 +186,19 @@ struct PromptContext: Equatable {
             "pr.branch": pr.headRefName,
             "pr.base": pr.baseRefName,
             "pr.author": pr.author,
+            "stack.size": String(prs.count),
+            "stack.prs": PRListExport.markdown(prs: prs),
+            "stack.urls": prs.map(\.htmlUrl).joined(separator: "\n"),
+            "stack.branches": prs.map(\.headRefName).filter { !$0.isEmpty }.joined(separator: "\n"),
         ]
     }
 
+    /// More than one PR.
+    var isStack: Bool { (Int(values["stack.size"] ?? "1") ?? 1) > 1 }
+
     static let placeholderNames = ["pr.url", "pr.number", "pr.title", "pr.repo",
-                                   "pr.owner", "pr.branch", "pr.base", "pr.author"]
+                                   "pr.owner", "pr.branch", "pr.base", "pr.author",
+                                   "stack.size", "stack.prs", "stack.urls", "stack.branches"]
 }
 
 // MARK: - PR state → template suggestions
@@ -190,11 +235,26 @@ enum PromptState {
         ("closed", "closed without merging"),
         ("authored", "you opened it (or committed to it)"),
         ("reviewing", "someone else's PR"),
+        ("stacked", "part of a stack of open PRs"),
     ]
     static var tokenNames: [String] { tokens.map(\.name) }
 
     /// The tokens that hold for `pr`.
     static func active(pr: PRSnapshot, myLogin: String) -> Set<String> {
+        active(prs: [pr], myLogin: myLogin, stacked: false)
+    }
+
+    /// The tokens that hold for a PR or a stack: a state holds when ANY member has it
+    /// (one conflicted PR makes the stack conflicted), plus `stacked` when `stacked` or
+    /// there are several.
+    static func active(prs: [PRSnapshot], myLogin: String, stacked: Bool) -> Set<String> {
+        var all = Set<String>()
+        for pr in prs { all.formUnion(single(pr: pr, myLogin: myLogin)) }
+        if stacked || prs.count > 1 { all.insert("stacked") }
+        return all
+    }
+
+    private static func single(pr: PRSnapshot, myLogin: String) -> Set<String> {
         var s = Set<String>()
         if pr.ciStatus == .failure || pr.ciStatus == .error { s.insert("ci-failing") }
         if pr.ciStatus == .success { s.insert("ci-passing") }
@@ -488,7 +548,17 @@ enum PromptEngine {
     static func renderBody(_ template: PromptTemplate, context: PromptContext) throws -> String {
         // `{{prompt}}` in a body would recurse into itself — it is reserved.
         if placeholders(in: template.body).contains("prompt") { throw PromptError.unknownPlaceholder("prompt") }
-        return try substitute(template.body, context: context)
+        return withStackContext(try substitute(template.body, context: context),
+                                source: template.body, context: context)
+    }
+
+    /// On a stack, a template that never mentions `{{stack.*}}` would silently see only the
+    /// base PR; append the stack list so it still knows about the rest.
+    static func withStackContext(_ rendered: String, source: String, context: PromptContext) -> String {
+        guard context.isStack,
+              !placeholders(in: source).contains(where: { $0.hasPrefix("stack.") }) else { return rendered }
+        return rendered + "\n\nThis is a stack of \(context.values["stack.size"] ?? "?") PRs "
+            + "(bottom → top, merge order):\n" + (context.values["stack.prs"] ?? "")
     }
 
     /// Single-quote a value for zsh.
@@ -595,6 +665,18 @@ enum PromptStarters {
 
     States: \(PromptState.tokenNames.joined(separator: " "))
 
+    Stacks
+    ------
+    Run a prompt on a whole stack of PRs (A on any stacked PR, or right-click ▸ Run Prompt
+    on Stack). {{pr.*}} is then the stack's BASE PR — the repo and branch the agent works in —
+    and these list every PR, bottom → top:
+
+        {{stack.size}}  {{stack.prs}} (Markdown list with CI/review state)  {{stack.urls}}  {{stack.branches}}
+
+    They work for a single PR too (size 1). A template that doesn't mention any {{stack.*}}
+    gets the stack list appended automatically. A state holds for a stack when ANY of its
+    PRs has it, and `stacked` is true for every PR in a stack.
+
     config.json
     -----------
     "harnesses" maps a key to either a `command` (run in your terminal) or a `url`
@@ -645,7 +727,7 @@ enum PromptStarters {
         checkout: true
         # when: float this template to the top when the PR is in this state. `,` = or, `+` = and,
         #       `!` = not. States: ci-failing ci-passing ci-pending conflict changes-requested approved
-        #       review-required unresolved-threads draft ready ready-to-merge open merged closed authored reviewing
+        #       review-required unresolved-threads draft ready ready-to-merge open merged closed authored reviewing stacked
         when: reviewing+ready
         # priority: orders templates that are suggested at once (higher first). Default 0.
         priority: 10
@@ -666,6 +748,17 @@ enum PromptStarters {
             Report findings ranked by severity; don't change any code.
             """,
             when: "reviewing+ready", priority: 10),
+        PromptTemplate(
+            fileName: "review-stack.md", name: "Review stack", harness: "claude", checkout: true,
+            body: """
+            Review this stack of PRs as one change set, bottom to top. Check that each PR
+            stands on its own, then how they fit together.
+
+            {{stack.prs}}
+
+            Focus on correctness and on review feedback still unresolved. Don't change any code.
+            """,
+            when: "reviewing+stacked", priority: 12),
         PromptTemplate(
             fileName: "resolve-conflicts.md", name: "Resolve merge conflicts", harness: "claude", checkout: true,
             body: """
@@ -757,6 +850,39 @@ enum PromptTemplateChecks {
         assert(PromptEngine.validate(wantsCheckout, config: quotedCheckout) == [.placeholderInQuotes("pr.branch")], "checkout step flagged")
         assert((try? PromptEngine.launch(prompt: "p", harnessKey: "claude", config: quotedCheckout, context: ctx,
                                          checkout: true, workingDirectory: "/tmp", promptFile: "/tmp/p")) == nil, "launch refuses a quoted checkout")
+
+        // Stacks: one target, many PRs.
+        func stackPR(_ n: Int, ci: CIStatus = .success, mergeable: Bool? = true, author: String = "me") -> PRSnapshot {
+            PRSnapshot(nodeId: "s\(n)", number: n, title: "pr \(n)", htmlUrl: "https://github.com/o/r/pull/\(n)",
+                       repoFullName: "o/r", isDraft: false, state: "open", reviewDecision: nil, ciStatus: ci,
+                       reviewState: .approved, commentCount: 0, updatedAt: "", author: author,
+                       requestedReviewers: [], mergeable: mergeable, headRefName: "b\(n)", baseRefName: "b\(n - 1)")
+        }
+        let members = [stackPR(1), stackPR(2, ci: .failure), stackPR(3, mergeable: false)]
+        var target = PromptTarget(anchor: members[1], members: members, wholeStack: true)
+        assert(target.prs.map(\.number) == [1, 2, 3] && target.primary.number == 1, "whole stack: base is primary")
+        assert(target.title == "stack #1 → #3 (3 PRs)", "stack title")
+        target.wholeStack = false
+        assert(target.prs.map(\.number) == [2] && target.primary.number == 2 && target.isStacked && !target.isStack, "this PR only, still stacked")
+        assert(target.title == "#2", "single title")
+        let lone = PromptTarget(anchor: members[0], members: [members[0]], wholeStack: true)
+        assert(lone.prs.count == 1 && !lone.isStacked, "a lone PR ignores wholeStack")
+        let stackState = PromptTarget(anchor: members[0], members: members, wholeStack: true).state(myLogin: "me")
+        assert(stackState.isSuperset(of: ["ci-failing", "conflict", "ci-passing", "stacked", "authored"]), "stack state = union of members + stacked")
+        assert(target.state(myLogin: "me").contains("stacked") && !target.state(myLogin: "me").contains("conflict"), "single member keeps its own state, plus stacked")
+        let sctx = PromptContext(prs: members)
+        assert(sctx.isStack && sctx.values["pr.number"] == "1" && sctx.values["stack.size"] == "3", "pr.* is the base")
+        assert(sctx.values["stack.urls"] == "https://github.com/o/r/pull/1\nhttps://github.com/o/r/pull/2\nhttps://github.com/o/r/pull/3", "stack.urls bottom → top")
+        assert(sctx.values["stack.branches"] == "b1\nb2\nb3" && sctx.values["stack.prs"]?.contains("[o/r#2]") == true, "stack.branches / stack.prs")
+        assert(!PromptContext(pr: members[0]).isStack && PromptContext(pr: members[0]).values["stack.size"] == "1", "single PR: stack.size 1")
+        var plain = tpl0; plain.body = "Review {{pr.url}}"
+        let appended = try? PromptEngine.renderBody(plain, context: sctx)
+        assert(appended?.hasPrefix("Review https://github.com/o/r/pull/1") == true && appended?.contains("stack of 3 PRs") == true && appended?.contains("[o/r#3]") == true, "stack list appended when the template ignores stack.*")
+        var aware = tpl0; aware.body = "Stack:\n{{stack.prs}}"
+        assert((try? PromptEngine.renderBody(aware, context: sctx))?.contains("stack of") == false, "no append when the template uses stack.*")
+        assert((try? PromptEngine.renderBody(plain, context: PromptContext(pr: members[0]))) == "Review https://github.com/o/r/pull/1", "single PR: nothing appended")
+        let rs = PromptStarters.templates.first { $0.fileName == "review-stack.md" }!
+        assert(PromptState.ordered(PromptStarters.templates, active: PromptTarget(anchor: stackPR(1, author: "x"), members: [stackPR(1, author: "x"), stackPR(2, author: "x")], wholeStack: true).state(myLogin: "me")).first?.template.fileName == rs.fileName, "someone else's stack → Review stack first")
 
         // A bad `when:` never blocks a run; a disabled harness does, and is never suggested.
         var badWhen = tpl0; badWhen.when = "nope"
@@ -871,7 +997,7 @@ enum PromptTemplateChecks {
         // Filtering.
         let all = PromptStarters.templates
         assert(PromptEngine.filter(all, query: "", config: cfg).count == all.count, "empty query keeps all")
-        assert(PromptEngine.filter(all, query: "REVIEW", config: cfg).map(\.fileName) == ["review-pr.md", "address-feedback.md", "verify-preview.md"], "name match (\"preview\" contains \"review\")")
+        assert(PromptEngine.filter(all, query: "REVIEW", config: cfg).map(\.fileName) == ["review-pr.md", "review-stack.md", "address-feedback.md", "verify-preview.md"], "name match (\"preview\" contains \"review\")")
         assert(PromptEngine.filter(all, query: "agent0", config: cfg).map(\.fileName) == ["analyse-telemetry.md", "verify-preview.md"], "harness-label match")
 
         // The annotated starter parses to the same template and sends no comment text.

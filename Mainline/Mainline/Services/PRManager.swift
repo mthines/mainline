@@ -137,39 +137,42 @@ final class PRManager: ObservableObject {
     /// `~/.config/mainline` prompt templates + harness config (Settings → Prompts).
     let promptStore = PromptTemplateStore()
 
-    /// The PR the prompt-template picker is open for, or `nil`. Presented at the
-    /// panel level in `MenuBarView`, like `peekPR`; the deck only sets it.
-    @Published var promptPickerPR: PRSnapshot?
+    /// What the prompt-template picker is open for (a PR, or its whole stack), or `nil`.
+    /// Presented at the panel level in `MenuBarView`, like `peekPR`; the deck only sets it.
+    @Published var promptPickerTarget: PromptTarget?
 
-    /// Renders `template` for `pr` and starts its harness. Failures — including a
+    /// Renders `template` for `target` and starts its harness. Failures — including a
     /// harness whose command/url lacks `{{prompt}}` — surface as a toast, never silently.
-    func runPromptTemplate(_ template: PromptTemplate, on pr: PRSnapshot) {
+    func runPromptTemplate(_ template: PromptTemplate, on target: PromptTarget) {
         let config = promptStore.config
         do {
             if let error = PromptEngine.blockingErrors(template, config: config).first { throw error }
-            let prompt = try PromptEngine.renderBody(template, context: PromptContext(pr: pr))
+            let context = target.context
+            let prompt = try PromptEngine.renderBody(template, context: context)
             let summary = try PromptLauncher.run(
                 prompt: prompt, harnessKey: template.harness, checkout: template.checkout,
-                pr: pr, config: config, terminal: settings.promptTerminal)
-            TelemetryService.shared.recordTriageInteraction("run_prompt_template")
-            showInfoToast(summary, symbol: "terminal", seconds: 4)
+                pr: target.primary, context: context, config: config, terminal: settings.promptTerminal)
+            TelemetryService.shared.recordTriageInteraction(target.isStack ? "run_prompt_template_stack" : "run_prompt_template")
+            showInfoToast(summary + (target.isStack ? " · \(target.prs.count) PRs" : ""), symbol: "terminal", seconds: 4)
         } catch {
             showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
         }
     }
 
-    /// Starts `harnessKey` with a free-typed prompt about `pr` (no template, no checkout).
-    func runCustomPrompt(_ typed: String, harnessKey: String, on pr: PRSnapshot) {
+    /// Starts `harnessKey` with a free-typed prompt about `target` (no template, no checkout).
+    func runCustomPrompt(_ typed: String, harnessKey: String, on target: PromptTarget) {
         let config = promptStore.config
         do {
             if let error = PromptEngine.validate(harnessKey: harnessKey, config: config).first { throw error }
+            let context = target.context
             let body = PromptEngine.customBody(typed)
-            let prompt = try PromptEngine.substitute(body, context: PromptContext(pr: pr))
+            let prompt = PromptEngine.withStackContext(
+                try PromptEngine.substitute(body, context: context), source: body, context: context)
             let summary = try PromptLauncher.run(
                 prompt: prompt, harnessKey: harnessKey, checkout: false,
-                pr: pr, config: config, terminal: settings.promptTerminal)
-            TelemetryService.shared.recordTriageInteraction("run_custom_prompt")
-            showInfoToast(summary, symbol: "terminal", seconds: 4)
+                pr: target.primary, context: context, config: config, terminal: settings.promptTerminal)
+            TelemetryService.shared.recordTriageInteraction(target.isStack ? "run_custom_prompt_stack" : "run_custom_prompt")
+            showInfoToast(summary + (target.isStack ? " · \(target.prs.count) PRs" : ""), symbol: "terminal", seconds: 4)
         } catch {
             showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
         }

@@ -254,8 +254,9 @@ enum PromptLaunchError: Error, LocalizedError {
 enum PromptLauncher {
     /// Runs `prompt` on `pr` with the harness. Returns a one-line summary for a toast.
     static func run(prompt: String, harnessKey: String, checkout: Bool, pr: PRSnapshot,
-                    config: PromptConfig, terminal: PromptTerminal) throws -> String {
-        let context = PromptContext(pr: pr)
+                    context: PromptContext? = nil, config: PromptConfig,
+                    terminal: PromptTerminal) throws -> String {
+        let context = context ?? PromptContext(pr: pr)
         let harness = config.harnesses[harnessKey]
         let label = harness?.label ?? harnessKey
         let localPath = config.localPath(forRepo: pr.repoFullName)

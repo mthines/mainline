@@ -316,12 +316,12 @@ struct TriageDeckView: View {
                     // reopening the panel starts on the normal grouped deck
                     // rather than a stale search field.
                     manager.peekPR = nil
-                    manager.promptPickerPR = nil
+                    manager.promptPickerTarget = nil
                     manager.closeSearch()
                 },
                 // The picker's text field takes first responder like the search field,
                 // so the key view must reclaim it when either closes.
-                searchActive: searchActive || manager.promptPickerPR != nil
+                searchActive: searchActive || manager.promptPickerTarget != nil
             )
         )
         .onAppear { installScrollMonitor() }
@@ -1042,7 +1042,11 @@ struct TriageDeckView: View {
                 copyListButton(heading: copyHeading, prs: stack.members, visible: hovering)
                     .padding(.trailing, RowMetrics.horizontalPadding)
             }
-            .contextMenu { copyListMenuItem(heading: copyHeading, prs: stack.members) }
+            .contextMenu {
+                copyListMenuItem(heading: copyHeading, prs: stack.members)
+                Divider()
+                promptMenu(for: stack.bottom, wholeStack: true, title: "Run Prompt on Stack (\(stack.count))")
+            }
         }
     }
 
@@ -1498,29 +1502,13 @@ struct TriageDeckView: View {
 
         Divider()
 
-        // Agent harnesses: one entry per template in ~/.config/mainline/prompts, plus
-        // the picker (type-to-filter, or a free-typed prompt).
-        Menu {
-            // Templates whose `when:` fits this PR's state come first, starred.
-            let promptConfig = manager.promptStore.config
-            let ranked = PromptState.ordered(manager.promptStore.templates,
-                                             active: PromptState.active(pr: pr, myLogin: settings.githubUsername),
-                                             canRun: { PromptEngine.blockingErrors($0, config: promptConfig).isEmpty })
-            let suggested = ranked.filter { $0.reason != nil }
-            let others = ranked.filter { $0.reason == nil }
-            ForEach(suggested, id: \.template.fileName) { entry in
-                Button { manager.runPromptTemplate(entry.template, on: pr) } label: {
-                    Label(entry.template.name, systemImage: "star.fill")
-                }
-            }
-            if !suggested.isEmpty && !others.isEmpty { Divider() }
-            ForEach(others, id: \.template.fileName) { entry in
-                Button(entry.template.name) { manager.runPromptTemplate(entry.template, on: pr) }
-            }
-            if !ranked.isEmpty { Divider() }
-            Button("Search / Custom Prompt…") { handleTriageAction(.runPrompt, on: pr) }
-        } label: {
-            Label("Run Prompt", systemImage: "terminal")
+        // Agent harnesses. On a stacked PR there are two scopes: the whole stack (the
+        // default, matching pin / Later) or just this PR.
+        if stackMembers(of: pr).count > 1 {
+            promptMenu(for: pr, wholeStack: true, title: "Run Prompt on Stack (\(stackMembers(of: pr).count))")
+            promptMenu(for: pr, wholeStack: false, title: "Run Prompt on This PR")
+        } else {
+            promptMenu(for: pr, wholeStack: false, title: "Run Prompt")
         }
 
         // Close / reopen sit last and apart from everything else: they end (or
@@ -2171,7 +2159,8 @@ struct TriageDeckView: View {
         case .copyBranch:
             copyBranch(pr)
         case .runPrompt:
-            manager.promptPickerPR = pr
+            // Whole stack by default (like pin / Later); Tab in the picker narrows it.
+            manager.promptPickerTarget = promptTarget(for: pr, wholeStack: true)
         case .togglePin:
             // Stack-aware: pinning any member pins the WHOLE stack so they stay
             // together and float to Pinned as one unit (and unpin together).
@@ -2378,6 +2367,48 @@ struct TriageDeckView: View {
     /// move together.
     private func stackMembers(of pr: PRSnapshot) -> [PRSnapshot] {
         stackIndex.stack(containing: pr.nodeId)?.members ?? [pr]
+    }
+
+    // MARK: - Prompt templates
+
+    /// What a prompt would run on for `pr`: its whole stack, or just the PR. The stack is
+    /// resolved at call time, so a menu item always uses the current members.
+    private func promptTarget(for pr: PRSnapshot, wholeStack: Bool) -> PromptTarget {
+        PromptTarget(anchor: pr, members: stackMembers(of: pr), wholeStack: wholeStack)
+    }
+
+    /// Submenu of prompt templates for `pr` at one scope: templates whose `when:` fits the
+    /// target's state first (starred), then the rest, then the picker for a free prompt.
+    @ViewBuilder
+    private func promptMenu(for pr: PRSnapshot, wholeStack: Bool, title: String) -> some View {
+        let target = promptTarget(for: pr, wholeStack: wholeStack)
+        let config = manager.promptStore.config
+        let ranked = PromptState.ordered(manager.promptStore.templates,
+                                         active: target.state(myLogin: settings.githubUsername),
+                                         canRun: { PromptEngine.blockingErrors($0, config: config).isEmpty })
+        let suggested = ranked.filter { $0.reason != nil }
+        let others = ranked.filter { $0.reason == nil }
+        Menu {
+            ForEach(suggested, id: \.template.fileName) { entry in
+                Button {
+                    manager.runPromptTemplate(entry.template, on: promptTarget(for: pr, wholeStack: wholeStack))
+                } label: {
+                    Label(entry.template.name, systemImage: "star.fill")
+                }
+            }
+            if !suggested.isEmpty && !others.isEmpty { Divider() }
+            ForEach(others, id: \.template.fileName) { entry in
+                Button(entry.template.name) {
+                    manager.runPromptTemplate(entry.template, on: promptTarget(for: pr, wholeStack: wholeStack))
+                }
+            }
+            if !ranked.isEmpty { Divider() }
+            Button("Search / Custom Prompt…") {
+                manager.promptPickerTarget = promptTarget(for: pr, wholeStack: wholeStack)
+            }
+        } label: {
+            Label(title, systemImage: "terminal")
+        }
     }
 
     // MARK: - Confirmation copy
