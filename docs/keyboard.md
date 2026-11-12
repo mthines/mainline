@@ -79,9 +79,10 @@ The menu carries every action for that PR, in this order:
 
 1. **GitHub write actions** — approve, merge, request changes, and mark ready for review (drafts) or convert to draft (open, non-draft PRs).
 2. **Triage** — later (every snooze duration), mark seen, dismiss, and mute (Inbox only).
-3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), pin / unpin, and **Run Prompt** (on a stacked PR: on the stack or on just that PR).
+3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), and pin / unpin.
 4. **Copy** — copy link (the GitHub URL) and copy branch name.
-5. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
+5. **Run Prompt** — starts an agent session from a template (on a stacked PR: on the whole stack or just that PR).
+6. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
 
 The "open" item follows your open target, so it reads **Open in Linear** when Linear is configured.
 
