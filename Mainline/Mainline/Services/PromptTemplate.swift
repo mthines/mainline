@@ -24,8 +24,31 @@ struct PromptTemplate: Identifiable, Equatable {
     var when: String = ""
     /// Orders suggested templates; higher first. Default 0.
     var priority: Int = 0
+    /// More harnesses this template can run on, after `harness` (the default). The picker
+    /// lets ←/→ choose between them. Empty = just `harness`.
+    var extraHarnesses: [String] = []
+    /// Prompt text for a harness that needs its own wording (Claude Code has slash
+    /// commands, Agent0 does not). A harness without an entry uses `body`.
+    var harnessBodies: [String: String] = [:]
 
     var id: String { fileName }
+
+    /// `harness` first, then `extraHarnesses` (no repeats).
+    var harnessKeys: [String] {
+        var seen = Set<String>()
+        return ([harness] + extraHarnesses).filter { seen.insert($0).inserted }
+    }
+
+    /// The template as it runs on `key`: that harness, its own prompt text if it has one,
+    /// and no other harnesses.
+    func resolved(for key: String) -> PromptTemplate {
+        var copy = self
+        copy.harness = key
+        copy.body = harnessBodies[key] ?? body
+        copy.extraHarnesses = []
+        copy.harnessBodies = [:]
+        return copy
+    }
 }
 
 /// A harness is either a CLI command run in a terminal (`command`) or a web page
@@ -414,26 +437,58 @@ enum PromptEngine {
         let name = (meta["name"]?.isEmpty == false ? meta["name"]! : fallbackName)
         guard !name.isEmpty else { return nil }
         let checkout = ["true", "yes", "1"].contains((meta["checkout"] ?? "").lowercased())
+        let keys = (meta["harness"] ?? "").split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let sections = splitHarnessSections(body)
         return PromptTemplate(
             fileName: fileName,
             name: name,
-            harness: meta["harness"] ?? "claude",
+            harness: keys.first ?? "claude",
             checkout: checkout,
-            body: body.trimmingCharacters(in: .whitespacesAndNewlines),
+            body: sections.body,
             when: meta["when"] ?? "",
-            priority: Int(meta["priority"] ?? "") ?? 0
+            priority: Int(meta["priority"] ?? "") ?? 0,
+            extraHarnesses: Array(keys.dropFirst()),
+            harnessBodies: sections.bodies
         )
     }
 
+    /// Marker line that starts a harness's own prompt text: `--- harness: agent0`.
+    private static let sectionMarker = "--- harness:"
+
+    /// Splits a body into the shared text and per-harness sections. Each section runs from
+    /// its marker line to the next marker. An empty section is dropped (= use the shared text).
+    static func splitHarnessSections(_ text: String) -> (body: String, bodies: [String: String]) {
+        var shared: [String] = []
+        var bodies: [String: [String]] = [:]
+        var current: String?
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix(sectionMarker) {
+                let key = trimmed.dropFirst(sectionMarker.count).trimmingCharacters(in: .whitespaces)
+                if !key.isEmpty { current = key; bodies[key] = bodies[key] ?? []; continue }
+            }
+            if let current { bodies[current, default: []].append(line) } else { shared.append(line) }
+        }
+        func clean(_ lines: [String]) -> String { lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) }
+        return (clean(shared), bodies.mapValues(clean).filter { !$0.value.isEmpty })
+    }
+
     static func serialize(_ t: PromptTemplate) -> String {
-        """
+        // Sections follow the order of `harnessKeys`; keys not in it keep a stable (sorted) order.
+        let sectionKeys = t.harnessKeys + t.harnessBodies.keys.sorted().filter { !t.harnessKeys.contains($0) }
+        let sections = sectionKeys.compactMap { key -> String? in
+            guard let text = t.harnessBodies[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+            return "\n\(sectionMarker) \(key)\n\(text)\n"
+        }.joined()
+        return """
         ---
         name: \(t.name)
-        harness: \(t.harness)
+        harness: \(t.harnessKeys.joined(separator: ", "))
         checkout: \(t.checkout ? "true" : "false")
         \(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")---
         \(t.body)
-
+        \(sections)
         """
     }
 
@@ -454,15 +509,35 @@ enum PromptEngine {
     /// Problems that would stop `template` from running; empty when it is fine.
     static func validate(_ template: PromptTemplate, config: PromptConfig) -> [PromptError] {
         var errors: [PromptError] = []
-        errors.append(contentsOf: validate(harnessKey: template.harness, config: config))
-        for name in placeholders(in: template.body) where !PromptContext.placeholderNames.contains(name) {
-            errors.append(.unknownPlaceholder(name))
+        // A template runs when ANY of its harnesses does; only when none can is a harness error shown.
+        if runnableHarnesses(template, config: config).isEmpty {
+            errors.append(contentsOf: validate(harnessKey: template.harness, config: config))
+        }
+        var seenNames = Set<String>()
+        for text in [template.body] + template.harnessKeys.compactMap({ template.harnessBodies[$0] }) {
+            for name in placeholders(in: text)
+            where !PromptContext.placeholderNames.contains(name) && seenNames.insert(name).inserted {
+                errors.append(.unknownPlaceholder(name))
+            }
         }
         errors.append(contentsOf: PromptState.parse(template.when).unknown.map(PromptError.unknownStateToken))
         if template.checkout, let bad = quotedPlaceholders(in: config.checkout).first {
             errors.append(.placeholderInQuotes(bad))
         }
         return errors
+    }
+
+    /// The harnesses of `template` that can run right now (known, enabled, with a `{{prompt}}`
+    /// target), in the template's own order.
+    static func runnableHarnesses(_ template: PromptTemplate, config: PromptConfig) -> [String] {
+        template.harnessKeys.filter { validate(harnessKey: $0, config: config).isEmpty }
+    }
+
+    /// `template` ready to run: on its default harness when that can run, else on the first
+    /// one that can; unchanged when none can (so the run reports why).
+    static func effective(_ template: PromptTemplate, config: PromptConfig) -> PromptTemplate {
+        let runnable = runnableHarnesses(template, config: config)
+        return template.resolved(for: runnable.first ?? template.harness)
     }
 
     /// `validate` minus what must not stop a run: a bad `when:` only affects suggestions.
@@ -629,7 +704,7 @@ enum PromptEngine {
         guard !q.isEmpty else { return templates }
         return templates.filter { t in
             t.name.lowercased().contains(q)
-                || (config.harnesses[t.harness]?.label.lowercased().contains(q) ?? false)
+                || t.harnessKeys.contains { config.harnesses[$0]?.label.lowercased().contains(q) ?? false }
         }
     }
 
@@ -660,6 +735,22 @@ enum PromptStarters {
         ---
         Your prompt. Placeholders: {{pr.url}} {{pr.number}} {{pr.title}} {{pr.repo}}
         {{pr.owner}} {{pr.branch}} {{pr.base}} {{pr.author}}
+
+    Several harnesses for one template
+    ----------------------------------
+    List more than one, comma-separated: the first is the default, and in the picker
+    ←/→ switch between them before ↵ runs. A harness that needs its own wording (Claude
+    Code has slash commands, Agent0 does not) gets a section after the shared prompt:
+
+        harness: claude, agent0
+        ---
+        /ci-auto-fix {{pr.url}}
+
+        --- harness: agent0
+        CI is failing on {{pr.url}}. Find the cause and fix it on {{pr.branch}}.
+
+    A harness without a section uses the shared prompt. A disabled harness drops out
+    of the choices; the template still runs on the others.
 
     Suggesting templates by PR state
     --------------------------------
@@ -834,6 +925,36 @@ enum PromptTemplateChecks {
         assert(bare.name == "plain-one" && bare.harness == "claude" && !bare.checkout && bare.body == "just text", "no frontmatter")
         assert(PromptEngine.parse(fileName: "r.md", text: PromptEngine.serialize(t)) == PromptTemplate(
             fileName: "r.md", name: t.name, harness: t.harness, checkout: t.checkout, body: t.body), "serialize round-trips")
+
+        // Several harnesses on one template, with per-harness prompt text.
+        let multi = PromptEngine.parse(fileName: "m.md", text: """
+            ---
+            name: /ci-auto-fix
+            harness: claude, agent0
+            ---
+            /ci-auto-fix {{pr.url}}
+
+            --- harness: agent0
+            Fix CI on {{pr.url}}.
+            """)!
+        assert(multi.harness == "claude" && multi.extraHarnesses == ["agent0"] && multi.harnessKeys == ["claude", "agent0"], "harness list")
+        assert(multi.body == "/ci-auto-fix {{pr.url}}" && multi.harnessBodies == ["agent0": "Fix CI on {{pr.url}}."], "harness sections")
+        assert(PromptEngine.parse(fileName: "m.md", text: PromptEngine.serialize(multi)) == multi, "multi-harness round-trips")
+        assert(multi.resolved(for: "agent0").body == "Fix CI on {{pr.url}}." && multi.resolved(for: "agent0").harness == "agent0"
+               && multi.resolved(for: "agent0").extraHarnesses.isEmpty, "resolved(for:) picks the harness's own text")
+        assert(multi.resolved(for: "claude").body == "/ci-auto-fix {{pr.url}}", "a harness without a section uses the shared text")
+        assert(PromptEngine.validate(multi, config: cfg).isEmpty, "multi-harness template validates")
+        assert(PromptEngine.runnableHarnesses(multi, config: cfg) == ["claude", "agent0"], "both runnable")
+        let claudeOff = cfg.settingEnabled("claude", false)
+        assert(PromptEngine.runnableHarnesses(multi, config: claudeOff) == ["agent0"] && PromptEngine.validate(multi, config: claudeOff).isEmpty,
+               "one disabled harness leaves the template runnable")
+        assert(PromptEngine.effective(multi, config: claudeOff).harness == "agent0" && PromptEngine.effective(multi, config: claudeOff).body == "Fix CI on {{pr.url}}.",
+               "run falls back to the first runnable harness")
+        assert(PromptEngine.effective(multi, config: cfg).harness == "claude", "default harness wins when it can run")
+        var badSection = multi; badSection.harnessBodies["agent0"] = "{{pr.nope}}"
+        assert(PromptEngine.validate(badSection, config: cfg) == [.unknownPlaceholder("pr.nope")], "placeholders checked in every harness's text")
+        assert(PromptEngine.filter([multi], query: "agent0", config: cfg).count == 1, "filter matches any harness label")
+        assert(PromptEngine.parse(fileName: "s.md", text: "---\nname: s\nharness: claude\n---\nsame")!.extraHarnesses.isEmpty, "single harness has no extras")
 
         // File names.
         assert(PromptEngine.fileName(forName: "Review PR!", existing: []) == "review-pr.md", "slug")
