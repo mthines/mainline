@@ -827,8 +827,10 @@ enum PromptStarters {
         # Each *.md file in this folder is one template (see README.txt).
         # name: what the picker and the right-click menu show.
         name: \(t.name)
-        # harness: a key from ../config.json "harnesses" (claude, agent0, or your own).
-        harness: \(t.harness)
+        # harness: keys from ../config.json "harnesses" (claude, agent0, or your own). List several,
+        #          comma-separated, to pick between them with ←/→ in the picker; the first is the default.
+        #          A harness that needs its own wording gets a `--- harness: <key>` section (see fix-ci.md).
+        harness: \(t.harnessKeys.joined(separator: ", "))
         # checkout: true runs config.json's "checkout" step in the repo's local clone first.
         #           Needs the repo listed under "repos" in config.json.
         checkout: true
@@ -854,7 +856,7 @@ enum PromptStarters {
             Focus on correctness, missed edge cases and unresolved review threads.
             Report findings ranked by severity; don't change any code.
             """,
-            when: "reviewing+ready", priority: 10),
+            when: "reviewing+ready", priority: 10, extraHarnesses: ["agent0"]),
         PromptTemplate(
             fileName: "review-stack.md", name: "Review stack", harness: "claude", checkout: true,
             body: """
@@ -865,7 +867,7 @@ enum PromptStarters {
 
             Focus on correctness and on review feedback still unresolved. Don't change any code.
             """,
-            when: "reviewing+stacked", priority: 12),
+            when: "reviewing+stacked", priority: 12, extraHarnesses: ["agent0"]),
         PromptTemplate(
             fileName: "resolve-conflicts.md", name: "Resolve merge conflicts", harness: "claude", checkout: true,
             body: """
@@ -880,14 +882,20 @@ enum PromptStarters {
             CI is failing on {{pr.url}} ({{pr.branch}}). Read the failing job logs, find the
             cause, fix it on this branch, verify locally and push. Never weaken a test.
             """,
-            when: "authored+ci-failing", priority: 20),
+            when: "authored+ci-failing", priority: 20, extraHarnesses: ["agent0"],
+            // A harness that can't do the shared wording gets its own: Agent0 has no local checkout.
+            harnessBodies: ["agent0": """
+            CI is failing on {{pr.url}} ({{pr.repo}}#{{pr.number}}). Read the failing job logs,
+            find the cause and propose a fix for {{pr.branch}}. Never weaken a test.
+            """]),
         PromptTemplate(
             fileName: "address-feedback.md", name: "Address review feedback", harness: "claude", checkout: true,
             body: """
             Read the review comments on {{pr.url}} and address each unresolved thread
             on this branch ({{pr.branch}}). Commit each fix separately.
             """,
-            when: "authored+changes-requested, authored+unresolved-threads", priority: 15),
+            when: "authored+changes-requested, authored+unresolved-threads", priority: 15,
+            extraHarnesses: ["agent0"]),
         PromptTemplate(
             fileName: "analyse-telemetry.md", name: "Analyse telemetry", harness: "agent0", checkout: false,
             body: """
@@ -1143,7 +1151,9 @@ enum PromptTemplateChecks {
         let all = PromptStarters.templates
         assert(PromptEngine.filter(all, query: "", config: cfg).count == all.count, "empty query keeps all")
         assert(PromptEngine.filter(all, query: "REVIEW", config: cfg).map(\.fileName) == ["review-pr.md", "review-stack.md", "address-feedback.md", "verify-preview.md"], "name match (\"preview\" contains \"review\")")
-        assert(PromptEngine.filter(all, query: "agent0", config: cfg).map(\.fileName) == ["analyse-telemetry.md", "verify-preview.md"], "harness-label match")
+        assert(PromptEngine.filter(all, query: "agent0", config: cfg).map(\.fileName) == ["review-pr.md", "review-stack.md", "fix-ci.md", "address-feedback.md", "analyse-telemetry.md", "verify-preview.md"], "harness-label match (any of a template's harnesses)")
+        let fixCI = all.first { $0.fileName == "fix-ci.md" }!
+        assert(fixCI.harnessKeys == ["claude", "agent0"] && fixCI.resolved(for: "agent0").body != fixCI.resolved(for: "claude").body, "starter shows a per-harness prompt")
 
         // The annotated starter parses to the same template and sends no comment text.
         let review = PromptStarters.templates[0]
