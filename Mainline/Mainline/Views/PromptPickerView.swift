@@ -3,9 +3,10 @@ import AppKit
 
 /// Type-to-filter picker for prompt templates, shown over the deck for one PR.
 ///
-/// ↑/↓ move, ←/→ pick the harness of a template that offers several, ↵ runs, Esc closes. Once something is typed, every configured harness
-/// also gets an "Ask …" row that sends the typed text itself as the prompt (about
-/// this PR) — so an arbitrary one-off session needs no template.
+/// ↑/↓ move, ←/→ pick the harness of a template that offers several (only while the query
+/// is empty, so the arrows still move the cursor in typed text), ↵ runs, Esc closes. Once
+/// something is typed, one "Ask" row (with a chip per configured harness) sends the typed
+/// text itself as the prompt (about this PR) — so an arbitrary one-off session needs no template.
 struct PromptPickerView: View {
     /// What the picker opened for. When it is a stacked PR, Tab switches between the whole
     /// stack and just that PR (`scopeOverride`).
@@ -310,13 +311,19 @@ struct PromptPickerView: View {
             switch event.keyCode {
             case 125: move(1);  return nil   // Down
             case 126: move(-1); return nil   // Up
-            case 123 where cycleHarness(-1): return nil   // Left: previous harness
-            case 124 where cycleHarness(1):  return nil   // Right: next harness
+            // Plain ←/→ cycle the harness only on an empty query; otherwise (or with a
+            // modifier) they fall through so the field's cursor/word/line moves still work.
+            case 123 where plainArrowCyclesHarness(event) && cycleHarness(-1): return nil   // Left
+            case 124 where plainArrowCyclesHarness(event) && cycleHarness(1):  return nil   // Right
             case 48 where initialTarget.isStacked:   // Tab: whole stack ↔ this PR
                 toggleScope(); return nil
             default:  return event
             }
         }
+    }
+
+    private func plainArrowCyclesHarness(_ event: NSEvent) -> Bool {
+        query.isEmpty && event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
     }
 
     private func removeKeyMonitor() {
