@@ -218,6 +218,37 @@ struct MenuBarView: View {
                 .zIndex(10)
             }
         }
+        // Prompt-template picker — panel level, like the peek card. The deck sets
+        // `manager.promptPickerTarget`; running or closing clears it.
+        .overlay {
+            if let target = manager.promptPickerTarget {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { manager.promptPickerTarget = nil }
+                    PromptPickerView(
+                        initialTarget: target,
+                        store: manager.promptStore,
+                        myLogin: settings.githubUsername,
+                        onRun: { item, scoped in
+                            manager.promptPickerTarget = nil
+                            switch item {
+                            case .template(let template, _):
+                                manager.runPromptTemplate(template, on: scoped)
+                            case .custom(let harnessKey, _, let text):
+                                manager.runCustomPrompt(text, harnessKey: harnessKey, on: scoped)
+                            }
+                        },
+                        onClose: { manager.promptPickerTarget = nil }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                }
+                .zIndex(11)
+            }
+        }
+        .animation(.easeInOut(duration: 0.12), value: manager.promptPickerTarget != nil)
         // Animate only the OPEN/CLOSE boundary (nil ↔ present), not PR-to-PR steps.
         // Keying on the node id animated every navigation and replayed the fade.
         .animation(.easeInOut(duration: 0.12), value: manager.peekPR != nil)
@@ -891,6 +922,10 @@ struct MenuBarView: View {
             "\(g(.merge)) merge",
             "\(g(.snooze)) later",
         ]
+        // Right after "pin"; hidden while unbound (an upgrade whose default "a" was taken).
+        if !b.runPrompt.key.isEmpty, let pinIndex = parts.firstIndex(where: { $0.hasSuffix(" pin") }) {
+            parts.insert("\(g(.runPrompt)) agent", at: pinIndex + 1)
+        }
         if settings.selectedTab == .inbox {
             parts.append("\(g(.toggleMute)) mute")
         }

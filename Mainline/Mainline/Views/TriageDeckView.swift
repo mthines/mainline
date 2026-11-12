@@ -25,6 +25,7 @@ enum TriageAction: Identifiable {
     case copyLink
     case copyBranch
     case togglePin
+    case runPrompt
 
     var id: String { label }
 
@@ -49,6 +50,7 @@ enum TriageAction: Identifiable {
         case .copyLink:           return "Copy Link"
         case .copyBranch:         return "Copy Branch Name"
         case .togglePin:          return "Pin / Unpin"
+        case .runPrompt:          return "Run Prompt…"
         }
     }
 
@@ -73,6 +75,7 @@ enum TriageAction: Identifiable {
         case .copyLink:        return "link"
         case .copyBranch:      return "doc.on.doc"
         case .togglePin:       return "pin"
+        case .runPrompt:       return "terminal"
         }
     }
 
@@ -313,9 +316,12 @@ struct TriageDeckView: View {
                     // reopening the panel starts on the normal grouped deck
                     // rather than a stale search field.
                     manager.peekPR = nil
+                    manager.promptPickerTarget = nil
                     manager.closeSearch()
                 },
-                searchActive: searchActive
+                // The picker's text field takes first responder like the search field,
+                // so the key view must reclaim it when either closes.
+                searchActive: searchActive || manager.promptPickerTarget != nil
             )
         )
         .onAppear { installScrollMonitor() }
@@ -974,7 +980,8 @@ struct TriageDeckView: View {
                 HStack(spacing: 0) {
                     stackSpine(position: position, count: stack.count)
                     memoizedDeckRow(pr: pr, index: indexMap[pr.nodeId] ?? 0,
-                                    stackBadge: "\(position + 1)/\(stack.count)")
+                                    stackBadge: "\(position + 1)/\(stack.count)",
+                                    stackMembers: stack.members)
                 }
                 Divider().padding(.leading, metrics.dividerInset() + Self.stackSpineWidth)
             }
@@ -987,6 +994,7 @@ struct TriageDeckView: View {
                 ?? visibleMembers.first ?? stack.bottom
             deckRow(pr: rep, index: indexMap[rep.nodeId] ?? 0,
                     stackCount: stack.count,
+                    stackMembers: stack.members,
                     onRowTap: { expansion.wrappedValue.toggle() })
             Divider().padding(.leading, metrics.dividerInset())
         }
@@ -1036,7 +1044,11 @@ struct TriageDeckView: View {
                 copyListButton(heading: copyHeading, prs: stack.members, visible: hovering)
                     .padding(.trailing, RowMetrics.horizontalPadding)
             }
-            .contextMenu { copyListMenuItem(heading: copyHeading, prs: stack.members) }
+            .contextMenu {
+                copyListMenuItem(heading: copyHeading, prs: stack.members)
+                Divider()
+                promptMenu(for: stack.bottom, members: stack.members, wholeStack: true, title: "Run Prompt on Stack (\(stack.count))")
+            }
         }
     }
 
@@ -1100,7 +1112,8 @@ struct TriageDeckView: View {
         !(searchActive && searchFieldFocused)
     }
 
-    private func memoizedDeckRow(pr: PRSnapshot, index: Int, stackBadge: String = "", stackCount: Int = 0) -> some View {
+    private func memoizedDeckRow(pr: PRSnapshot, index: Int, stackBadge: String = "", stackCount: Int = 0,
+                                 stackMembers: [PRSnapshot] = []) -> some View {
         EquatableRow(key: DeckRowKey(
             pr: pr,
             index: index,
@@ -1115,9 +1128,11 @@ struct TriageDeckView: View {
             showPeek: showPeek,
             compact: settings.compactRows,
             stackBadge: stackBadge,
-            stackCount: stackCount
+            stackCount: stackCount,
+            promptRevision: manager.promptStore.revision,
+            stackMembers: stackMembers
         )) {
-            deckRow(pr: pr, index: index, stackBadge: stackBadge, stackCount: stackCount)
+            deckRow(pr: pr, index: index, stackBadge: stackBadge, stackCount: stackCount, stackMembers: stackMembers)
         }
         .equatable()
     }
@@ -1182,7 +1197,7 @@ struct TriageDeckView: View {
     }
 
     private func deckRow(pr: PRSnapshot, index: Int, stackBadge: String = "", stackCount: Int = 0,
-                         onRowTap: (() -> Void)? = nil) -> some View {
+                         stackMembers: [PRSnapshot] = [], onRowTap: (() -> Void)? = nil) -> some View {
         let isFocused = index == selectedIndex && showsKeyboardFocus
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
@@ -1361,7 +1376,7 @@ struct TriageDeckView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contextMenu { rowContextMenu(for: pr) }
+        .contextMenu { rowContextMenu(for: pr, stackMembers: stackMembers) }
     }
 
     /// Native right-click action menu for a PR row — the discoverable home for
@@ -1375,7 +1390,7 @@ struct TriageDeckView: View {
     /// Grouped into `Group` blocks so each builder stays well under the ViewBuilder
     /// child limit as items are added.
     @ViewBuilder
-    private func rowContextMenu(for pr: PRSnapshot) -> some View {
+    private func rowContextMenu(for pr: PRSnapshot, stackMembers: [PRSnapshot] = []) -> some View {
         let writeOff = !settings.writeActionsEnabled
         // `merged` implies `closed` on GitHub; both are checked so a snapshot that
         // somehow carries only one still reads as finished.
@@ -1487,6 +1502,19 @@ struct TriageDeckView: View {
                     Label("Copy Branch Name", systemImage: "doc.on.doc")
                 }
             }
+        }
+
+        Divider()
+
+        // Agent harnesses. On a stacked PR there are two scopes: the whole stack (the
+        // default, matching pin / Later) or just this PR.
+        // `stackMembers` comes from the call site (and the row's memo key), never from a
+        // per-row `stackIndex` lookup — that property rebuilds every stack on each access.
+        if stackMembers.count > 1 {
+            promptMenu(for: pr, members: stackMembers, wholeStack: true, title: "Run Prompt on Stack (\(stackMembers.count))")
+            promptMenu(for: pr, members: stackMembers, wholeStack: false, title: "Run Prompt on This PR")
+        } else {
+            promptMenu(for: pr, members: [pr], wholeStack: false, title: "Run Prompt")
         }
 
         // Close / reopen sit last and apart from everything else: they end (or
@@ -2022,6 +2050,12 @@ struct TriageDeckView: View {
             return nil
         }
 
+        // Open the prompt-template picker for the focused PR (start an agent session).
+        if shortcutMatches(.runPrompt, event: event) {
+            if let pr = focusedPR { handleTriageAction(.runPrompt, on: pr) }
+            return nil
+        }
+
         // Open the in-app search field. `openSearch` also requests keyboard focus
         // on the field (via a focus token) so pressing it again while search is
         // already open re-focuses the field for editing.
@@ -2130,6 +2164,9 @@ struct TriageDeckView: View {
             copyLink(pr)
         case .copyBranch:
             copyBranch(pr)
+        case .runPrompt:
+            // Whole stack by default (like pin / Later); Tab in the picker narrows it.
+            manager.promptPickerTarget = promptTarget(for: pr, wholeStack: true)
         case .togglePin:
             // Stack-aware: pinning any member pins the WHOLE stack so they stay
             // together and float to Pinned as one unit (and unpin together).
@@ -2336,6 +2373,52 @@ struct TriageDeckView: View {
     /// move together.
     private func stackMembers(of pr: PRSnapshot) -> [PRSnapshot] {
         stackIndex.stack(containing: pr.nodeId)?.members ?? [pr]
+    }
+
+    // MARK: - Prompt templates
+
+    /// What a prompt would run on for `pr`: its whole stack, or just the PR. The stack is
+    /// resolved at call time, so a menu item always uses the current members.
+    private func promptTarget(for pr: PRSnapshot, wholeStack: Bool) -> PromptTarget {
+        promptTarget(for: pr, members: stackMembers(of: pr), wholeStack: wholeStack)
+    }
+
+    private func promptTarget(for pr: PRSnapshot, members: [PRSnapshot], wholeStack: Bool) -> PromptTarget {
+        PromptTarget(anchor: pr, members: members.count > 1 ? members : [pr], wholeStack: wholeStack)
+    }
+
+    /// Submenu of prompt templates for `pr` at one scope: templates whose `when:` fits the
+    /// target's state first (starred), then the rest, then the picker for a free prompt.
+    @ViewBuilder
+    private func promptMenu(for pr: PRSnapshot, members: [PRSnapshot], wholeStack: Bool, title: String) -> some View {
+        let target = promptTarget(for: pr, members: members, wholeStack: wholeStack)
+        let config = manager.promptStore.config
+        let ranked = PromptState.ordered(manager.promptStore.templates,
+                                         active: target.state(myLogin: settings.githubUsername),
+                                         canRun: { PromptEngine.blockingErrors($0, config: config).isEmpty })
+        let suggested = ranked.filter { $0.reason != nil }
+        let others = ranked.filter { $0.reason == nil }
+        Menu {
+            ForEach(suggested, id: \.template.fileName) { entry in
+                Button {
+                    manager.runPromptTemplate(entry.template, on: target)
+                } label: {
+                    Label(entry.template.name, systemImage: "star.fill")
+                }
+            }
+            if !suggested.isEmpty && !others.isEmpty { Divider() }
+            ForEach(others, id: \.template.fileName) { entry in
+                Button(entry.template.name) {
+                    manager.runPromptTemplate(entry.template, on: target)
+                }
+            }
+            if !ranked.isEmpty { Divider() }
+            Button("Search / Custom Prompt…") {
+                manager.promptPickerTarget = target
+            }
+        } label: {
+            Label(title, systemImage: "terminal")
+        }
     }
 
     // MARK: - Confirmation copy
@@ -2609,6 +2692,13 @@ private struct DeckRowKey: Equatable {
     /// > 0 when this row is the collapsed representative of a stack of that size —
     /// draws the stack glyph + count chip. Part of the key so it re-renders on change.
     let stackCount: Int
+    /// `PromptTemplateStore.revision` — the row's context menu lists the templates, so
+    /// editing one must re-render rows that are otherwise unchanged.
+    let promptRevision: Int
+    /// The row's whole stack (empty when not stacked). The menu's "Run Prompt on Stack"
+    /// puts these snapshots in the prompt and ranks templates on their state, so a change
+    /// to ANY member must re-render a memoized row — `pr` alone only covers the anchor.
+    let stackMembers: [PRSnapshot]
 }
 
 /// Memoizing wrapper: re-evaluates `content()` only when `key` changes. Paired

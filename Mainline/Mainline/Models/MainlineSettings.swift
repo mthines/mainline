@@ -67,6 +67,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case copyBranch
     case togglePin
     case search
+    case runPrompt
     case undo
 
     var id: String { rawValue }
@@ -89,6 +90,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .copyBranch:       return "Copy Branch Name"
         case .togglePin:        return "Pin / Unpin"
         case .search:           return "Find / Search"
+        case .runPrompt:        return "Run Prompt Template"
         case .undo:             return "Undo (⌘+key)"
         }
     }
@@ -111,6 +113,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .copyBranch:       return "c"   // "copy" — left-hand key (see left-hand default policy)
         case .togglePin:        return "p"   // "pin" — mnemonic (right-hand exception, like M/N)
         case .search:           return "f"   // "find" — mnemonic (freed by moving Mark Ready to "t")
+        case .runPrompt:        return "a"   // "agent" — left-hand key (see left-hand default policy)
         case .undo:             return "z"
         }
     }
@@ -133,6 +136,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .copyBranch:       return "doc.on.doc"
         case .togglePin:        return "pin"
         case .search:           return "magnifyingglass"
+        case .runPrompt:        return "terminal"
         case .undo:             return "arrow.uturn.backward"
         }
     }
@@ -206,6 +210,7 @@ struct InAppShortcutBindings: Equatable {
     var copyBranch:      ShortcutBinding
     var togglePin:       ShortcutBinding
     var search:          ShortcutBinding
+    var runPrompt:       ShortcutBinding
     var undo:            ShortcutBinding
 
     /// Factory defaults — all bindings bare except undo = ⌘Z.
@@ -228,6 +233,7 @@ struct InAppShortcutBindings: Equatable {
             copyBranch:      ShortcutBinding(key: "c"),
             togglePin:       ShortcutBinding(key: "p"),
             search:          ShortcutBinding(key: "f"),
+            runPrompt:       ShortcutBinding(key: "a"),
             undo:            ShortcutBinding(key: "z", modifiers: cmdRaw)
         )
     }()
@@ -251,6 +257,7 @@ struct InAppShortcutBindings: Equatable {
         case .copyBranch:        return copyBranch
         case .togglePin:         return togglePin
         case .search:            return search
+        case .runPrompt:         return runPrompt
         case .undo:              return undo
         }
     }
@@ -274,6 +281,7 @@ struct InAppShortcutBindings: Equatable {
         case .copyBranch:        copyBranch      = binding
         case .togglePin:         togglePin       = binding
         case .search:            search          = binding
+        case .runPrompt:         runPrompt       = binding
         case .undo:              undo            = binding
         }
     }
@@ -320,7 +328,7 @@ extension InAppShortcutBindings: Codable {
     enum CodingKeys: String, CodingKey {
         case navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview,
              snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
-             toggleMute, copyBranch, togglePin, search, undo
+             toggleMute, copyBranch, togglePin, search, runPrompt, undo
     }
 
     /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
@@ -379,6 +387,19 @@ extension InAppShortcutBindings: Codable {
         togglePin = try decodeBinding(.togglePin, default: d.togglePin)
         search    = try decodeBinding(.search,    default: d.search)
 
+        // `runPrompt` is new: an upgrading user's stored JSON has no key for it. Its
+        // default ("a") must not silently clash with a binding they already chose, so
+        // when the key is absent AND "a" is taken, leave it unbound (empty key — skipped
+        // by clash detection) and let them assign one in Settings → Keyboard.
+        if container.contains(.runPrompt) {
+            runPrompt = try decodeBinding(.runPrompt, default: d.runPrompt)
+        } else {
+            let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch,
+                         togglePin, search].contains(d.runPrompt)
+            runPrompt = taken ? ShortcutBinding(key: "") : d.runPrompt
+        }
+
         // Undo migration: bare-string or absent → apply .command modifier.
         if let newShape = try? container.decodeIfPresent(ShortcutBinding.self, forKey: .undo) {
             // New-shape object — use modifiers as stored (trusts the encoder).
@@ -410,6 +431,7 @@ extension InAppShortcutBindings: Codable {
         try container.encode(copyBranch,       forKey: .copyBranch)
         try container.encode(togglePin,        forKey: .togglePin)
         try container.encode(search,           forKey: .search)
+        try container.encode(runPrompt,        forKey: .runPrompt)
         try container.encode(undo,             forKey: .undo)
     }
 }
@@ -593,6 +615,7 @@ final class MainlineSettings: ObservableObject {
         // Triage Cockpit additions
         static let writeActionsEnabled  = "writeActionsEnabled"
         static let mergeMethodPreference = "mergeMethodPreference"
+        static let promptTerminal        = "promptTerminal"
         static let prOpenTarget         = "prOpenTarget"
         static let linearRepoFilter     = "linearRepoFilter"
         static let defaultSnoozeDuration = "defaultSnoozeDuration"
@@ -728,6 +751,11 @@ final class MainlineSettings: ObservableObject {
     /// The user's preferred merge method for in-app merges. Default `.auto`.
     @Published var mergeMethodPreference: MergeMethodPreference {
         didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
+    }
+
+    /// Terminal app CLI prompt-template harnesses open in (Settings → Prompts).
+    @Published var promptTerminal: PromptTerminal {
+        didSet { defaults.set(promptTerminal.rawValue, forKey: Keys.promptTerminal) }
     }
 
     /// Where the primary "open PR" action sends the user. Default `.github`.
@@ -1407,6 +1435,9 @@ final class MainlineSettings: ObservableObject {
         // Merge method preference — default Auto (picks the repo's allowed method)
         mergeMethodPreference = defaults.string(forKey: Keys.mergeMethodPreference)
             .flatMap { MergeMethodPreference(rawValue: $0) } ?? .auto
+
+        // Terminal for prompt-template CLI harnesses — load only (persisted by its didSet)
+        promptTerminal = defaults.string(forKey: Keys.promptTerminal).flatMap(PromptTerminal.init(rawValue:)) ?? .auto
 
         // Quick-snooze duration for the `S` verb — default matches `SnoozeDuration.quickDefault`
         defaultSnoozeDuration = defaults.string(forKey: Keys.defaultSnoozeDuration)

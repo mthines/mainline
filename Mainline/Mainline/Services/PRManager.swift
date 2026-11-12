@@ -132,6 +132,54 @@ final class PRManager: ObservableObject {
     /// second keystroke on the same URL doesn't kick off a duplicate request.
     private var searchFetchInFlight: Set<String> = []
 
+    // MARK: - Prompt templates
+
+    /// `~/.config/mainline` prompt templates + harness config (Settings → Prompts).
+    let promptStore = PromptTemplateStore()
+
+    /// What the prompt-template picker is open for (a PR, or its whole stack), or `nil`.
+    /// Presented at the panel level in `MenuBarView`, like `peekPR`; the deck only sets it.
+    @Published var promptPickerTarget: PromptTarget?
+
+    /// Renders `template` for `target` and starts its harness. Failures — including a
+    /// harness whose command/url lacks `{{prompt}}` — surface as a toast, never silently.
+    func runPromptTemplate(_ template: PromptTemplate, on target: PromptTarget) {
+        let config = promptStore.config
+        do {
+            if let error = PromptEngine.blockingErrors(template, config: config).first { throw error }
+            let context = target.context
+            let prompt = try PromptEngine.renderBody(template, context: context)
+            let summary = try PromptLauncher.run(
+                prompt: prompt, harnessKey: template.harness, checkout: template.checkout,
+                pr: target.primary, context: context, config: config, terminal: settings.promptTerminal)
+            TelemetryService.shared.recordTriageInteraction(target.isStack ? "run_prompt_template_stack" : "run_prompt_template")
+            showInfoToast(summary + (target.isStack ? " · \(target.prs.count) PRs" : ""), symbol: "terminal", seconds: 4)
+        } catch {
+            showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
+        }
+    }
+
+    /// Starts `harnessKey` with a free-typed prompt about `target` (no template, no checkout).
+    func runCustomPrompt(_ typed: String, harnessKey: String, on target: PromptTarget) {
+        let config = promptStore.config
+        do {
+            if let error = PromptEngine.validate(harnessKey: harnessKey, config: config).first { throw error }
+            let context = target.context
+            // Only the PR prefix is a template; the typed text is literal, so a question
+            // about a Helm / Jinja `{{ … }}` template launches instead of failing.
+            let prefix = PromptEngine.customBody("")
+            let rendered = try PromptEngine.substitute(prefix, context: context) + typed
+            let prompt = PromptEngine.withStackContext(rendered, source: prefix, context: context)
+            let summary = try PromptLauncher.run(
+                prompt: prompt, harnessKey: harnessKey, checkout: false,
+                pr: target.primary, context: context, config: config, terminal: settings.promptTerminal)
+            TelemetryService.shared.recordTriageInteraction(target.isStack ? "run_custom_prompt_stack" : "run_custom_prompt")
+            showInfoToast(summary + (target.isStack ? " · \(target.prs.count) PRs" : ""), symbol: "terminal", seconds: 4)
+        } catch {
+            showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
+        }
+    }
+
     /// Opens the search field (idempotent) and requests keyboard focus on it.
     /// Called by the `search` shortcut.
     func openSearch() {
@@ -1027,6 +1075,12 @@ final class PRManager: ObservableObject {
         // first call should spin up the poller.
         guard !didStart else { return }
         didStart = true
+        promptStore.start()
+        // The store is a `let`, so forward its changes: the deck re-renders (and its
+        // row key picks up `promptStore.revision`) when a template is edited on disk.
+        promptStore.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
 
         // Notification authorization runs OFF the critical path, in its own task.
         // The system prompt does not return until the user answers it, and nothing

@@ -1,0 +1,221 @@
+import SwiftUI
+import AppKit
+
+/// Type-to-filter picker for prompt templates, shown over the deck for one PR.
+///
+/// ↑/↓ move, ↵ runs, Esc closes. Once something is typed, every configured harness
+/// also gets an "Ask …" row that sends the typed text itself as the prompt (about
+/// this PR) — so an arbitrary one-off session needs no template.
+struct PromptPickerView: View {
+    /// What the picker opened for. When it is a stacked PR, Tab switches between the whole
+    /// stack and just that PR (`scopeOverride`).
+    let initialTarget: PromptTarget
+    @ObservedObject var store: PromptTemplateStore
+    /// Drives which templates are suggested first (`PromptTarget.state`).
+    let myLogin: String
+    /// The item to run, and the target as scoped when ↵ was pressed.
+    let onRun: (Item, PromptTarget) -> Void
+    let onClose: () -> Void
+
+    enum Item: Identifiable {
+        /// `reason` is why it is suggested for this PR (nil = not suggested).
+        case template(PromptTemplate, reason: String?)
+        case custom(harnessKey: String, label: String, text: String)
+
+        var id: String {
+            switch self {
+            case .template(let t, _): return "t:\(t.fileName)"
+            case .custom(let key, _, _): return "c:\(key)"
+            }
+        }
+    }
+
+    @State private var query = ""
+    @State private var scopeOverride: Bool?
+    @State private var selected = 0
+    @State private var keyMonitor: Any?
+    @FocusState private var fieldFocused: Bool
+
+    private var target: PromptTarget {
+        var t = initialTarget
+        if let scopeOverride { t.wholeStack = scopeOverride }
+        return t
+    }
+
+    private var items: [Item] {
+        // Filter by the query, then keep suggested-first order (so ↵ on an empty query
+        // runs the best fit for this PR's state).
+        let matching = Set(PromptEngine.filter(store.templates, query: query, config: store.config).map(\.fileName))
+        let config = store.config
+        let templates = PromptState.ordered(store.templates, active: target.state(myLogin: myLogin),
+                                            canRun: { PromptEngine.blockingErrors($0, config: config).isEmpty })
+            .filter { matching.contains($0.template.fileName) }
+            .map { Item.template($0.template, reason: $0.reason) }
+        let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return templates }
+        let custom = store.config.enabledHarnesses.map {
+            Item.custom(harnessKey: $0.key, label: $0.value.label, text: typed)
+        }
+        return templates + custom
+    }
+
+    var body: some View {
+        let rows = items
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal").foregroundStyle(.secondary)
+                TextField("Run a prompt on \(target.title) — type to filter, or write your own",
+                          text: $query)
+                    .textFieldStyle(.plain)
+                    .focused($fieldFocused)
+                    .onSubmit { run(rows) }
+                    .onExitCommand(perform: onClose)
+                if initialTarget.isStacked {
+                    Button(action: toggleScope) {
+                        Text(target.isStack ? "Stack ×\(target.prs.count)  ⇥" : "This PR  ⇥")
+                            .font(.caption2)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.quaternary, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Tab: run on the whole stack or just this PR")
+                }
+                Button(action: onClose) { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Close (Esc)")
+            }
+            .padding(10)
+            Divider()
+
+            if rows.isEmpty {
+                emptyState
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
+                                row(item, isSelected: index == selected)
+                                    .id(item.id)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { onRun(item, target) }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 320)
+                    .onChange(of: selected) { index in
+                        guard rows.indices.contains(index) else { return }
+                        proxy.scrollTo(rows[index].id)
+                    }
+                }
+            }
+
+            if let error = store.configError {
+                Divider()
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange).padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.12)))
+        .shadow(radius: 12)
+        .onAppear {
+            store.reload()
+            installKeyMonitor()
+            // The field is created in this same pass; focus it on the next tick.
+            DispatchQueue.main.async { fieldFocused = true }
+        }
+        .onDisappear { removeKeyMonitor() }
+        .onChange(of: query) { _ in selected = 0 }
+    }
+
+    // MARK: Rows
+
+    @ViewBuilder
+    private func row(_ item: Item, isSelected: Bool) -> some View {
+        HStack(spacing: 8) {
+            switch item {
+            case .template(let t, let reason):
+                let problem = PromptEngine.validate(t, config: store.config).first
+                Image(systemName: problem != nil ? "exclamationmark.triangle" : (reason != nil ? "star.fill" : "text.quote"))
+                    .foregroundStyle(problem != nil ? Color.orange : (reason != nil ? Color.accentColor : Color.secondary))
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(t.name).lineLimit(1)
+                    Text(problem?.localizedDescription
+                         ?? (reason.map { "Suggested: \($0) · " } ?? "")
+                            + harnessLabel(t.harness) + (t.checkout ? " · checks out the PR branch" : ""))
+                        .font(.caption)
+                        .foregroundStyle(problem == nil ? Color.secondary : Color.orange)
+                        .lineLimit(1)
+                }
+            case .custom(_, let label, let text):
+                Image(systemName: "pencil.line").foregroundStyle(.secondary).frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Ask \(label)").lineLimit(1)
+                    Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            if isSelected { Text("↵").font(.caption).foregroundStyle(.secondary) }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 4) {
+            Text("No templates yet").font(.callout)
+            Text("Add Markdown files to ~/.config/mainline/prompts, or create one in Settings → Prompts.")
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func harnessLabel(_ key: String) -> String {
+        store.config.harnesses[key]?.label ?? "\(key) (not configured)"
+    }
+
+    // MARK: Actions + keys
+
+    private func run(_ rows: [Item]) {
+        guard rows.indices.contains(selected) else { return }
+        onRun(rows[selected], target)
+    }
+
+    private func toggleScope() {
+        guard initialTarget.isStacked else { return }
+        scopeOverride = !target.wholeStack
+        selected = 0
+    }
+
+    /// ↑/↓ must be intercepted: in a single-line `NSTextField` they move the cursor to
+    /// the line's ends instead of reaching SwiftUI. Same technique as the search bar's
+    /// Down handoff; installed only while the picker is on screen.
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            switch event.keyCode {
+            case 125: move(1);  return nil   // Down
+            case 126: move(-1); return nil   // Up
+            case 48 where initialTarget.isStacked:   // Tab: whole stack ↔ this PR
+                toggleScope(); return nil
+            default:  return event
+            }
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+    }
+
+    private func move(_ delta: Int) {
+        let count = items.count
+        guard count > 0 else { return }
+        selected = min(max(selected + delta, 0), count - 1)
+    }
+}
