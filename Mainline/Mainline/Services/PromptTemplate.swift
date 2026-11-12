@@ -152,7 +152,7 @@ struct PromptTarget: Equatable {
     var context: PromptContext { PromptContext(prs: prs) }
 
     func state(myLogin: String) -> Set<String> {
-        PromptState.active(prs: prs, myLogin: myLogin, stacked: isStacked)
+        PromptState.active(prs: prs, myLogin: myLogin, stacked: isStack)
     }
 
     /// "#123" or "stack #1 → #4 (4 PRs)".
@@ -235,7 +235,7 @@ enum PromptState {
         ("closed", "closed without merging"),
         ("authored", "you opened it (or committed to it)"),
         ("reviewing", "someone else's PR"),
-        ("stacked", "part of a stack of open PRs"),
+        ("stacked", "the prompt targets a whole stack of PRs"),
     ]
     static var tokenNames: [String] { tokens.map(\.name) }
 
@@ -245,8 +245,8 @@ enum PromptState {
     }
 
     /// The tokens that hold for a PR or a stack: a state holds when ANY member has it
-    /// (one conflicted PR makes the stack conflicted), plus `stacked` when `stacked` or
-    /// there are several.
+    /// (one conflicted PR makes the stack conflicted), plus `stacked` when the target is a
+    /// whole stack (`stacked`, or several PRs) — NOT when a stacked PR is run on its own.
     static func active(prs: [PRSnapshot], myLogin: String, stacked: Bool) -> Set<String> {
         var all = Set<String>()
         for pr in prs { all.formUnion(single(pr: pr, myLogin: myLogin)) }
@@ -497,7 +497,7 @@ enum PromptEngine {
                       let close = command.range(of: "}}", range: i..<command.endIndex) {
                 let name = command[command.index(i, offsetBy: 2)..<close.lowerBound]
                     .trimmingCharacters(in: .whitespaces)
-                if name.hasPrefix("pr.") || name == "prompt" { found.append(name) }
+                if name == "prompt" || PromptContext.placeholderNames.contains(name) { found.append(name) }
                 i = close.upperBound
                 continue
             }
@@ -675,7 +675,8 @@ enum PromptStarters {
 
     They work for a single PR too (size 1). A template that doesn't mention any {{stack.*}}
     gets the stack list appended automatically. A state holds for a stack when ANY of its
-    PRs has it, and `stacked` is true for every PR in a stack.
+    PRs has it, and `stacked` holds when the prompt targets a whole stack (not when a
+    stacked PR is run on its own).
 
     config.json
     -----------
@@ -869,7 +870,12 @@ enum PromptTemplateChecks {
         assert(lone.prs.count == 1 && !lone.isStacked, "a lone PR ignores wholeStack")
         let stackState = PromptTarget(anchor: members[0], members: members, wholeStack: true).state(myLogin: "me")
         assert(stackState.isSuperset(of: ["ci-failing", "conflict", "ci-passing", "stacked", "authored"]), "stack state = union of members + stacked")
-        assert(target.state(myLogin: "me").contains("stacked") && !target.state(myLogin: "me").contains("conflict"), "single member keeps its own state, plus stacked")
+        assert(!target.state(myLogin: "me").contains("stacked") && !target.state(myLogin: "me").contains("conflict"), "a stacked PR run on its own keeps its own state and is not `stacked`")
+        var theirsNarrow = PromptTarget(anchor: stackPR(1, author: "x"), members: [stackPR(1, author: "x"), stackPR(2, author: "x")], wholeStack: false)
+        assert(PromptState.ordered(PromptStarters.templates, active: theirsNarrow.state(myLogin: "me")).first?.template.fileName == "review-pr.md", "narrowed to one PR → Review PR, not Review stack")
+        theirsNarrow.wholeStack = true
+        assert(PromptState.ordered(PromptStarters.templates, active: theirsNarrow.state(myLogin: "me")).first?.template.fileName == "review-stack.md", "whole stack → Review stack")
+        assert(PromptEngine.quotedPlaceholders(in: "echo \"{{stack.prs}} {{stack.branches}}\"") == ["stack.prs", "stack.branches"], "stack.* inside quotes is rejected too")
         let sctx = PromptContext(prs: members)
         assert(sctx.isStack && sctx.values["pr.number"] == "1" && sctx.values["stack.size"] == "3", "pr.* is the base")
         assert(sctx.values["stack.urls"] == "https://github.com/o/r/pull/1\nhttps://github.com/o/r/pull/2\nhttps://github.com/o/r/pull/3", "stack.urls bottom → top")
