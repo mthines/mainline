@@ -244,15 +244,25 @@ enum PromptState {
         active(prs: [pr], myLogin: myLogin, stacked: false)
     }
 
-    /// The tokens that hold for a PR or a stack: a state holds when ANY member has it
-    /// (one conflicted PR makes the stack conflicted), plus `stacked` when the target is a
+    /// The tokens that hold for a PR or a stack: a state holds when ANY member has it —
+    /// except the branch-fixing ones (`branchStateTokens`), which only the base PR counts,
+    /// since that is the branch the session works on — plus `stacked` when the target is a
     /// whole stack (`stacked`, or several PRs) — NOT when a stacked PR is run on its own.
     static func active(prs: [PRSnapshot], myLogin: String, stacked: Bool) -> Set<String> {
         var all = Set<String>()
-        for pr in prs { all.formUnion(single(pr: pr, myLogin: myLogin)) }
+        for (index, pr) in prs.enumerated() {
+            var tokens = single(pr: pr, myLogin: myLogin)
+            // The session works on the BASE PR's branch (`{{pr.*}}` + checkout), so a problem
+            // only a later member has must not suggest a fix-it template aimed at the base.
+            if index > 0 { tokens.subtract(branchStateTokens) }
+            all.formUnion(tokens)
+        }
         if stacked || prs.count > 1 { all.insert("stacked") }
         return all
     }
+
+    /// States a template fixes by working on the PR's own branch.
+    private static let branchStateTokens: Set<String> = ["conflict", "ci-failing", "changes-requested", "unresolved-threads"]
 
     private static func single(pr: PRSnapshot, myLogin: String) -> Set<String> {
         var s = Set<String>()
@@ -601,7 +611,9 @@ enum PromptEngine {
             if let bad = quotedPlaceholders(in: config.checkout).first { throw PromptError.placeholderInQuotes(bad) }
             let pre = try substitute(config.checkout, context: context, transform: shellQuote)
             if !pre.trimmingCharacters(in: .whitespaces).isEmpty {
-                lines.append(pre + " || echo '⚠︎ checkout failed — continuing on the current branch'")
+                // A failed checkout must stop the session: the fix-it templates push, and
+                // would otherwise push from whatever branch the clone happens to be on.
+                lines.append(pre + " || { echo '⚠︎ checkout failed — not starting the session'; exit 1; }")
             }
         }
         lines.append(command)
@@ -869,7 +881,10 @@ enum PromptTemplateChecks {
         let lone = PromptTarget(anchor: members[0], members: [members[0]], wholeStack: true)
         assert(lone.prs.count == 1 && !lone.isStacked, "a lone PR ignores wholeStack")
         let stackState = PromptTarget(anchor: members[0], members: members, wholeStack: true).state(myLogin: "me")
-        assert(stackState.isSuperset(of: ["ci-failing", "conflict", "ci-passing", "stacked", "authored"]), "stack state = union of members + stacked")
+        assert(stackState.isSuperset(of: ["ci-passing", "stacked", "authored"]), "stack state = union of members + stacked")
+        assert(!stackState.contains("ci-failing") && !stackState.contains("conflict"), "a later member's conflict / red CI is not the base PR's — no fix-it suggestion for the base")
+        let baseBroken = [stackPR(1, ci: .failure), stackPR(2)]
+        assert(PromptTarget(anchor: baseBroken[0], members: baseBroken, wholeStack: true).state(myLogin: "me").contains("ci-failing"), "the base PR's own failing CI still counts for the stack")
         assert(!target.state(myLogin: "me").contains("stacked") && !target.state(myLogin: "me").contains("conflict"), "a stacked PR run on its own keeps its own state and is not `stacked`")
         var theirsNarrow = PromptTarget(anchor: stackPR(1, author: "x"), members: [stackPR(1, author: "x"), stackPR(2, author: "x")], wholeStack: false)
         assert(PromptState.ordered(PromptStarters.templates, active: theirsNarrow.state(myLogin: "me")).first?.template.fileName == "review-pr.md", "narrowed to one PR → Review PR, not Review stack")
