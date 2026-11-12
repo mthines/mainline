@@ -25,7 +25,7 @@ struct PromptPickerView: View {
         var id: String {
             switch self {
             case .template(let t, _): return "t:\(t.fileName)"
-            case .custom(let key, _, _): return "c:\(key)"
+            case .custom: return "c:ask"   // one row; ←/→ pick which harness it asks
             }
         }
     }
@@ -55,11 +55,20 @@ struct PromptPickerView: View {
             .map { Item.template($0.template, reason: $0.reason) }
         let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return templates }
-        let custom = store.config.enabledHarnesses.map {
-            Item.custom(harnessKey: $0.key, label: $0.value.label, text: typed)
-        }
-        return templates + custom
+        guard let harness = store.config.enabledHarnesses.first(where: { $0.key == chosenAskHarness }) else { return templates }
+        return templates + [.custom(harnessKey: harness.key, label: harness.value.label, text: typed)]
     }
+
+    /// Harnesses the free-typed "Ask" row can use, in priority order.
+    private var askChoices: [String] { store.config.enabledHarnesses.map(\.key) }
+
+    /// The one ←/→ picked for the "Ask" row; the default (first enabled) until then.
+    private var chosenAskHarness: String? {
+        if let key = harnessChoice[Self.askChoiceKey], askChoices.contains(key) { return key }
+        return askChoices.first
+    }
+
+    private static let askChoiceKey = "\u{0}ask"
 
     /// Harnesses ←/→ can pick for a template row (never empty: a broken template shows its one).
     private func choices(_ t: PromptTemplate) -> [String] {
@@ -177,13 +186,16 @@ struct PromptPickerView: View {
                         .foregroundStyle(problem == nil ? Color.secondary : Color.orange)
                         .lineLimit(1).truncationMode(.tail)
                 }
-            case .custom(_, let label, let text):
+            case .custom(let key, _, let text):
                 Image(systemName: "pencil.line").foregroundStyle(.secondary).frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Ask \(label)").lineLimit(1)
-                    Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text("Ask").lineLimit(1)
+                        Spacer(minLength: 4)
+                        chips(askChoices, chosen: key).fixedSize()
+                    }
+                    Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.horizontal, 10)
@@ -204,8 +216,11 @@ struct PromptPickerView: View {
     /// single-harness template reads as its plain label.
     @ViewBuilder
     private func harnessChips(_ t: PromptTemplate) -> some View {
-        let all = choices(t)
-        let chosen = chosenHarness(t)
+        chips(choices(t), chosen: chosenHarness(t))
+    }
+
+    @ViewBuilder
+    private func chips(_ all: [String], chosen: String) -> some View {
         if all.count == 1 {
             Text(harnessLabel(chosen)).font(.caption).foregroundStyle(.secondary)
         } else {
@@ -223,7 +238,7 @@ struct PromptPickerView: View {
     /// is a template that offers more than one harness.
     private func keyHints(_ rows: [Item]) -> some View {
         var hints = ["↑↓ move"]
-        if rows.indices.contains(selected), case .template(let t, _) = rows[selected], choices(t).count > 1 {
+        if rows.indices.contains(selected), cycleOptions(rows[selected]) != nil {
             hints.append("←→ harness")
         }
         hints += ["↵ run"]
@@ -258,14 +273,25 @@ struct PromptPickerView: View {
         onRun(resolve(rows[selected]), target)
     }
 
-    /// ←/→ on a template that offers several harnesses: cycle which one ↵ runs.
-    /// Returns false when the selected row has nothing to cycle (the key then passes through).
+    /// What ←/→ cycle for `item`: its harness choices, the chosen one, and where the choice is
+    /// stored. nil when there is only one harness (the key then passes through to the field).
+    private func cycleOptions(_ item: Item) -> (keys: [String], chosen: String, slot: String)? {
+        switch item {
+        case .template(let t, _):
+            let all = choices(t)
+            return all.count > 1 ? (all, chosenHarness(t), t.fileName) : nil
+        case .custom:
+            guard askChoices.count > 1, let chosen = chosenAskHarness else { return nil }
+            return (askChoices, chosen, Self.askChoiceKey)
+        }
+    }
+
+    /// ←/→ on a row that offers several harnesses: cycle which one ↵ runs.
     private func cycleHarness(_ delta: Int) -> Bool {
         let rows = items
-        guard rows.indices.contains(selected), case .template(let t, _) = rows[selected] else { return false }
-        let all = choices(t)
-        guard all.count > 1, let index = all.firstIndex(of: chosenHarness(t)) else { return false }
-        harnessChoice[t.fileName] = all[(index + delta + all.count) % all.count]
+        guard rows.indices.contains(selected), let o = cycleOptions(rows[selected]),
+              let index = o.keys.firstIndex(of: o.chosen) else { return false }
+        harnessChoice[o.slot] = o.keys[(index + delta + o.keys.count) % o.keys.count]
         return true
     }
 
