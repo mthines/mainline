@@ -748,15 +748,14 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(writeActionsEnabled, forKey: Keys.writeActionsEnabled) }
     }
 
+    /// The user's preferred merge method for in-app merges. Default `.auto`.
+    @Published var mergeMethodPreference: MergeMethodPreference {
+        didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
+    }
+
     /// Terminal app CLI prompt-template harnesses open in (Settings → Prompts).
     @Published var promptTerminal: PromptTerminal {
         didSet { defaults.set(promptTerminal.rawValue, forKey: Keys.promptTerminal) }
-    }
-
-    /// The user's preferred merge method for in-app merges. Default `.auto`.
-
-    @Published var mergeMethodPreference: MergeMethodPreference {
-        didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
     }
 
     /// Where the primary "open PR" action sends the user. Default `.github`.
@@ -1434,9 +1433,11 @@ final class MainlineSettings: ObservableObject {
         writeActionsEnabled = defaults.bool(forKey: Keys.writeActionsEnabled)
 
         // Merge method preference — default Auto (picks the repo's allowed method)
-        promptTerminal = defaults.string(forKey: Keys.promptTerminal).flatMap(PromptTerminal.init(rawValue:)) ?? .auto
         mergeMethodPreference = defaults.string(forKey: Keys.mergeMethodPreference)
             .flatMap { MergeMethodPreference(rawValue: $0) } ?? .auto
+
+        // Terminal for prompt-template CLI harnesses — load only (persisted by its didSet)
+        promptTerminal = defaults.string(forKey: Keys.promptTerminal).flatMap(PromptTerminal.init(rawValue:)) ?? .auto
 
         // Quick-snooze duration for the `S` verb — default matches `SnoozeDuration.quickDefault`
         defaultSnoozeDuration = defaults.string(forKey: Keys.defaultSnoozeDuration)
