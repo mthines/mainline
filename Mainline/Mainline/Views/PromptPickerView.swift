@@ -4,7 +4,7 @@ import AppKit
 /// Type-to-filter picker for prompt templates, shown over the deck for one PR.
 ///
 /// ↑/↓ move, ←/→ pick the harness of a template that offers several (only while the query
-/// is empty, so the arrows still move the cursor in typed text), ↵ runs, Esc closes. Once
+/// is empty or the caret is at the matching edge, so the arrows still move the cursor in typed text), ↵ runs, Esc closes. Once
 /// something is typed, one "Ask" row (with a chip per configured harness) sends the typed
 /// text itself as the prompt (about this PR) — so an arbitrary one-off session needs no template.
 struct PromptPickerView: View {
@@ -311,8 +311,8 @@ struct PromptPickerView: View {
             switch event.keyCode {
             case 125: move(1);  return nil   // Down
             case 126: move(-1); return nil   // Up
-            // Plain ←/→ cycle the harness only on an empty query; otherwise (or with a
-            // modifier) they fall through so the field's cursor/word/line moves still work.
+            // Plain ←/→ cycle the harness only when the caret has nowhere to go (see
+            // plainArrowCyclesHarness); otherwise they fall through to the field.
             case 123 where plainArrowCyclesHarness(event) && cycleHarness(-1): return nil   // Left
             case 124 where plainArrowCyclesHarness(event) && cycleHarness(1):  return nil   // Right
             case 48 where initialTarget.isStacked:   // Tab: whole stack ↔ this PR
@@ -322,8 +322,16 @@ struct PromptPickerView: View {
         }
     }
 
+    /// Plain ←/→ cycle the harness when the field has nothing to move: an empty query, or a
+    /// caret already at the edge the arrow points to (→ at the end, ← at the start) with no
+    /// selection. Anywhere else the arrow stays a cursor move.
     private func plainArrowCyclesHarness(_ event: NSEvent) -> Bool {
-        query.isEmpty && event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
+        guard event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else { return false }
+        if query.isEmpty { return true }
+        guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+        let range = editor.selectedRange()
+        guard range.length == 0 else { return false }
+        return event.keyCode == 124 ? range.location >= (editor.string as NSString).length : range.location == 0
     }
 
     private func removeKeyMonitor() {
