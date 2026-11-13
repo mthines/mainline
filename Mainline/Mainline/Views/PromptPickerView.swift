@@ -109,7 +109,7 @@ struct PromptPickerView: View {
                     .focused($fieldFocused)
                     .onSubmit { run(rows) }
                     .onExitCommand(perform: onClose)
-                if initialTarget.isStacked {
+                if initialTarget.isStacked && !initialTarget.isGroup {
                     Button(action: toggleScope) {
                         Text(target.isStack ? "Stack ×\(target.prs.count)  ⇥" : "This PR  ⇥")
                             .font(.caption2)
@@ -252,7 +252,7 @@ struct PromptPickerView: View {
             hints.append("←→ harness")
         }
         hints += ["↵ run"]
-        if initialTarget.isStacked { hints.append("⇥ stack / PR") }
+        if initialTarget.isStacked && !initialTarget.isGroup { hints.append("⇥ stack / PR") }
         hints.append("esc close")
         return Text(hints.joined(separator: "  ·  "))
             .font(.caption)
@@ -306,7 +306,7 @@ struct PromptPickerView: View {
     }
 
     private func toggleScope() {
-        guard initialTarget.isStacked else { return }
+        guard initialTarget.isStacked, !initialTarget.isGroup else { return }
         scopeOverride = !target.wholeStack
         selected = 0
     }
