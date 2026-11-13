@@ -15,7 +15,7 @@ It notifies you when something changes: a PR turns green, a review lands, or CI 
 It groups every PR by what needs your attention, and lets you approve, merge, or snooze straight from the keyboard.
 No browser tabs, no refreshing GitHub by hand.
 
-**Jump to:** [Install](#install) · [Get started](#get-started) · [Features](#features) · [Screenshots](#screenshots) · [Docs](docs/README.md)
+**Jump to:** [Install](#install) · [Get started](#get-started) · [Features](#features) · [Agents](#put-an-agent-on-it) · [Screenshots](#screenshots) · [Docs](docs/README.md)
 
 ## Install
 
@@ -82,6 +82,17 @@ Not relevant, hover and press `Q`. For later, press `S`.
 <img width="406" height="897" alt="image" src="https://github.com/user-attachments/assets/8ff42fba-bd71-4892-bae2-b1f2b1986a99" />
 
 
+### Put an agent on it
+
+Mainline doesn't only tell you a PR needs work. It can start the work.
+
+- **One key, one agent.** Press `A` on any PR and pick a template: *Fix failing CI*, *Resolve merge conflicts*, *Address review feedback*, *Review PR*. Mainline fills in the PR and starts a Claude Code or Agent0 session for you. The template that fits the PR's state is already starred at the top.
+- **Your repo's automation, one key away.** Press `W` and post a canned comment like `/aw-verify` or `/beta` on the PR. Comments are scoped per org or repo, so each team sees only its own.
+- **Whole stacks and sections.** Run a prompt on a stacked PR chain, or on a whole group by hovering its header.
+- **All plain Markdown.** Templates are files in `~/.config/mainline/`. Edit them in any editor, keep them in dotfiles, and see changes instantly.
+
+Type to filter, ↵ to go. Details in [Agents: prompts and comments](docs/agents.md).
+
 ### Stay notified
 
 - **New PR** — fires a notification when a new PR appears in your search queries.
@@ -100,7 +111,7 @@ Not relevant, hover and press `Q`. For later, press `S`.
 - **Keyboard triage** — drive the whole panel from the keyboard: `J`/`K` to move, `Space` to peek, `↩` to open, `M` to merge, `S` to postpone, `E` to open the preview, `A` to run an agent prompt, `N` to mark seen, `X` to dismiss, `V` for multi-select, `D` to toggle drafts, `Q` to mute (Inbox), `R` to refresh, `⌘Z` to undo. Every key is rebindable in Settings → Keyboard.
 - **Peek** — `Space` opens a glance card with the PR's changed-files list.
 - **Row menu** — right-click any PR for every action, including approve, request changes, close, convert to draft, and copy link.
-- **Agent prompts** — press `A` (or right-click → Run Prompt) to start a Claude Code or Agent0 session from a template, on a PR or a whole stack. Templates live in `~/.config/mainline/prompts/`.
+- **Agent prompts and comments** — press `A` to start a Claude Code or Agent0 session from a template, or `W` to post a canned comment that triggers your repo's automation. See [Agents](docs/agents.md).
 - **Copy a section** — hover a section header (or a stack's header) to copy its PRs as a Markdown list (links + CI/review state), ready to paste into an agent.
 - **Global shortcut** — open Mainline from any app with a system-wide hotkey (default ⇧⌃ + the key left of `1`; customizable in Settings).
 - **Scope filter** — narrow the panel and badge to a single org or repo.
@@ -109,7 +120,7 @@ See the [keyboard reference](docs/keyboard.md) for the full list and how to rebi
 
 ### Act (optional, off by default)
 
-- **Write actions** — approve, merge, request changes, close, or reopen without leaving the menu bar (each behind a confirmation; enable in Settings), and flip a PR between draft and ready. See [Write actions](docs/actions.md).
+- **Write actions** — approve, merge, request changes, close, or reopen without leaving the menu bar (each behind a confirmation; enable in Settings), flip a PR between draft and ready, and post canned comments. See [Write actions](docs/actions.md).
 
 ### Configure and secure
 

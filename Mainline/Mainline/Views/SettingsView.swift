@@ -15,6 +15,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
     case appearance
     case keyboard
     case prompts
+    case comments
     case privacy
     case help
 
@@ -30,6 +31,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .appearance:    return "Appearance"
         case .keyboard:      return "Keyboard"
         case .prompts:       return "Prompts"
+        case .comments:      return "Comments"
         case .privacy:       return "Privacy"
         case .help:          return "Help"
         }
@@ -45,6 +47,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .appearance:    return "slider.horizontal.3"
         case .keyboard:      return "keyboard"
         case .prompts:       return "terminal"
+        case .comments:      return "text.bubble"
         case .privacy:       return "hand.raised.fill"
         case .help:          return "questionmark.circle.fill"
         }
@@ -147,6 +150,7 @@ struct SettingsView: View {
                 case .appearance:    appearanceSection
                 case .keyboard:      keyboardSection
                 case .prompts:       PromptsSettingsView(settings: settings, store: manager.promptStore)
+                case .comments:      CommentsSettingsView(settings: settings, store: manager.commentStore)
                 case .privacy:       privacySection
                 case .help:          helpSection
                 }

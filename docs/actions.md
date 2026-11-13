@@ -10,7 +10,7 @@ Write actions are disabled until you enable them.
 1. Open **Settings** → **GitHub**.
 2. Turn on **Enable write actions**.
 
-While write actions are off, `M` (on a ready-to-merge PR) and `T` (on a draft) show a reminder alert instead of acting, and the menu's write items are greyed out.
+While write actions are off, `M` (on a ready-to-merge PR), `T` (on a draft) and `W` (comment) show a reminder alert instead of acting, and the menu's write items are greyed out.
 
 ## The actions
 
@@ -22,6 +22,7 @@ While write actions are off, `M` (on a ready-to-merge PR) and `T` (on a draft) s
 | **Mark ready for review** | `T`, or row menu → Mark Ready for Review. | Draft PRs.                                       |
 | **Convert to draft**      | Row menu → Convert to Draft.           | Open, non-draft PRs.                                |
 | **Close**                 | Row menu → Close PR.                   | Open PRs. Closes without merging.                   |
+| **Comment**               | `W`, or row menu → Comment.            | Posts a canned comment scoped to the PR's repo (see [Comments](./settings.md#comments)); the picker previews the text, the menu asks first. |
 | **Reopen**                | Row menu → Reopen PR.                  | PRs closed without merging — a pinned closed PR, or a closed PR in **Done**. |
 
 Approve, request changes, convert to draft, close, and reopen have no default key.

@@ -15,6 +15,7 @@ After that, treat them as reference.
 - [Keyboard triage](./keyboard.md) — every key, the peek card, the row menu, and the global shortcut.
 - [Filtering the Inbox](./filtering.md) — the four mute rules and the review-focus allow-list.
 - [Write actions](./actions.md) — approve, merge, request changes, close, and reopen from the menu bar.
+- [Agents: prompts and comments](./agents.md) — start an agent session, or post a canned comment that triggers your repo's automation.
 - [Integrations](./integrations.md) — Preview links and opening PRs in Linear.
 
 ## Reference

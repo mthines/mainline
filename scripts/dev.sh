@@ -41,22 +41,38 @@ kill_app() {
     pkill -x "Mainline" 2>/dev/null || true
 }
 
-# Build the app (incremental — only recompiles changed files)
+# Signing: use the project's signing when a development certificate is installed;
+# otherwise build unsigned so a fresh machine / contributor can still run the app.
+# (An unsigned build re-prompts for Keychain access and may not get notification grants.)
+signing_args() {
+    if security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development\|Mac Development"; then
+        return
+    fi
+    echo "CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="
+}
+
+# Build the app (incremental — only recompiles changed files).
+# Succeeds only when xcodebuild itself does: a failed build must never relaunch a stale app.
 build_app() {
     log_info "Building $SCHEME..."
-
-    if xcodebuild \
+    local log status
+    log=$(mktemp)
+    # shellcheck disable=SC2046
+    xcodebuild \
         -scheme "$SCHEME" \
         -configuration Debug \
         -derivedDataPath "$PROJECT_DIR/build" \
         -destination "platform=macOS" \
         ONLY_ACTIVE_ARCH=YES \
-        build 2>&1 | grep -E "(error:|warning:|BUILD SUCCEEDED|BUILD FAILED)"; then
+        $(signing_args) \
+        build > "$log" 2>&1
+    status=$?
+    grep -E "(error:|warning:|BUILD SUCCEEDED|BUILD FAILED)" "$log" | sort -u
+    rm -f "$log"
 
-        if [ -d "$APP_PATH" ]; then
-            log_success "Build succeeded"
-            return 0
-        fi
+    if [ $status -eq 0 ] && [ -d "$APP_PATH" ]; then
+        log_success "Build succeeded"
+        return 0
     fi
 
     log_error "Build failed"

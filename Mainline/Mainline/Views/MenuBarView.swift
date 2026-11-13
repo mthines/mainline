@@ -249,6 +249,31 @@ struct MenuBarView: View {
             }
         }
         .animation(.easeInOut(duration: 0.12), value: manager.promptPickerTarget != nil)
+        // Comment picker — same shape as the prompt picker, for one PR.
+        .overlay {
+            if let pr = manager.commentPickerTarget {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { manager.commentPickerTarget = nil }
+                    CommentPickerView(
+                        pr: pr,
+                        store: manager.commentStore,
+                        myLogin: settings.githubUsername,
+                        onPost: { body, label in
+                            manager.commentPickerTarget = nil
+                            manager.postComment(body, label: label, on: pr)
+                        },
+                        onClose: { manager.commentPickerTarget = nil }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                }
+                .zIndex(11)
+            }
+        }
+        .animation(.easeInOut(duration: 0.12), value: manager.commentPickerTarget != nil)
         // Animate only the OPEN/CLOSE boundary (nil ↔ present), not PR-to-PR steps.
         // Keying on the node id animated every navigation and replayed the fade.
         .animation(.easeInOut(duration: 0.12), value: manager.peekPR != nil)
@@ -925,6 +950,9 @@ struct MenuBarView: View {
         // Right after "pin"; hidden while unbound (an upgrade whose default "a" was taken).
         if !b.runPrompt.key.isEmpty, let pinIndex = parts.firstIndex(where: { $0.hasSuffix(" pin") }) {
             parts.insert("\(g(.runPrompt)) agent", at: pinIndex + 1)
+        }
+        if settings.writeActionsEnabled, !b.addComment.key.isEmpty, let pinIndex = parts.firstIndex(where: { $0.hasSuffix(" pin") }) {
+            parts.insert("\(g(.addComment)) comment", at: pinIndex + 1)
         }
         if settings.selectedTab == .inbox {
             parts.append("\(g(.toggleMute)) mute")

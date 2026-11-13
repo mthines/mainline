@@ -26,6 +26,7 @@ enum TriageAction: Identifiable {
     case copyBranch
     case togglePin
     case runPrompt
+    case addComment
 
     var id: String { label }
 
@@ -51,6 +52,7 @@ enum TriageAction: Identifiable {
         case .copyBranch:         return "Copy Branch Name"
         case .togglePin:          return "Pin / Unpin"
         case .runPrompt:          return "Run Prompt…"
+        case .addComment:         return "Comment…"
         }
     }
 
@@ -76,13 +78,14 @@ enum TriageAction: Identifiable {
         case .copyBranch:      return "doc.on.doc"
         case .togglePin:       return "pin"
         case .runPrompt:       return "terminal"
+        case .addComment:      return "text.bubble"
         }
     }
 
     /// Returns true if this action requires write-actions to be enabled.
     var requiresWriteActions: Bool {
         switch self {
-        case .approve, .merge, .requestChanges, .markReady, .convertToDraft, .close, .reopen: return true
+        case .approve, .merge, .requestChanges, .markReady, .convertToDraft, .close, .reopen, .addComment: return true
         default: return false
         }
     }
@@ -321,11 +324,12 @@ struct TriageDeckView: View {
                     manager.peekPR = nil
                     hoveredGroup.group = nil
                     manager.promptPickerTarget = nil
+                    manager.commentPickerTarget = nil
                     manager.closeSearch()
                 },
                 // The picker's text field takes first responder like the search field,
                 // so the key view must reclaim it when either closes.
-                searchActive: searchActive || manager.promptPickerTarget != nil
+                searchActive: searchActive || manager.promptPickerTarget != nil || manager.commentPickerTarget != nil
             )
         )
         .onAppear { installScrollMonitor() }
@@ -1163,6 +1167,7 @@ struct TriageDeckView: View {
             stackBadge: stackBadge,
             stackCount: stackCount,
             promptRevision: manager.promptStore.revision,
+            commentRevision: manager.commentStore.revision,
             stackMembers: stackMembers
         )) {
             deckRow(pr: pr, index: index, stackBadge: stackBadge, stackCount: stackCount, stackMembers: stackMembers)
@@ -1549,6 +1554,8 @@ struct TriageDeckView: View {
         } else {
             promptMenu(for: pr, members: [pr], wholeStack: false, title: "Run Prompt")
         }
+
+        commentMenu(for: pr)
 
         // Close / reopen sit last and apart from everything else: they end (or
         // revive) the PR on GitHub. A closed-but-unmerged PR can still be on screen
@@ -2094,6 +2101,12 @@ struct TriageDeckView: View {
             return nil
         }
 
+        // Open the comment picker for the focused PR (post a canned comment).
+        if shortcutMatches(.addComment, event: event) {
+            if let pr = focusedPR { handleTriageAction(.addComment, on: pr) }
+            return nil
+        }
+
         // Open the in-app search field. `openSearch` also requests keyboard focus
         // on the field (via a focus token) so pressing it again while search is
         // already open re-focuses the field for editing.
@@ -2144,7 +2157,7 @@ struct TriageDeckView: View {
     private func presentWriteActionsDisabledAlert() {
         let alert = NSAlert()
         alert.messageText = "Write Actions Disabled"
-        alert.informativeText = "Enable \"Write Actions\" in Settings to approve, merge, request changes, close, reopen, or change a PR's draft state."
+        alert.informativeText = "Enable \"Write Actions\" in Settings to approve, merge, request changes, close, reopen, comment, or change a PR's draft state."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -2202,6 +2215,12 @@ struct TriageDeckView: View {
             copyLink(pr)
         case .copyBranch:
             copyBranch(pr)
+        case .addComment:
+            guard settings.writeActionsEnabled else {
+                presentWriteActionsDisabledAlert()
+                return
+            }
+            manager.commentPickerTarget = pr
         case .runPrompt:
             // The focused PR alone, even when stacked; Tab in the picker widens it to the
             // whole stack. Hovering a stack/section header (see `handleKeyDown`) or its
@@ -2480,6 +2499,48 @@ struct TriageDeckView: View {
         }
     }
 
+    // MARK: - Comment templates
+
+    /// Submenu of canned comments scoped to `pr`'s repo (suggested ones starred first), then
+    /// the picker for a free-typed comment. Disabled while write actions are off, like the
+    /// other GitHub write verbs.
+    @ViewBuilder
+    private func commentMenu(for pr: PRSnapshot) -> some View {
+        let ranked = CommentEngine.ordered(manager.commentStore.templates, repo: pr.repoFullName,
+                                           active: PromptState.active(pr: pr, myLogin: settings.githubUsername))
+        Menu {
+            ForEach(ranked, id: \.template.fileName) { entry in
+                Button {
+                    confirmAndPostComment(entry.template, on: pr)
+                } label: {
+                    if entry.reason != nil { Label(entry.template.name, systemImage: "star.fill") } else { Text(entry.template.name) }
+                }
+            }
+            if !ranked.isEmpty { Divider() }
+            Button("Search / Custom Comment…") { handleTriageAction(.addComment, on: pr) }
+        } label: {
+            Label("Comment", systemImage: "text.bubble")
+        }
+        .disabled(!settings.writeActionsEnabled)
+    }
+
+    /// The Comment submenu skips the picker's preview, so confirm the exact rendered text
+    /// first: one mis-click must not publish a comment that can start an agent run.
+    private func confirmAndPostComment(_ template: CommentTemplate, on pr: PRSnapshot) {
+        let text: String
+        do { text = try CommentEngine.render(template, for: pr) } catch {
+            manager.showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Post “\(template.name)” on #\(pr.number)?"
+        alert.informativeText = text
+        alert.addButton(withTitle: "Post Comment")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        manager.postComment(text, label: template.name, on: pr)
+    }
+
     // MARK: - Confirmation copy
 
     private func confirmCopy(for action: WriteAction) -> (message: String, button: String) {
@@ -2754,6 +2815,8 @@ private struct DeckRowKey: Equatable {
     /// `PromptTemplateStore.revision` — the row's context menu lists the templates, so
     /// editing one must re-render rows that are otherwise unchanged.
     let promptRevision: Int
+    /// `CommentTemplateStore.revision` — same reason as `promptRevision`, for the Comment menu.
+    let commentRevision: Int
     /// The row's whole stack (empty when not stacked). The menu's "Run Prompt on Stack"
     /// puts these snapshots in the prompt and ranks templates on their state, so a change
     /// to ANY member must re-render a memoized row — `pr` alone only covers the anchor.

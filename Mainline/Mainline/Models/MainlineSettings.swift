@@ -68,6 +68,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case togglePin
     case search
     case runPrompt
+    case addComment
     case undo
 
     var id: String { rawValue }
@@ -91,6 +92,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .togglePin:        return "Pin / Unpin"
         case .search:           return "Find / Search"
         case .runPrompt:        return "Run Prompt Template"
+        case .addComment:       return "Post Comment Template"
         case .undo:             return "Undo (⌘+key)"
         }
     }
@@ -114,6 +116,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .togglePin:        return "p"   // "pin" — mnemonic (right-hand exception, like M/N)
         case .search:           return "f"   // "find" — mnemonic (freed by moving Mark Ready to "t")
         case .runPrompt:        return "a"   // "agent" — left-hand key (see left-hand default policy)
+        case .addComment:       return "w"   // "write" — left-hand key (see left-hand default policy)
         case .undo:             return "z"
         }
     }
@@ -137,6 +140,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .togglePin:        return "pin"
         case .search:           return "magnifyingglass"
         case .runPrompt:        return "terminal"
+        case .addComment:       return "text.bubble"
         case .undo:             return "arrow.uturn.backward"
         }
     }
@@ -211,6 +215,7 @@ struct InAppShortcutBindings: Equatable {
     var togglePin:       ShortcutBinding
     var search:          ShortcutBinding
     var runPrompt:       ShortcutBinding
+    var addComment:      ShortcutBinding
     var undo:            ShortcutBinding
 
     /// Factory defaults — all bindings bare except undo = ⌘Z.
@@ -234,6 +239,7 @@ struct InAppShortcutBindings: Equatable {
             togglePin:       ShortcutBinding(key: "p"),
             search:          ShortcutBinding(key: "f"),
             runPrompt:       ShortcutBinding(key: "a"),
+            addComment:      ShortcutBinding(key: "w"),
             undo:            ShortcutBinding(key: "z", modifiers: cmdRaw)
         )
     }()
@@ -258,6 +264,7 @@ struct InAppShortcutBindings: Equatable {
         case .togglePin:         return togglePin
         case .search:            return search
         case .runPrompt:         return runPrompt
+        case .addComment:        return addComment
         case .undo:              return undo
         }
     }
@@ -282,6 +289,7 @@ struct InAppShortcutBindings: Equatable {
         case .togglePin:         togglePin       = binding
         case .search:            search          = binding
         case .runPrompt:         runPrompt       = binding
+        case .addComment:        addComment      = binding
         case .undo:              undo            = binding
         }
     }
@@ -328,7 +336,7 @@ extension InAppShortcutBindings: Codable {
     enum CodingKeys: String, CodingKey {
         case navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview,
              snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
-             toggleMute, copyBranch, togglePin, search, runPrompt, undo
+             toggleMute, copyBranch, togglePin, search, runPrompt, addComment, undo
     }
 
     /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
@@ -400,6 +408,16 @@ extension InAppShortcutBindings: Codable {
             runPrompt = taken ? ShortcutBinding(key: "") : d.runPrompt
         }
 
+        // `addComment` is new the same way: absent + default "w" already taken → unbound.
+        if container.contains(.addComment) {
+            addComment = try decodeBinding(.addComment, default: d.addComment)
+        } else {
+            let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch,
+                         togglePin, search, runPrompt].contains(d.addComment)
+            addComment = taken ? ShortcutBinding(key: "") : d.addComment
+        }
+
         // Undo migration: bare-string or absent → apply .command modifier.
         if let newShape = try? container.decodeIfPresent(ShortcutBinding.self, forKey: .undo) {
             // New-shape object — use modifiers as stored (trusts the encoder).
@@ -432,6 +450,7 @@ extension InAppShortcutBindings: Codable {
         try container.encode(togglePin,        forKey: .togglePin)
         try container.encode(search,           forKey: .search)
         try container.encode(runPrompt,        forKey: .runPrompt)
+        try container.encode(addComment,       forKey: .addComment)
         try container.encode(undo,             forKey: .undo)
     }
 }

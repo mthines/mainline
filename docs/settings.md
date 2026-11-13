@@ -94,6 +94,23 @@ Templates are Markdown files in `~/.config/mainline/prompts/`; one template can 
 | Templates        | Starters | Add, edit or delete; a template's `when:` / `priority:` float it to the top for matching PR states. |
 | Harnesses        | Claude Code, Agent0 | Enable or disable each and order them; the first enabled one is the default. Every command or URL must contain `{{prompt}}`. |
 
+## Comments
+
+Post a canned comment on a PR: right-click → **Comment**, or press `W` (needs **Enable write actions**).
+Use it to start a comment-triggered automation, such as an agent run that reacts to `@agent0 fix CI`.
+Comments are Markdown files in `~/.config/mainline/comments/`, one per file, with frontmatter and the text as the body:
+
+```
+---
+name: Fix failing CI
+scope: acme/*, me/side-project
+when: authored+ci-failing
+---
+@agent0 fix the failing checks on {{pr.url}}
+```
+
+`scope:` limits where a comment is offered (`owner/repo`, `owner/*` or `*`, comma-separated; empty = every repo), so each org keeps its own set. `when:` / `priority:` float a comment to the top for matching PR states, like prompt templates. In the picker, type to filter, ↑/↓ to choose, ↵ to post; text you type that matches nothing can be posted as typed. The picker previews the exact text before you post.
+
 ## Privacy
 
 Anonymous telemetry, off by default.

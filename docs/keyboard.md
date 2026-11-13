@@ -16,6 +16,7 @@ A key acts on the focused row unless noted.
 | `Space`    | Peek             | Opens the glance card. See [Peek](#peek).                         |
 | `↩`        | Open             | Opens the PR in the browser (or Linear — see [Integrations](./integrations.md)). |
 | `E`        | Open preview     | Opens the PR's preview deployment. Silent no-op if none.        |
+| `W`        | Post comment     | Opens the comment picker for the focused PR: canned comments scoped to its org/repo, type to filter, ↵ posts. Needs write actions. See [Comment templates](./settings.md#comments). |
 | `A`        | Run prompt       | Opens the prompt-template picker for the focused PR (or its whole stack). See [Prompt templates](./settings.md#prompts). |
 | `N`        | Mark seen        | Clears the unread state.                                          |
 | `S`        | Postpone / resume | Postpones with your default duration, or resumes if already postponed. |
@@ -82,7 +83,8 @@ The menu carries every action for that PR, in this order:
 3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), and pin / unpin.
 4. **Copy** — copy link (the GitHub URL) and copy branch name.
 5. **Run Prompt** — starts an agent session from a template (on a stacked PR: on the whole stack or just that PR). Press it while the pointer is over a stack header or a section/role header to run on every PR in that group.
-6. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
+6. **Comment** — posts a canned comment (scoped to the PR's repo) or opens the picker for a typed one. Disabled while write actions are off.
+7. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
 
 The "open" item follows your open target, so it reads **Open in Linear** when Linear is configured.
 
