@@ -74,8 +74,9 @@ struct PromptConfig: Codable, Equatable {
     var checkout: String
     /// `owner/repo` → local clone path (`~` allowed). Harnesses start here.
     var repos: [String: String]
-    /// `owner/repo` → harness key → URL template that replaces that web harness's `url`
-    /// for PRs in the repo (e.g. point Agent0 at the dev stack and org for one repo).
+    /// `owner/repo` (or `owner/*` for a whole org, `*` for every repo; exact beats org beats
+    /// `*`) → harness key → URL template that replaces that web harness's `url`
+    /// for matching PRs (e.g. point Agent0 at the dev stack and org for one repo).
     /// Must contain `{{prompt}}`; ignored for CLI harnesses.
     var repoUrls: [String: [String: String]]
     var harnesses: [String: HarnessConfig]
@@ -155,12 +156,16 @@ struct PromptConfig: Codable, Equatable {
     /// This config with each web harness's `url` swapped for the repo's `repoUrls` override
     /// (case-insensitive `owner/repo`). Blank overrides and CLI harnesses are left alone.
     func resolved(forRepo repo: String) -> PromptConfig {
-        guard let overrides = repoUrls.first(where: { $0.key.caseInsensitiveCompare(repo) == .orderedSame })?.value
-        else { return self }
+        // Least → most specific, so a later layer wins per harness key: `*`, `owner/*`, `owner/repo`.
+        let owner = repo.split(separator: "/", maxSplits: 1).first.map(String.init) ?? repo
         var copy = self
-        for (key, raw) in overrides {
-            let url = raw.trimmingCharacters(in: .whitespaces)
-            if !url.isEmpty, copy.harnesses[key]?.isWeb == true { copy.harnesses[key]?.url = url }
+        for pattern in ["*", "\(owner)/*", repo] {
+            guard let overrides = repoUrls.first(where: { $0.key.caseInsensitiveCompare(pattern) == .orderedSame })?.value
+            else { continue }
+            for (key, raw) in overrides {
+                let url = raw.trimmingCharacters(in: .whitespaces)
+                if !url.isEmpty, copy.harnesses[key]?.isWeb == true { copy.harnesses[key]?.url = url }
+            }
         }
         return copy
     }
@@ -838,7 +843,8 @@ enum PromptStarters {
             }
         }
 
-    Repos without an entry use the harness's own url.
+    Keys may be a whole org ("mthines/*") or everything ("*"); an exact repo beats
+    its org, which beats "*". Repos matching nothing use the harness's own url.
 
     "checkout" is the command a template runs first when it sets `checkout: true`
     (default: gh pr checkout {{pr.number}}; e.g. `gw checkout {{pr.branch}}`).
@@ -1179,6 +1185,13 @@ enum PromptTemplateChecks {
         assert(withUrls.resolved(forRepo: "mthines/mainline").harnesses["agent0"]?.url?.hasPrefix("https://app.dash0-dev.com/") == true, "repo url override applies")
         assert(withUrls.resolved(forRepo: "mthines/mainline").harnesses["claude"] == cfg.harnesses["claude"], "CLI harness ignores url override")
         assert(withUrls.resolved(forRepo: "other/repo") == withUrls, "unmapped repo keeps harness url")
+        var withOrg = cfg
+        withOrg.repoUrls = ["Mthines/*": ["agent0": "https://dev/{{prompt}}"],
+                            "mthines/mainline": ["agent0": "https://exact/{{prompt}}"],
+                            "*": ["agent0": "https://all/{{prompt}}"]]
+        assert(withOrg.resolved(forRepo: "mthines/agent-skills").harnesses["agent0"]?.url == "https://dev/{{prompt}}", "owner/* matches the org")
+        assert(withOrg.resolved(forRepo: "MThines/Mainline").harnesses["agent0"]?.url == "https://exact/{{prompt}}", "exact repo beats owner/*")
+        assert(withOrg.resolved(forRepo: "dash0hq/dash0").harnesses["agent0"]?.url == "https://all/{{prompt}}", "* is the fallback")
         let urlsRoundTrip = try? JSONDecoder().decode(PromptConfig.self, from: JSONEncoder().encode(withUrls))
         assert(urlsRoundTrip == withUrls, "repoUrls survive JSON")
 
