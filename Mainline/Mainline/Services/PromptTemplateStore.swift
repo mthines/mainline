@@ -256,11 +256,12 @@ enum PromptLauncher {
     static func run(prompt: String, harnessKey: String, checkout: Bool, pr: PRSnapshot,
                     context: PromptContext? = nil, config: PromptConfig,
                     terminal: PromptTerminal) throws -> String {
-        let broken = config.brokenRepoUrls
-        for entry in config.matchingRepoUrls(forRepo: pr.repoFullName) {
-            if let bad = broken.first(where: { $0.pattern == entry.pattern && $0.harness == harnessKey }) {
-                throw PromptError.repoUrlMissingPrompt(pattern: bad.pattern, harness: bad.harness)
-            }
+        // Only the entry that WINS for this harness (most specific, non-blank) can break the launch.
+        let winner = config.matchingRepoUrls(forRepo: pr.repoFullName).last {
+            !($0.overrides[harnessKey]?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty
+        }
+        if let winner, config.brokenRepoUrls.contains(where: { $0.pattern == winner.pattern && $0.harness == harnessKey }) {
+            throw PromptError.repoUrlMissingPrompt(pattern: winner.pattern, harness: harnessKey)
         }
         let config = config.resolved(forRepo: pr.repoFullName)
         let context = context ?? PromptContext(pr: pr)
