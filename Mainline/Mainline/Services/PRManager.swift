@@ -183,6 +183,57 @@ final class PRManager: ObservableObject {
         }
     }
 
+    // MARK: - Comment templates
+
+    /// `~/.config/mainline/comments` canned PR comments (Settings → Comments).
+    let commentStore = CommentTemplateStore()
+
+    /// The PR the comment picker is open for, or `nil`. Presented at the panel level in
+    /// `MenuBarView`, like `promptPickerTarget`; the deck only sets it.
+    @Published var commentPickerTarget: PRSnapshot?
+
+    /// Posts `body` as a comment on `pr`. `label` names the template for the toast (nil for
+    /// free-typed text). Gated by `settings.writeActionsEnabled`; failures surface as a toast.
+    func postComment(_ body: String, label: String?, on pr: PRSnapshot) {
+        guard settings.writeActionsEnabled else {
+            showInfoToast(CommentError.writeActionsOff.localizedDescription, symbol: "exclamationmark.triangle", seconds: 6)
+            return
+        }
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            showInfoToast(CommentError.empty.localizedDescription, symbol: "exclamationmark.triangle", seconds: 6)
+            return
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
+            let start = Date()
+            do {
+                try await client.addComment(nodeId: pr.nodeId, body: text, token: token)
+                TelemetryService.shared.recordWriteAction(
+                    "comment", mergeMethod: nil, result: "success",
+                    duration: Date().timeIntervalSince(start), failureCategory: nil)
+                showInfoToast("Commented on #\(pr.number)" + (label.map { " · \($0)" } ?? ""),
+                              symbol: "text.bubble", seconds: 4)
+                await triggerSingleRefresh()
+            } catch {
+                TelemetryService.shared.recordWriteAction(
+                    "comment", mergeMethod: nil, result: "failure",
+                    duration: Date().timeIntervalSince(start), failureCategory: "api_error")
+                showInfoToast("Comment failed: \(error.localizedDescription)", symbol: "exclamationmark.triangle", seconds: 8)
+            }
+        }
+    }
+
+    /// Renders `template` for `pr` and posts it.
+    func runCommentTemplate(_ template: CommentTemplate, on pr: PRSnapshot) {
+        do {
+            postComment(try CommentEngine.render(template, for: pr), label: template.name, on: pr)
+        } catch {
+            showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
+        }
+    }
+
     /// Opens the search field (idempotent) and requests keyboard focus on it.
     /// Called by the `search` shortcut.
     func openSearch() {
@@ -1079,6 +1130,10 @@ final class PRManager: ObservableObject {
         guard !didStart else { return }
         didStart = true
         promptStore.start()
+        commentStore.start()
+        commentStore.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
         // The store is a `let`, so forward its changes: the deck re-renders (and its
         // row key picks up `promptStore.revision`) when a template is edited on disk.
         promptStore.objectWillChange

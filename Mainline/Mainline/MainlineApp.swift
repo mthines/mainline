@@ -90,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         PanelBackdropChecks.run()
         PRListExportChecks.run()
         PromptTemplateChecks.run()
+        CommentTemplateChecks.run()
         #endif
 
         // Listen for open-settings requests from MenuBarView

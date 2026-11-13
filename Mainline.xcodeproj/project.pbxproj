@@ -48,6 +48,10 @@
 		LG000000000000000000000B1 /* LaunchAtLoginService.swift in Sources */ = {isa = PBXBuildFile; fileRef = LG000000000000000000000A1 /* LaunchAtLoginService.swift */; };
 		PS000000000000000000000B1 /* PRSearchFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = PS000000000000000000000A1 /* PRSearchFilter.swift */; };
 		PC000000000000000000A901 /* PromptTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A901 /* PromptTemplate.swift */; };
+		PC0000000000000000000B01 /* CommentTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000B01 /* CommentTemplate.swift */; };
+		PC0000000000000000000B02 /* CommentTemplateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000B02 /* CommentTemplateStore.swift */; };
+		PC0000000000000000000B03 /* CommentPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000B03 /* CommentPickerView.swift */; };
+		PC0000000000000000000B04 /* CommentsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000B04 /* CommentsSettingsView.swift */; };
 		PC000000000000000000A902 /* PromptTemplateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A902 /* PromptTemplateStore.swift */; };
 		PC000000000000000000A903 /* PromptPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A903 /* PromptPickerView.swift */; };
 		PC000000000000000000A904 /* PromptsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A904 /* PromptsSettingsView.swift */; };
@@ -95,6 +99,10 @@
 		LG000000000000000000000A1 /* LaunchAtLoginService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginService.swift; sourceTree = "<group>"; };
 		PS000000000000000000000A1 /* PRSearchFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRSearchFilter.swift; sourceTree = "<group>"; };
 		PF000000000000000000A901 /* PromptTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTemplate.swift; sourceTree = "<group>"; };
+		PF0000000000000000000B01 /* CommentTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommentTemplate.swift; sourceTree = "<group>"; };
+		PF0000000000000000000B02 /* CommentTemplateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommentTemplateStore.swift; sourceTree = "<group>"; };
+		PF0000000000000000000B03 /* CommentPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommentPickerView.swift; sourceTree = "<group>"; };
+		PF0000000000000000000B04 /* CommentsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommentsSettingsView.swift; sourceTree = "<group>"; };
 		PF000000000000000000A902 /* PromptTemplateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTemplateStore.swift; sourceTree = "<group>"; };
 		PF000000000000000000A903 /* PromptPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptPickerView.swift; sourceTree = "<group>"; };
 		PF000000000000000000A904 /* PromptsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptsSettingsView.swift; sourceTree = "<group>"; };
@@ -169,6 +177,8 @@
 				LG000000000000000000000A1 /* LaunchAtLoginService.swift */,
 				PS000000000000000000000A1 /* PRSearchFilter.swift */,
 				PX000000000000000000000A1 /* PRListExport.swift */,
+				PF0000000000000000000B01 /* CommentTemplate.swift */,
+				PF0000000000000000000B02 /* CommentTemplateStore.swift */,
 				PF000000000000000000A902 /* PromptTemplateStore.swift */,
 				PF000000000000000000A901 /* PromptTemplate.swift */,
 			);
@@ -185,6 +195,8 @@
 				PF000000000000000000001A /* PRPeekView.swift */,
 				PF000000000000000000001C /* UndoToastView.swift */,
 				PF0000000000000000000020 /* KeyboardShortcutsView.swift */,
+				PF0000000000000000000B03 /* CommentPickerView.swift */,
+				PF0000000000000000000B04 /* CommentsSettingsView.swift */,
 				PF000000000000000000A904 /* PromptsSettingsView.swift */,
 				PF000000000000000000A903 /* PromptPickerView.swift */,
 				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
@@ -317,6 +329,10 @@
 				PX000000000000000000000B1 /* PRListExport.swift in Sources */,
 				PC000000000000000000A904 /* PromptsSettingsView.swift in Sources */,
 				PC000000000000000000A903 /* PromptPickerView.swift in Sources */,
+				PC0000000000000000000B01 /* CommentTemplate.swift in Sources */,
+				PC0000000000000000000B02 /* CommentTemplateStore.swift in Sources */,
+				PC0000000000000000000B03 /* CommentPickerView.swift in Sources */,
+				PC0000000000000000000B04 /* CommentsSettingsView.swift in Sources */,
 				PC000000000000000000A902 /* PromptTemplateStore.swift in Sources */,
 				PC000000000000000000A901 /* PromptTemplate.swift in Sources */,
 				OT00000000000000000000B1 /* TelemetryService.swift in Sources */,

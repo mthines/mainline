@@ -1521,6 +1521,37 @@ final class GitHubClient {
         )
     }
 
+    // MARK: - Comment mutation
+
+    private static let addCommentMutation = """
+    mutation($subjectId: ID!, $body: String!) {
+      addComment(input: { subjectId: $subjectId, body: $body }) {
+        commentEdge { node { id } }
+      }
+    }
+    """
+
+    struct AddCommentMutationResponse: Decodable {
+        struct AddComment: Decodable {
+            struct Edge: Decodable {
+                struct Node: Decodable { let id: String }
+                let node: Node?
+            }
+            let commentEdge: Edge?
+        }
+        let data: AddComment?
+    }
+
+    /// Posts `body` as a conversation comment on the PR (GraphQL `addComment`).
+    func addComment(nodeId: String, body: String, token: String) async throws {
+        _ = try await performMutation(
+            Self.addCommentMutation,
+            variables: ["subjectId": nodeId, "body": body],
+            token: token,
+            responseType: AddCommentMutationResponse.self
+        )
+    }
+
     // MARK: - Review mutations
 
     private static let addPullRequestReviewMutation = """
