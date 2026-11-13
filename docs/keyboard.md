@@ -82,8 +82,8 @@ The menu carries every action for that PR, in this order:
 2. **Triage** — later (every snooze duration), mark seen, dismiss, and mute (Inbox only).
 3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), and pin / unpin.
 4. **Copy** — copy link (the GitHub URL) and copy branch name.
-5. **Comment** — posts a canned comment (scoped to the PR's repo) or opens the picker for a typed one. Disabled while write actions are off.
-6. **Run Prompt** — starts an agent session from a template (on a stacked PR: on the whole stack or just that PR). Press it while the pointer is over a stack header or a section/role header to run on every PR in that group.
+5. **Run Prompt** — starts an agent session from a template (on a stacked PR: on the whole stack or just that PR). Press it while the pointer is over a stack header or a section/role header to run on every PR in that group.
+6. **Comment** — posts a canned comment (scoped to the PR's repo) or opens the picker for a typed one. Disabled while write actions are off.
 7. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
 
 The "open" item follows your open target, so it reads **Open in Linear** when Linear is configured.
