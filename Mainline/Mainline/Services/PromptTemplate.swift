@@ -323,7 +323,7 @@ enum PromptState {
     /// The tokens that hold for a PR or a stack: a state holds when ANY member has it —
     /// except the branch-fixing ones (`branchStateTokens`), which only the base PR counts,
     /// since that is the branch the session works on — plus `stacked` when the target is a
-    /// whole stack (`stacked`, or several PRs) — NOT when a stacked PR is run on its own.
+    /// whole stack (the caller passes `stacked`; a deck-section group does not) — NOT when a stacked PR is run on its own.
     static func active(prs: [PRSnapshot], myLogin: String, stacked: Bool) -> Set<String> {
         var all = Set<String>()
         for (index, pr) in prs.enumerated() {
