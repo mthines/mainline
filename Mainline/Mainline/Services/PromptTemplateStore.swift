@@ -256,6 +256,7 @@ enum PromptLauncher {
     static func run(prompt: String, harnessKey: String, checkout: Bool, pr: PRSnapshot,
                     context: PromptContext? = nil, config: PromptConfig,
                     terminal: PromptTerminal) throws -> String {
+        let config = config.resolved(forRepo: pr.repoFullName)
         let context = context ?? PromptContext(pr: pr)
         let harness = config.harnesses[harnessKey]
         let label = harness?.label ?? harnessKey

@@ -74,16 +74,22 @@ struct PromptConfig: Codable, Equatable {
     var checkout: String
     /// `owner/repo` → local clone path (`~` allowed). Harnesses start here.
     var repos: [String: String]
+    /// `owner/repo` → harness key → URL template that replaces that web harness's `url`
+    /// for PRs in the repo (e.g. point Agent0 at the dev stack and org for one repo).
+    /// Must contain `{{prompt}}`; ignored for CLI harnesses.
+    var repoUrls: [String: [String: String]]
     var harnesses: [String: HarnessConfig]
     /// Harness keys in priority order, first = default. Harnesses not listed come after,
     /// sorted by label.
     var order: [String]
 
-    enum CodingKeys: String, CodingKey { case checkout, repos, harnesses, order }
+    enum CodingKeys: String, CodingKey { case checkout, repos, repoUrls, harnesses, order }
 
-    init(checkout: String, repos: [String: String], harnesses: [String: HarnessConfig], order: [String] = []) {
+    init(checkout: String, repos: [String: String], repoUrls: [String: [String: String]] = [:],
+         harnesses: [String: HarnessConfig], order: [String] = []) {
         self.checkout = checkout
         self.repos = repos
+        self.repoUrls = repoUrls
         self.harnesses = harnesses
         self.order = order
     }
@@ -95,6 +101,7 @@ struct PromptConfig: Codable, Equatable {
         let d = PromptConfig.default
         checkout = try c.decodeIfPresent(String.self, forKey: .checkout) ?? d.checkout
         repos = try c.decodeIfPresent([String: String].self, forKey: .repos) ?? [:]
+        repoUrls = try c.decodeIfPresent([String: [String: String]].self, forKey: .repoUrls) ?? [:]
         harnesses = try c.decodeIfPresent([String: HarnessConfig].self, forKey: .harnesses) ?? d.harnesses
         order = try c.decodeIfPresent([String].self, forKey: .order) ?? d.order
     }
@@ -142,6 +149,19 @@ struct PromptConfig: Codable, Equatable {
     func settingEnabled(_ key: String, _ on: Bool) -> PromptConfig {
         var copy = self
         copy.harnesses[key]?.enabled = on ? nil : false
+        return copy
+    }
+
+    /// This config with each web harness's `url` swapped for the repo's `repoUrls` override
+    /// (case-insensitive `owner/repo`). Blank overrides and CLI harnesses are left alone.
+    func resolved(forRepo repo: String) -> PromptConfig {
+        guard let overrides = repoUrls.first(where: { $0.key.caseInsensitiveCompare(repo) == .orderedSame })?.value
+        else { return self }
+        var copy = self
+        for (key, raw) in overrides {
+            let url = raw.trimmingCharacters(in: .whitespaces)
+            if !url.isEmpty, copy.harnesses[key]?.isWeb == true { copy.harnesses[key]?.url = url }
+        }
         return copy
     }
 
@@ -809,6 +829,17 @@ enum PromptStarters {
 
         "repos": { "dash0hq/dash0": "~/Workspace/dash0.git/main" }
 
+    "repoUrls" overrides a web harness's url for one repo, e.g. to send a repo's
+    Agent0 sessions to the dev stack and a specific org (must contain {{prompt}}):
+
+        "repoUrls": {
+            "mthines/mainline": {
+                "agent0": "https://app.dash0-dev.com/goto/agent0?org=<org-id>&auto_submit=true&initial_prompt={{prompt}}"
+            }
+        }
+
+    Repos without an entry use the harness's own url.
+
     "checkout" is the command a template runs first when it sets `checkout: true`
     (default: gh pr checkout {{pr.number}}; e.g. `gw checkout {{pr.branch}}`).
     Without a repos entry a CLI harness starts in ~ and the checkout is skipped.
@@ -1141,6 +1172,15 @@ enum PromptTemplateChecks {
             checkout: true, workingDirectory: nil, promptFile: "/tmp/p") {
             assert(!script.contains("checkout"), "no repo path → checkout skipped")
         } else { assertionFailure("cli launch without dir") }
+
+        // Per-repo harness URL override.
+        var withUrls = cfg
+        withUrls.repoUrls = ["Mthines/Mainline": ["agent0": "https://app.dash0-dev.com/goto/agent0?org=o1&initial_prompt={{prompt}}", "claude": "https://x/{{prompt}}"]]
+        assert(withUrls.resolved(forRepo: "mthines/mainline").harnesses["agent0"]?.url?.hasPrefix("https://app.dash0-dev.com/") == true, "repo url override applies")
+        assert(withUrls.resolved(forRepo: "mthines/mainline").harnesses["claude"] == cfg.harnesses["claude"], "CLI harness ignores url override")
+        assert(withUrls.resolved(forRepo: "other/repo") == withUrls, "unmapped repo keeps harness url")
+        let urlsRoundTrip = try? JSONDecoder().decode(PromptConfig.self, from: JSONEncoder().encode(withUrls))
+        assert(urlsRoundTrip == withUrls, "repoUrls survive JSON")
 
         // Repo path lookup.
         var withRepo = cfg; withRepo.repos = ["Dash0hq/Dash0": "~/code"]

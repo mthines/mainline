@@ -69,7 +69,8 @@ struct PromptsSettingsView: View {
                     .font(.caption).foregroundStyle(.orange)
             }
             HStack {
-                Text("\(store.config.repos.count) repo path\(store.config.repos.count == 1 ? "" : "s") mapped")
+                Text("\(store.config.repos.count) repo path\(store.config.repos.count == 1 ? "" : "s") mapped"
+                     + (store.config.repoUrls.isEmpty ? "" : " · \(store.config.repoUrls.count) repo URL override\(store.config.repoUrls.count == 1 ? "" : "s")"))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Open config.json") { store.openConfig() }
