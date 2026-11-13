@@ -84,9 +84,18 @@ struct PromptPickerView: View {
     }
 
     /// The item as it will run: a template pinned to the harness chosen for it.
+    /// Both kinds read the harness from the live ←/→ choice, never from the row value: the
+    /// `rows` a ↵ handler captured can predate the keypress that changed it.
     private func resolve(_ item: Item) -> Item {
-        guard case .template(let t, let reason) = item else { return item }
-        return .template(t.resolved(for: chosenHarness(t)), reason: reason)
+        switch item {
+        case .template(let t, let reason):
+            return .template(t.resolved(for: chosenHarness(t)), reason: reason)
+        case .custom(let key, let label, let text):
+            let live = PromptEngine.askHarnessKey(picked: chosenAskHarness, row: key,
+                                                  enabled: store.config.enabledHarnesses.map(\.key))
+            guard live != key, let harness = store.config.harnesses[live] else { return item }
+            return .custom(harnessKey: live, label: harness.label, text: text)
+        }
     }
 
     var body: some View {
