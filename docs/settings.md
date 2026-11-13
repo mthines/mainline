@@ -86,7 +86,7 @@ See [Keyboard triage](./keyboard.md).
 ## Prompts
 
 Start an agent session from a PR: right-click → **Run Prompt**, or press `A`.
-Templates are Markdown files in `~/.config/mainline/prompts/`; one template can list several harnesses (`harness: claude, agent0`, first = default) with optional per-harness prompt text, and ←/→ in the picker switch between them; harnesses, repo paths and the checkout step live in `~/.config/mainline/config.json`.
+Templates are Markdown files in `~/.config/mainline/prompts/`; one template can list several harnesses (`harness: claude, agent0`, first = default) with optional per-harness prompt text, and ←/→ in the picker switch between them; harnesses, repo paths and the checkout step live in `~/.config/mainline/config.json`. A web harness's URL can be overridden per repo with `repoUrls` — key is `owner/repo`, `owner/*` for a whole org, or `*`; exact beats org beats `*` (`"owner/repo": { "agent0": "https://app.dash0-dev.com/goto/agent0?org=<id>&auto_submit=true&initial_prompt={{prompt}}" }`) — e.g. dev stack and org for personal repos, prod for Dash0's.
 
 | Setting          | Default | Notes                                                                 |
 | ---------------- | ------- | --------------------------------------------------------------------- |
