@@ -2511,7 +2511,7 @@ struct TriageDeckView: View {
         Menu {
             ForEach(ranked, id: \.template.fileName) { entry in
                 Button {
-                    manager.runCommentTemplate(entry.template, on: pr)
+                    confirmAndPostComment(entry.template, on: pr)
                 } label: {
                     if entry.reason != nil { Label(entry.template.name, systemImage: "star.fill") } else { Text(entry.template.name) }
                 }
@@ -2522,6 +2522,23 @@ struct TriageDeckView: View {
             Label("Comment", systemImage: "text.bubble")
         }
         .disabled(!settings.writeActionsEnabled)
+    }
+
+    /// The Comment submenu skips the picker's preview, so confirm the exact rendered text
+    /// first: one mis-click must not publish a comment that can start an agent run.
+    private func confirmAndPostComment(_ template: CommentTemplate, on pr: PRSnapshot) {
+        let text: String
+        do { text = try CommentEngine.render(template, for: pr) } catch {
+            manager.showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Post “\(template.name)” on #\(pr.number)?"
+        alert.informativeText = text
+        alert.addButton(withTitle: "Post Comment")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        manager.postComment(text, label: template.name, on: pr)
     }
 
     // MARK: - Confirmation copy

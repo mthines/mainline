@@ -161,11 +161,13 @@ enum CommentEngine {
         return suggested + ranked.filter { $0.reason == nil }
     }
 
-    /// Case-insensitive match on the name or the text; empty query keeps everything.
+    /// Case-insensitive match on the name only; empty query keeps everything. The body is
+    /// deliberately not searched: typed text like "@agent0 fix" would otherwise leave a
+    /// template highlighted and ↵ would post that instead of what was typed.
     static func filter(_ ranked: [Ranked], query: String) -> [Ranked] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return ranked }
-        return ranked.filter { $0.template.name.lowercased().contains(q) || $0.template.body.lowercased().contains(q) }
+        return ranked.filter { $0.template.name.lowercased().contains(q) }
     }
 }
 

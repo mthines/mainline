@@ -82,7 +82,10 @@ struct CommentPickerView: View {
                                 row(item, isSelected: index == selected)
                                     .id(item.id)
                                     .contentShape(Rectangle())
-                                    .onTapGesture { selected = index; post(rows) }
+                                    // Double-click posts; a single click only highlights, so
+                                    // clicking a row to read its preview never publishes it.
+                                    .onTapGesture(count: 2) { selected = index; post(rows) }
+                                    .onTapGesture { selected = index }
                             }
                         }
                     }
