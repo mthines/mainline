@@ -154,7 +154,8 @@ struct PromptConfig: Codable, Equatable {
     }
 
     /// This config with each web harness's `url` swapped for the repo's `repoUrls` override
-    /// (case-insensitive `owner/repo`). Blank overrides and CLI harnesses are left alone.
+    /// (case-insensitive `owner/repo`, `owner/*` or `*`; the most specific match wins per
+    /// harness). Blank overrides and CLI harnesses are left alone.
     func resolved(forRepo repo: String) -> PromptConfig {
         // Least → most specific, so a later layer wins per harness key: `*`, `owner/*`, `owner/repo`.
         let owner = repo.split(separator: "/", maxSplits: 1).first.map(String.init) ?? repo
