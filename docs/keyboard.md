@@ -81,7 +81,7 @@ The menu carries every action for that PR, in this order:
 2. **Triage** — later (every snooze duration), mark seen, dismiss, and mute (Inbox only).
 3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), and pin / unpin.
 4. **Copy** — copy link (the GitHub URL) and copy branch name.
-5. **Run Prompt** — starts an agent session from a template (on a stacked PR: on the whole stack or just that PR).
+5. **Run Prompt** — starts an agent session from a template (on a stacked PR: on the whole stack or just that PR). Press it while the pointer is over a stack header or a section/role header to run on every PR in that group.
 6. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
 
 The "open" item follows your open target, so it reads **Open in Linear** when Linear is configured.
@@ -91,7 +91,7 @@ Rows in **Done** have a shorter menu: open, open on GitHub, copy link, copy bran
 
 ## Copying a section
 
-Hover a section header (**Needs attention**, **Waiting**, …) or a role header (**Your PRs**, **Needs your review**) and a copy button appears; right-clicking the header offers **Copy PR List** too.
+Hover a section header (**Needs attention**, **Waiting**, …) or a role header (**Your PRs**, **Needs your review**) and a copy button appears; right-clicking the header offers **Copy PR List** and **Run Prompt on <section>** too (so does pressing the Run Prompt key while hovering it).
 It copies the section's PRs, in on-screen order and including collapsed stack members, as a Markdown list — each PR's link and title plus its author, draft state, CI, review decision, conflicts, unresolved threads, size, and branch — ready to paste into an agent.
 
 An expanded stack's **Stack** header has the same button and right-click item. It copies just that stack's PRs, in merge order (base first).

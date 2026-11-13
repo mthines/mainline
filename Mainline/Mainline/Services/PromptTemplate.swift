@@ -206,6 +206,9 @@ struct PromptTarget: Equatable {
     var members: [PRSnapshot]
     /// Run on every member rather than just `anchor`. Ignored when not stacked.
     var wholeStack: Bool
+    /// `members` is an arbitrary header group (a deck section), not a merge-ordered stack:
+    /// no stack wording, no `stacked` state token.
+    var isGroup: Bool = false
 
     /// The PRs the prompt covers.
     var prs: [PRSnapshot] { wholeStack && members.count > 1 ? members : [anchor] }
@@ -215,15 +218,20 @@ struct PromptTarget: Equatable {
     var isStacked: Bool { members.count > 1 }
     var isStack: Bool { prs.count > 1 }
 
-    var context: PromptContext { PromptContext(prs: prs) }
+    var context: PromptContext {
+        var c = PromptContext(prs: prs)
+        c.isGroup = isGroup
+        return c
+    }
 
     func state(myLogin: String) -> Set<String> {
-        PromptState.active(prs: prs, myLogin: myLogin, stacked: isStack)
+        PromptState.active(prs: prs, myLogin: myLogin, stacked: isStack && !isGroup)
     }
 
     /// "#123" or "stack #1 → #4 (4 PRs)".
     var title: String {
-        isStack ? "stack #\(prs.first!.number) → #\(prs.last!.number) (\(prs.count) PRs)" : "#\(anchor.number)"
+        isGroup && isStack ? "\(prs.count) PRs"
+            : isStack ? "stack #\(prs.first!.number) → #\(prs.last!.number) (\(prs.count) PRs)" : "#\(anchor.number)"
     }
 }
 
@@ -260,6 +268,8 @@ struct PromptContext: Equatable {
     }
 
     /// More than one PR.
+    /// The PRs are a deck section, not a stack: only changes the appended wording.
+    var isGroup = false
     var isStack: Bool { (Int(values["stack.size"] ?? "1") ?? 1) > 1 }
 
     static let placeholderNames = ["pr.url", "pr.number", "pr.title", "pr.repo",
@@ -696,8 +706,11 @@ enum PromptEngine {
     static func withStackContext(_ rendered: String, source: String, context: PromptContext) -> String {
         guard context.isStack,
               !placeholders(in: source).contains(where: { $0.hasPrefix("stack.") }) else { return rendered }
-        return rendered + "\n\nThis is a stack of \(context.values["stack.size"] ?? "?") PRs "
-            + "(bottom → top, merge order):\n" + (context.values["stack.prs"] ?? "")
+        let size = context.values["stack.size"] ?? "?"
+        let intro = context.isGroup
+            ? "This covers \(size) PRs (they may be unrelated, possibly in different repos):\n"
+            : "This is a stack of \(size) PRs (bottom → top, merge order):\n"
+        return rendered + "\n\n" + intro + (context.values["stack.prs"] ?? "")
     }
 
     /// Single-quote a value for zsh.

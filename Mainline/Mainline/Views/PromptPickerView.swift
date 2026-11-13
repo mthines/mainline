@@ -111,7 +111,7 @@ struct PromptPickerView: View {
                     .onExitCommand(perform: onClose)
                 if initialTarget.isStacked {
                     Button(action: toggleScope) {
-                        Text(target.isStack ? "Stack ×\(target.prs.count)  ⇥" : "This PR  ⇥")
+                        Text(target.isStack ? "\(target.isGroup ? "Group" : "Stack") ×\(target.prs.count)  ⇥" : "This PR  ⇥")
                             .font(.caption2)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(.quaternary, in: Capsule())
