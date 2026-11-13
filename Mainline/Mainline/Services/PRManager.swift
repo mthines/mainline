@@ -225,15 +225,6 @@ final class PRManager: ObservableObject {
         }
     }
 
-    /// Renders `template` for `pr` and posts it.
-    func runCommentTemplate(_ template: CommentTemplate, on pr: PRSnapshot) {
-        do {
-            postComment(try CommentEngine.render(template, for: pr), label: template.name, on: pr)
-        } catch {
-            showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
-        }
-    }
-
     /// Opens the search field (idempotent) and requests keyboard focus on it.
     /// Called by the `search` shortcut.
     func openSearch() {

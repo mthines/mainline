@@ -46,7 +46,8 @@ struct CommentPickerView: View {
     private func resolve(_ item: Item) -> Result<(text: String, label: String?), Error> {
         switch item {
         case .template(let t, _):
-            if let problem = CommentEngine.validate(t).first { return .failure(problem) }
+            // `render` itself refuses an unknown placeholder; a bad `when:` only affects
+            // suggestions, so it must not block posting (the right-click menu doesn't).
             do { return .success((try CommentEngine.render(t, for: pr), t.name)) } catch { return .failure(error) }
         case .typed(let text):
             return .success((text, nil))   // literal: never run through the placeholder engine
@@ -162,12 +163,17 @@ struct CommentPickerView: View {
             Divider()
             switch resolve(rows[selected]) {
             case .success(let result):
-                Text(result.text)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
+                // The whole text, scrollable: this preview is the confirmation, so it must
+                // never hide part of what ↵ will post.
+                ScrollView {
+                    Text(result.text)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                }
+                .frame(maxHeight: 120)
             case .failure(let error):
                 Label(error.localizedDescription, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
