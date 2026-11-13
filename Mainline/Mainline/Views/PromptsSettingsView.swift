@@ -68,6 +68,11 @@ struct PromptsSettingsView: View {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
             }
+            if let bad = store.config.brokenRepoUrls.first {
+                Label("repoUrls “\(bad.pattern)” for “\(bad.harness)” has no {{prompt}} — launches for matching repos will fail.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             HStack {
                 Text("\(store.config.repos.count) repo path\(store.config.repos.count == 1 ? "" : "s") mapped"
                      + (store.config.repoUrls.isEmpty ? "" : " · \(store.config.repoUrls.count) repo URL override\(store.config.repoUrls.count == 1 ? "" : "s")"))

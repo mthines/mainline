@@ -256,6 +256,12 @@ enum PromptLauncher {
     static func run(prompt: String, harnessKey: String, checkout: Bool, pr: PRSnapshot,
                     context: PromptContext? = nil, config: PromptConfig,
                     terminal: PromptTerminal) throws -> String {
+        let broken = config.brokenRepoUrls
+        for entry in config.matchingRepoUrls(forRepo: pr.repoFullName) {
+            if let bad = broken.first(where: { $0.pattern == entry.pattern && $0.harness == harnessKey }) {
+                throw PromptError.repoUrlMissingPrompt(pattern: bad.pattern, harness: bad.harness)
+            }
+        }
         let config = config.resolved(forRepo: pr.repoFullName)
         let context = context ?? PromptContext(pr: pr)
         let harness = config.harnesses[harnessKey]

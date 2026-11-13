@@ -153,16 +153,33 @@ struct PromptConfig: Codable, Equatable {
         return copy
     }
 
+    /// `repoUrls` entries that apply to `repo`, least → most specific, with their original keys.
+    func matchingRepoUrls(forRepo repo: String) -> [(pattern: String, overrides: [String: String])] {
+        let owner = repo.split(separator: "/", maxSplits: 1).first.map(String.init) ?? repo
+        return ["*", "\(owner)/*", repo].compactMap { pattern in
+            repoUrls.first(where: { $0.key.caseInsensitiveCompare(pattern) == .orderedSame })
+                .map { (pattern: $0.key, overrides: $0.value) }
+        }
+    }
+
+    /// Overrides of web harnesses that lack `{{prompt}}` — they would fail every launch.
+    var brokenRepoUrls: [(pattern: String, harness: String)] {
+        repoUrls.flatMap { pattern, overrides in
+            overrides.compactMap { key, raw in
+                let url = raw.trimmingCharacters(in: .whitespaces)
+                return !url.isEmpty && harnesses[key]?.isWeb == true && !url.contains(PromptEngine.promptToken)
+                    ? (pattern: pattern, harness: key) : nil
+            }
+        }.sorted { ($0.pattern, $0.harness) < ($1.pattern, $1.harness) }
+    }
+
     /// This config with each web harness's `url` swapped for the repo's `repoUrls` override
     /// (case-insensitive `owner/repo`, `owner/*` or `*`; the most specific match wins per
     /// harness). Blank overrides and CLI harnesses are left alone.
     func resolved(forRepo repo: String) -> PromptConfig {
         // Least → most specific, so a later layer wins per harness key: `*`, `owner/*`, `owner/repo`.
-        let owner = repo.split(separator: "/", maxSplits: 1).first.map(String.init) ?? repo
         var copy = self
-        for pattern in ["*", "\(owner)/*", repo] {
-            guard let overrides = repoUrls.first(where: { $0.key.caseInsensitiveCompare(pattern) == .orderedSame })?.value
-            else { continue }
+        for (_, overrides) in matchingRepoUrls(forRepo: repo) {
             for (key, raw) in overrides {
                 let url = raw.trimmingCharacters(in: .whitespaces)
                 if !url.isEmpty, copy.harnesses[key]?.isWeb == true { copy.harnesses[key]?.url = url }
@@ -401,6 +418,7 @@ enum PromptError: Error, Equatable, LocalizedError {
     case placeholderInQuotes(String)
     case harnessDisabled(String)
     case unknownStateToken(String)
+    case repoUrlMissingPrompt(pattern: String, harness: String)
 
     var errorDescription: String? {
         switch self {
@@ -414,6 +432,8 @@ enum PromptError: Error, Equatable, LocalizedError {
             return "Harness “\(h)” needs a `command` or a `url`."
         case .unknownStateToken(let t):
             return "Unknown state “\(t)” in `when:` — known: \(PromptState.tokenNames.joined(separator: ", "))."
+        case .repoUrlMissingPrompt(let pattern, let h):
+            return "repoUrls “\(pattern)” for harness “\(h)” must contain {{prompt}} — that's where the prompt is inserted."
         case .harnessDisabled(let h):
             return "Harness “\(h)” is disabled — turn it on in Settings → Prompts."
         case .placeholderInQuotes(let p):
@@ -1195,6 +1215,10 @@ enum PromptTemplateChecks {
         assert(withOrg.resolved(forRepo: "dash0hq/dash0").harnesses["agent0"]?.url == "https://all/{{prompt}}", "* is the fallback")
         let urlsRoundTrip = try? JSONDecoder().decode(PromptConfig.self, from: JSONEncoder().encode(withUrls))
         assert(urlsRoundTrip == withUrls, "repoUrls survive JSON")
+
+        assert(withOrg.brokenRepoUrls.isEmpty, "valid overrides are not broken")
+        var broken = cfg; broken.repoUrls = ["a/*": ["agent0": "https://x/", "claude": "nope"]]
+        assert(broken.brokenRepoUrls.map(\.pattern) == ["a/*"] && broken.brokenRepoUrls.map(\.harness) == ["agent0"], "override without {{prompt}} is reported; CLI ignored")
 
         // Repo path lookup.
         var withRepo = cfg; withRepo.repos = ["Dash0hq/Dash0": "~/code"]
