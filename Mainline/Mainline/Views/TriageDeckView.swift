@@ -249,6 +249,9 @@ struct TriageDeckView: View {
     @ObservedObject var settings: MainlineSettings
 
     @State private var selectedIndex: Int = 0
+    /// The stack or section whose header the pointer is over. A plain reference (not `@State`) so
+    /// hovering never re-renders the deck; read only by the `runPrompt` key handler.
+    @State private var hoveredGroup = HoveredGroupBox()
     /// Whether the peek overlay is open. The peek TARGET lives on `manager.peekPR`
     /// (so `MenuBarView` can present the card at the panel level and use the full
     /// popover height); this deck only reads/sets it. Set by both the Space key
@@ -670,7 +673,7 @@ struct TriageDeckView: View {
     @ViewBuilder
     private func inboxRoleSectionHeader(for role: InboxRole, prs rolePRs: [PRSnapshot]) -> some View {
         let title = inboxRoleTitle(role)
-        HoverReveal { hovering in
+        HoverReveal(onHoverChange: hoverTracker(id: "role:\(title)", members: rolePRs)) { hovering in
             HStack(spacing: 6) {
                 Text(title)
                     .font(.caption)
@@ -689,7 +692,10 @@ struct TriageDeckView: View {
             .padding(.top, 12)
             .padding(.bottom, 4)
             .contentShape(Rectangle())
-            .contextMenu { copyListMenuItem(heading: title, prs: rolePRs) }
+            .contextMenu {
+                copyListMenuItem(heading: title, prs: rolePRs)
+                groupPromptMenu(heading: title, prs: rolePRs)
+            }
         }
     }
 
@@ -848,7 +854,7 @@ struct TriageDeckView: View {
         // the Needs-a-Human header. Replaces DisclosureGroup so tapping the text or
         // count — not just the triangle — expands/collapses. The copy button is an
         // overlay (not nested in the toggle's label) so its click doesn't also toggle.
-        HoverReveal { hovering in
+        HoverReveal(onHoverChange: hoverTracker(id: "sec:\(copyHeading)", members: sectionPRs)) { hovering in
         Button {
             // No withAnimation: animating the expand makes the body height change
             // every frame, which the GeometryReader/BodyHeightKey → .frame(height:)
@@ -889,7 +895,10 @@ struct TriageDeckView: View {
             copyListButton(heading: copyHeading, prs: sectionPRs, visible: hovering)
                 .padding(.trailing, RowMetrics.horizontalPadding + 18)
         }
-        .contextMenu { copyListMenuItem(heading: copyHeading, prs: sectionPRs) }
+        .contextMenu {
+            copyListMenuItem(heading: copyHeading, prs: sectionPRs)
+            groupPromptMenu(heading: copyHeading, prs: sectionPRs)
+        }
         }
 
         if expansion.wrappedValue {
@@ -1005,7 +1014,7 @@ struct TriageDeckView: View {
         let copyHeading = "Stack #\(stack.bottom.number) → #\(stack.top.number)"
         // Same layering as `sectionView`: the copy button is an overlay (not nested in
         // the toggle's label) so its click doesn't also collapse the stack.
-        HoverReveal { hovering in
+        HoverReveal(onHoverChange: hoverTracker(id: "s:" + stack.id, members: stack.members)) { hovering in
             Button {
                 expansion.wrappedValue.toggle()
             } label: {
@@ -1048,6 +1057,27 @@ struct TriageDeckView: View {
                 copyListMenuItem(heading: copyHeading, prs: stack.members)
                 Divider()
                 promptMenu(for: stack.bottom, members: stack.members, wholeStack: true, title: "Run Prompt on Stack (\(stack.count))")
+            }
+        }
+    }
+
+    /// "Run Prompt on <section> (N)" for a section header's right-click menu.
+    @ViewBuilder
+    private func groupPromptMenu(heading: String, prs: [PRSnapshot]) -> some View {
+        if let first = prs.first {
+            Divider()
+            promptMenu(for: first, members: prs, wholeStack: true, title: "Run Prompt on \(heading) (\(prs.count))")
+        }
+    }
+
+    /// Hover callback recording which header (stack or section) the pointer is over, so
+    /// the `runPrompt` key can target its PRs. Cleared only by the header that set it.
+    private func hoverTracker(id: String, members: [PRSnapshot]) -> (Bool) -> Void {
+        { inside in
+            if inside {
+                hoveredGroup.group = (id, members)
+            } else if hoveredGroup.group?.id == id {
+                hoveredGroup.group = nil
             }
         }
     }
@@ -2052,7 +2082,12 @@ struct TriageDeckView: View {
 
         // Open the prompt-template picker for the focused PR (start an agent session).
         if shortcutMatches(.runPrompt, event: event) {
-            if let pr = focusedPR { handleTriageAction(.runPrompt, on: pr) }
+            // Pointer over a stack header → run on the whole stack, like its right-click menu.
+            if let group = hoveredGroup.group, let first = group.members.first {
+                manager.promptPickerTarget = promptTarget(for: first, members: group.members, wholeStack: true)
+            } else if let pr = focusedPR {
+                handleTriageAction(.runPrompt, on: pr)
+            }
             return nil
         }
 
@@ -3004,10 +3039,19 @@ private struct KeyCaptureView: NSViewRepresentable {
 /// Tracks hover for one header in its own `@State`, so hovering a section header
 /// re-renders just that header rather than the whole deck.
 private struct HoverReveal<Content: View>: View {
+    var onHoverChange: ((Bool) -> Void)? = nil
     @ViewBuilder let content: (Bool) -> Content
     @State private var hovering = false
 
     var body: some View {
-        content(hovering).onHover { hovering = $0 }
+        content(hovering).onHover {
+            hovering = $0
+            onHoverChange?($0)
+        }
     }
+}
+
+/// Reference holder for the stack header under the pointer (no view invalidation).
+private final class HoveredGroupBox {
+    var group: (id: String, members: [PRSnapshot])?
 }
