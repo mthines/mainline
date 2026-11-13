@@ -586,6 +586,13 @@ enum PromptEngine {
         return template.resolved(for: runnable.first ?? template.harness)
     }
 
+    /// The harness a free-typed "Ask" runs on: the one picked with ←/→ when it is still enabled,
+    /// else what the row showed. Pure so the pick can't be lost between keypress and ↵.
+    static func askHarnessKey(picked: String?, row: String, enabled: [String]) -> String {
+        if let picked, enabled.contains(picked) { return picked }
+        return row
+    }
+
     /// `validate` minus what must not stop a run: a bad `when:` only affects suggestions.
     static func blockingErrors(_ template: PromptTemplate, config: PromptConfig) -> [PromptError] {
         validate(template, config: config).filter {
@@ -1224,6 +1231,11 @@ enum PromptTemplateChecks {
         var withRepo = cfg; withRepo.repos = ["Dash0hq/Dash0": "~/code"]
         assert(withRepo.localPath(forRepo: "dash0hq/dash0") == (("~/code") as NSString).expandingTildeInPath, "case-insensitive repo")
         assert(withRepo.localPath(forRepo: "x/y") == nil, "unmapped repo")
+
+        // The Ask row runs on the harness picked with ←/→, even from a stale row value.
+        assert(PromptEngine.askHarnessKey(picked: "claude", row: "agent0", enabled: ["agent0", "claude"]) == "claude", "picked Ask harness wins over the row's")
+        assert(PromptEngine.askHarnessKey(picked: nil, row: "agent0", enabled: ["agent0", "claude"]) == "agent0", "no pick keeps the row's harness")
+        assert(PromptEngine.askHarnessKey(picked: "gone", row: "agent0", enabled: ["agent0"]) == "agent0", "a disabled pick falls back")
 
         // Filtering.
         let all = PromptStarters.templates
