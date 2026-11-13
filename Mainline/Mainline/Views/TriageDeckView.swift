@@ -1074,7 +1074,9 @@ struct TriageDeckView: View {
     /// Hover callback recording which header (stack or section) the pointer is over, so
     /// the `runPrompt` key can target its PRs. Cleared only by the header that set it.
     private func hoverTracker(id: String, members: [PRSnapshot], isGroup: Bool) -> (Bool) -> Void {
-        { inside in
+        // Refresh a still-hovered header's PR list (a poll may have changed the section).
+        if hoveredGroup.group?.id == id { hoveredGroup.group = (id, members, isGroup) }
+        return { inside in
             if inside {
                 hoveredGroup.group = (id, members, isGroup)
             } else if hoveredGroup.group?.id == id {

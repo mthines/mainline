@@ -334,7 +334,7 @@ enum PromptState {
             if index > 0 { tokens.subtract(branchStateTokens.union(["authored", "reviewing"])) }
             all.formUnion(tokens)
         }
-        if stacked || prs.count > 1 { all.insert("stacked") }
+        if stacked { all.insert("stacked") }
         return all
     }
 
@@ -1088,6 +1088,9 @@ enum PromptTemplateChecks {
         target.wholeStack = false
         assert(target.prs.map(\.number) == [2] && target.primary.number == 2 && target.isStacked && !target.isStack, "this PR only, still stacked")
         assert(target.title == "#2", "single title")
+        var group = PromptTarget(anchor: members[0], members: members, wholeStack: true)
+        group.isGroup = true
+        assert(!group.state(myLogin: "me").contains("stacked") && group.title == "3 PRs", "a section is a group, not a stack")
         let lone = PromptTarget(anchor: members[0], members: [members[0]], wholeStack: true)
         assert(lone.prs.count == 1 && !lone.isStacked, "a lone PR ignores wholeStack")
         let stackState = PromptTarget(anchor: members[0], members: members, wholeStack: true).state(myLogin: "me")
