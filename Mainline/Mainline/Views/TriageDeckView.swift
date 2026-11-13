@@ -2157,7 +2157,7 @@ struct TriageDeckView: View {
     private func presentWriteActionsDisabledAlert() {
         let alert = NSAlert()
         alert.messageText = "Write Actions Disabled"
-        alert.informativeText = "Enable \"Write Actions\" in Settings to approve, merge, request changes, close, reopen, or change a PR's draft state."
+        alert.informativeText = "Enable \"Write Actions\" in Settings to approve, merge, request changes, close, reopen, comment, or change a PR's draft state."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
