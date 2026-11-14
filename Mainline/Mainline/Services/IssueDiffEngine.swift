@@ -79,12 +79,12 @@ enum IssueDiffEngine {
     }
 
     /// An incomplete fetch must not shrink the diff baseline (it would re-notify later):
-    /// re-add every previous issue the fetch lacks, verbatim. A complete fetch carries nothing.
+    /// re-add, verbatim, each previous issue the fetch lacks that an incomplete query could
+    /// have returned (`mayCarry`). An issue only a complete query covers left the set: drop it.
     static func carryingForward(fetched: [IssueSnapshot], previous: [String: IssueSnapshot],
-                                incomplete: Bool) -> CarryResult {
-        guard incomplete else { return CarryResult(issues: fetched, carried: 0) }
+                                mayCarry: (IssueSnapshot) -> Bool) -> CarryResult {
         let have = Set(fetched.map(\.nodeId))
-        let missing = previous.values.filter { !have.contains($0.nodeId) }
+        let missing = previous.values.filter { !have.contains($0.nodeId) && mayCarry($0) }
         return CarryResult(issues: fetched + missing, carried: missing.count)
     }
 }
@@ -153,10 +153,18 @@ enum IssueDiffChecks {
                                     watchLevel: mine, seedRepos: ["acme/app"], now: now).map(\.kind) == ["assigned"],
                "seeding one repo leaves the others notifying")
 
-        let kept = IssueDiffEngine.carryingForward(fetched: [], previous: ["a": a], incomplete: true)
+        let kept = IssueDiffEngine.carryingForward(fetched: [], previous: ["a": a], mayCarry: { _ in true })
         assert(kept.issues.count == 1 && kept.carried == 1, "incomplete fetch carries previous issues forward")
-        let dropped = IssueDiffEngine.carryingForward(fetched: [], previous: ["a": a], incomplete: false)
+        let dropped = IssueDiffEngine.carryingForward(fetched: [], previous: ["a": a], mayCarry: { _ in false })
         assert(dropped.issues.isEmpty && dropped.carried == 0, "complete fetch drops issues that left the set")
+        // Only the issues an incomplete query covers are carried: with the involves search
+        // complete, an unassigned issue in an "Only mine" repo leaves even if a broad search was cut.
+        let mineRepo = mk("m", repo: "acme/mine"), allRepo = mk("b", repo: "acme/all")
+        let scoped = IssueDiffEngine.carryingForward(
+            fetched: [], previous: ["m": mineRepo, "b": allRepo],
+            mayCarry: { $0.repoFullName == "acme/all" })
+        assert(scoped.issues.map(\.nodeId) == ["b"] && scoped.carried == 1,
+               "carry-forward is limited to issues an incomplete query could return")
         // Carried issues diff to nothing, so an incomplete poll can never re-notify.
         assert(IssueDiffEngine.diff(previous: ["a": a], next: kept.issues, myLogin: me, watchLevel: all, now: now).isEmpty,
                "carry-forward yields no transitions")

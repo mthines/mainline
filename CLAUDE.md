@@ -558,7 +558,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `pinsIgnoreOrgFilter` | Bool | `false` — when OFF (default) pins are ORG-SCOPED: the Pinned subsection follows the org chip like every other section, so selecting `mthines` hides a pinned `dash0hq` PR. When ON, a pin overrides the chip and shows under every org (the pre-1.72 behaviour). Enforced by the single `PRManager.survivesScope(_:scope:)` predicate shared by `applyingSelectedScope` and `tabFiltered`. Scope only — mute, Drafts, snooze, search and the on-demand pin fetch are unaffected. Toggle in Settings → Appearance → Pinning. |
 | `issueRepoWatchLevels` | [String: String] (repo → `IssueWatchLevel` rawValue) | `{}` — per-repo `IssueWatchLevel` override |
 | `issueOrgWatchLevels` | [String: String] (org → `IssueWatchLevel` rawValue) | `{}` — per-org default; repo override wins, fallback Only mine |
-| `showNewIssuesInInbox` | Bool | true — "Show new issues in Inbox": at most 3 issue rows of any kind in the Inbox group, then "+N more"; "new" issues (unanswered, unassigned) appear only for repos at All issues |
+| `showNewIssuesInInbox` | Bool | true — "Show new issues in Inbox": at most 3 issue rows of any kind in the Inbox group, then "+N more"; "new" issues (unanswered, unassigned, opened within the last 3 days — `IssueDiffEngine.newIssueMaxAge`; older ones are backlog) appear only for repos at All issues |
 | `archivedIssues` | [String: Double] (nodeId → issue `updatedAt` when archived) | `{}` — an archived issue stays hidden until its `updatedAt` moves past the stored value; Mute is the permanent hide |
 | `mutedIssueIds` | [String] | `[]` |
 | `unreadIssueIds` | [String] | `[]` — one unread set serves the Issues tab and the Inbox group |

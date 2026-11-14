@@ -86,16 +86,17 @@ final class IssueStore: ObservableObject {
         let myLogin = settings.githubUsername
         guard !myLogin.isEmpty else { return }
 
-        // `incomplete`: carry previous issues forward. `failed`: a fetch failed or came back
-        // partial, which (unlike a cap-only truncation) must not end first-run seeding.
-        var incomplete = false
+        // `involvesIncomplete` / `broadIncomplete`: that query may have missed issues, so carry
+        // the previous ones it covers forward. `failed`: a fetch failed or came back partial,
+        // which (unlike a cap-only truncation) must not end first-run seeding.
+        var involvesIncomplete = false
+        var broadIncomplete = false
         var failed = false
         var involved: [IssueSnapshot] = []
         var broad: [IssueSnapshot] = []
         let pollStart = Date()
         // A failed or partial fetch keeps a first run seeding, so each one is counted.
         func noteResult(_ r: GitHubClient.IssueSearchResult) {
-            incomplete = incomplete || r.incomplete
             guard r.incomplete && !r.truncated else { return }
             failed = true
             TelemetryService.shared.recordIssueFetchIncomplete(degraded: r.degraded)
@@ -110,10 +111,11 @@ final class IssueStore: ObservableObject {
         do {
             let r = try await client.searchIssues(query: Self.involvesQuery, token: token, myLogin: myLogin)
             involved = r.issues
+            involvesIncomplete = r.incomplete
             noteResult(r)
         } catch {
             recordFailure(error)
-            incomplete = true
+            involvesIncomplete = true
             failed = true
         }
 
@@ -122,10 +124,11 @@ final class IssueStore: ObservableObject {
             do {
                 let r = try await client.searchIssues(query: query, token: token, myLogin: myLogin)
                 broad.append(contentsOf: r.issues)
+                broadIncomplete = broadIncomplete || r.incomplete
                 noteResult(r)
             } catch {
                 recordFailure(error)
-                incomplete = true
+                broadIncomplete = true
                 failed = true
             }
         }
@@ -140,8 +143,16 @@ final class IssueStore: ObservableObject {
             merged[issue.nodeId] = issue
         }
 
-        let carry = IssueDiffEngine.carryingForward(fetched: Array(merged.values), previous: baseline,
-                                                    incomplete: incomplete)
+        // The involves search covers every followed issue; the broad search only All-issues
+        // repos. So an issue missing from a complete involves search in an Only-mine repo has
+        // left the set (unassigned, repo lowered), even while a cap-truncated broad search
+        // keeps the poll incomplete.
+        let carry = IssueDiffEngine.carryingForward(
+            fetched: Array(merged.values), previous: baseline,
+            mayCarry: { [settings] issue in
+                involvesIncomplete
+                    || (broadIncomplete && settings.issueWatchLevel(forRepo: issue.repoFullName) == .allIssues)
+            })
         var carriedIssues = carry.issues
         var carriedCount = carry.carried
         if carry.carried > 0 {
