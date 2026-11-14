@@ -386,6 +386,8 @@ final class PRManager: ObservableObject {
     let settings:       MainlineSettings
     let snoozeStore:    SnoozeStore
     let scopeStore:     ScopeStore
+    /// GitHub issues: fetch, baseline, unread. One instance serves the Issues tab and the Inbox group.
+    let issueStore:     IssueStore
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -950,7 +952,25 @@ final class PRManager: ObservableObject {
 
     /// Count of PRs that need attention. Single source of truth for the badge's
     /// `.needsAHuman` metric.
-    var needsAttentionCount: Int { needsAttentionPRs.count }
+    var needsAttentionCount: Int { needsAttentionPRs.count + issueNeedsMyTimeCount }
+
+    /// Whether the badge covers issues: always when global, else only on the tabs that show them.
+    private var issueViewsIncluded: Bool {
+        let tab = settings.selectedTab
+        return !settings.menuBarScopeFollowsSelection || tab == .inbox || tab == .issues
+    }
+
+    /// Issues that need the viewer's time: assigned, mentioned, replied-on, plus new
+    /// issues when "Show new issues in Inbox" is on. Counted through
+    /// `IssueClassifier.needsMyTimeCount`, i.e. the SAME deduplicated list the Inbox
+    /// group draws, so an issue is counted exactly once. Only part of the badge while
+    /// the current view includes issues (Inbox / Issues tab) or the badge is global.
+    var issueNeedsMyTimeCount: Int {
+        guard issueViewsIncluded else { return 0 }
+        return IssueClassifier.needsMyTimeCount(
+            issueStore.issues, myLogin: settings.githubUsername,
+            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox)
+    }
 
     /// Count of PRs the user personally needs to act on (Layer A badge logic).
     /// - Authored PR with failing CI  → merge blocker
@@ -1003,7 +1023,9 @@ final class PRManager: ObservableObject {
             return .attention(count)
 
         case .unread:
+            // Issues share the badge: the same unread set the Issues tab and Inbox use.
             let count = scoped.filter { unreadPRIds.contains($0.nodeId) }.count
+                + (issueViewsIncluded ? issueStore.unreadIds.count : 0)
             return .attention(count)
 
         case .totalOpen:
@@ -1057,12 +1079,18 @@ final class PRManager: ObservableObject {
         self.client        = GitHubClient(settings: settings)
         self.snoozeStore   = SnoozeStore(settings: settings)
         self.scopeStore    = ScopeStore()
+        self.issueStore    = IssueStore(settings: settings, notifications: notifications)
         self.poller        = PRPoller(
             client:        GitHubClient(settings: settings),
             store:         store,
             notifications: notifications,
             settings:      settings
         )
+
+        poller.issueStore = issueStore
+        issueStore.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
 
         // Receive the display-only Done set from the poller. Assigned on the main
         // actor (poller is @MainActor); stored separately from `prs` so it never
@@ -1150,6 +1178,7 @@ final class PRManager: ObservableObject {
         // engine compares against last-known state instead of an empty set (which
         // would fire a "New PR" banner for every open PR on launch).
         await store.load()
+        await issueStore.load()
 
         let token = await KeychainHelper.loadToken()
         if let token, !token.isEmpty {
@@ -1477,6 +1506,17 @@ final class PRManager: ObservableObject {
     func markSeen(_ pr: PRSnapshot) {
         unreadPRIds.remove(pr.nodeId)
         settings.unreadPRIdsList = Array(unreadPRIds)
+    }
+
+    /// Marks an issue as seen (opened). The one read-state set for both issue views.
+    func markIssueSeen(_ issue: IssueSnapshot) {
+        issueStore.markSeen(issue.nodeId)
+    }
+
+    /// Opens an issue in the browser and marks it seen.
+    func openIssue(_ issue: IssueSnapshot) {
+        markIssueSeen(issue)
+        if let url = URL(string: issue.url) { NSWorkspace.shared.open(url) }
     }
 
     /// Marks all currently visible PRs as seen.

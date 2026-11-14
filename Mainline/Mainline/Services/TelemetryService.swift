@@ -84,6 +84,8 @@ final class TelemetryService {
     private var pollErrorsCounter: LongCounterSdk?
     private var pollCarriedForwardCounter: LongCounterSdk?
     private var pollCarriedForwardDroppedCounter: LongCounterSdk?
+    private var issuesObservedCounter: LongCounterSdk?
+    private var issuesCarriedForwardCounter: LongCounterSdk?
     private var appLaunchCounter: LongCounterSdk?
     private var writeActionsCounter: LongCounterSdk?
     private var triageInteractionsCounter: LongCounterSdk?
@@ -221,6 +223,18 @@ final class TelemetryService {
         pollCarriedForwardCounter = meter
             .counterBuilder(name: "mainline.poll.carried_forward")
             .setDescription("Number of PRs carried forward because a tab's fetch was incomplete")
+            .setUnit("1")
+            .build()
+
+        issuesObservedCounter = meter
+            .counterBuilder(name: "mainline.issues.observed")
+            .setDescription("Number of open issues seen by an issue poll (counts only)")
+            .setUnit("1")
+            .build()
+
+        issuesCarriedForwardCounter = meter
+            .counterBuilder(name: "mainline.issues.carried_forward")
+            .setDescription("Number of issues carried forward because an issue fetch was incomplete")
             .setUnit("1")
             .build()
 
@@ -521,6 +535,14 @@ final class TelemetryService {
         pollCarriedForwardCounter?.add(value: count, attribute: [
             "poll.carry_forward_reason": .string(reason),
         ])
+    }
+
+    /// Record one issue poll. Counts only: never a title, repo name or login.
+    func recordIssuePoll(observed: Int, carriedForward: Int) {
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+        if observed > 0 { issuesObservedCounter?.add(value: observed, attribute: [:]) }
+        if carriedForward > 0 { issuesCarriedForwardCounter?.add(value: carriedForward, attribute: [:]) }
     }
 
     /// Record PRs removed from a carry-forward because GitHub reported them MERGED

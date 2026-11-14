@@ -683,6 +683,12 @@ final class MainlineSettings: ObservableObject {
         // PRs you committed to but did not open (e.g. a bot opened them for you)
         static let committedPRPlacement  = "committedPRPlacement"
         static let committedPRBotAuthors = "committedPRBotAuthors"
+        // GitHub issues
+        static let issueRepoWatchLevels  = "issueRepoWatchLevels"
+        static let issueOrgWatchLevels   = "issueOrgWatchLevels"
+        static let showNewIssuesInInbox  = "showNewIssuesInInbox"
+        static let mutedIssueIds         = "mutedIssueIds"
+        static let unreadIssueIds        = "unreadIssueIds"
         // Preview-deployment detection
         static let vercelPreviewEnabled  = "vercelPreviewEnabled"
         static let vercelPreviewDomains  = "vercelPreviewDomains"
@@ -1037,6 +1043,73 @@ final class MainlineSettings: ObservableObject {
             notReadyOnUnresolvedThreads: reviewNotReadyOnUnresolvedThreads,
             notReadyOnMyApproval: reviewNotReadyOnMyApproval
         )
+    }
+
+    // MARK: - Issues
+
+    /// Per-repo watch-level overrides, keyed by lowercased `owner/repo`
+    /// (value = `IssueWatchLevel.rawValue`).
+    @Published var issueRepoWatchLevels: [String: String] {
+        didSet { defaults.set(issueRepoWatchLevels, forKey: Keys.issueRepoWatchLevels) }
+    }
+
+    /// Org-wide watch-level defaults, keyed by lowercased org.
+    @Published var issueOrgWatchLevels: [String: String] {
+        didSet { defaults.set(issueOrgWatchLevels, forKey: Keys.issueOrgWatchLevels) }
+    }
+
+    /// "Show new issues in Inbox" — whether new issues from All-issues repos surface in the
+    /// Inbox. Assigned, mention and reply issues always show. Default ON.
+    @Published var showNewIssuesInInbox: Bool {
+        didSet { defaults.set(showNewIssuesInInbox, forKey: Keys.showNewIssuesInInbox) }
+    }
+
+    /// Issues the user muted (hidden from every issue view, and never notify).
+    @Published var mutedIssueIds: [String] {
+        didSet { defaults.set(mutedIssueIds, forKey: Keys.mutedIssueIds) }
+    }
+
+    /// The ONE unread set for issues, shared by the Issues tab and the Inbox group.
+    /// An issue leaves it when opened (not when the popover opens).
+    @Published var unreadIssueIds: [String] {
+        didSet { defaults.set(unreadIssueIds, forKey: Keys.unreadIssueIds) }
+    }
+
+    /// Effective watch level: repo override, else org default, else `.onlyMine`.
+    func issueWatchLevel(forRepo repo: String) -> IssueWatchLevel {
+        let key = repo.lowercased()
+        if let raw = issueRepoWatchLevels[key], let level = IssueWatchLevel(rawValue: raw) { return level }
+        let org = key.split(separator: "/").first.map(String.init) ?? ""
+        if let raw = issueOrgWatchLevels[org], let level = IssueWatchLevel(rawValue: raw) { return level }
+        return IssueWatchLevel.default
+    }
+
+    func setIssueWatchLevel(_ level: IssueWatchLevel, forRepo repo: String) {
+        issueRepoWatchLevels[repo.lowercased()] = level.rawValue
+    }
+
+    /// Org-wide action: sets the org default and clears that org's per-repo overrides.
+    func setIssueWatchLevel(_ level: IssueWatchLevel, forOrg org: String) {
+        let key = org.lowercased()
+        issueOrgWatchLevels[key] = level.rawValue
+        issueRepoWatchLevels = issueRepoWatchLevels.filter { !$0.key.hasPrefix(key + "/") }
+    }
+
+    /// Orgs and repos currently at All issues (drives the second, broader fetch).
+    /// Repos covered by an All-issues org are not repeated.
+    var issueAllTargets: (orgs: [String], repos: [String]) {
+        let orgs = issueOrgWatchLevels.filter { $0.value == IssueWatchLevel.allIssues.rawValue }.map { $0.key }.sorted()
+        let repos = issueRepoWatchLevels.filter { entry in
+            guard entry.value == IssueWatchLevel.allIssues.rawValue else { return false }
+            let org = entry.key.split(separator: "/").first.map(String.init) ?? ""
+            return !orgs.contains(org)
+        }.map { $0.key }.sorted()
+        return (orgs, repos)
+    }
+
+    var hasAllIssuesRepo: Bool {
+        let t = issueAllTargets
+        return !t.orgs.isEmpty || !t.repos.isEmpty
     }
 
     // MARK: - Committed-to PRs
@@ -1525,6 +1598,12 @@ final class MainlineSettings: ObservableObject {
         committedPRPlacement = defaults.string(forKey: Keys.committedPRPlacement)
             .flatMap { CommittedPRPlacement(rawValue: $0) } ?? .yourPRs
         committedPRBotAuthors = defaults.stringArray(forKey: Keys.committedPRBotAuthors) ?? []
+        issueRepoWatchLevels = defaults.dictionary(forKey: Keys.issueRepoWatchLevels) as? [String: String] ?? [:]
+        issueOrgWatchLevels = defaults.dictionary(forKey: Keys.issueOrgWatchLevels) as? [String: String] ?? [:]
+        showNewIssuesInInbox = defaults.object(forKey: Keys.showNewIssuesInInbox) == nil
+            ? true : defaults.bool(forKey: Keys.showNewIssuesInInbox)
+        mutedIssueIds = defaults.stringArray(forKey: Keys.mutedIssueIds) ?? []
+        unreadIssueIds = defaults.stringArray(forKey: Keys.unreadIssueIds) ?? []
         // Review readiness — default ON when unset (absent key → true).
         reviewNotReadyOnConflict = defaults.object(forKey: Keys.reviewNotReadyOnConflict) == nil
             ? true : defaults.bool(forKey: Keys.reviewNotReadyOnConflict)

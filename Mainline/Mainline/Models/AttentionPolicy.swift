@@ -25,6 +25,10 @@ enum PREvent: String, Codable, CaseIterable {
     case prClosed            // PR was closed (not merged)
     case ciPassedOnMyPR      // CI turned green on my PR
     case draftCreated        // new draft PR created
+    case newIssue            // new issue on a repo watched at "All issues" (not authored by me)
+    case issueAssigned       // an issue was assigned to me
+    case issueMentioned      // I was mentioned in an issue
+    case issueReply          // new reply on an issue I opened
 
     /// Whether this event can actually be produced by
     /// `NotificationService.resolveTransition`.
@@ -50,7 +54,11 @@ enum PREvent: String, Codable, CaseIterable {
              .newReviewOrComment,
              .newCommentOnReviewPR,
              .readyForReview,
-             .draftCreated:
+             .draftCreated,
+             .newIssue,
+             .issueAssigned,
+             .issueMentioned,
+             .issueReply:
             return true
         case .changesRequested,
              .prMerged,
@@ -80,6 +88,10 @@ enum PREvent: String, Codable, CaseIterable {
         case .prClosed:           return "PR closed"
         case .ciPassedOnMyPR:     return "CI passed"
         case .draftCreated:       return "Draft PR created"
+        case .newIssue:           return "New issue"
+        case .issueAssigned:      return "Issue assigned to me"
+        case .issueMentioned:     return "Mentioned in an issue"
+        case .issueReply:         return "Reply on my issue"
         }
     }
 }
@@ -92,11 +104,13 @@ enum PREvent: String, Codable, CaseIterable {
 enum PREventGroup: CaseIterable {
     case yourPRs
     case reviewing
+    case issues
 
     var title: String {
         switch self {
         case .yourPRs:   return "Your PRs"
         case .reviewing: return "PRs You Review"
+        case .issues:    return "Issues"
         }
     }
 
@@ -104,6 +118,7 @@ enum PREventGroup: CaseIterable {
         switch self {
         case .yourPRs:   return "PRs you opened, or that carry your commits (unless set to By author only in Inbox)."
         case .reviewing: return "PRs from others where your review was requested."
+        case .issues:    return "Issues assigned to you, mentioning you, opened by you, or new on repos watched at All issues."
         }
     }
 
@@ -122,6 +137,8 @@ extension PREvent {
         case .reviewRequested, .reviewRequestedTeam, .newCommentOnReviewPR,
              .readyForReview, .draftCreated:
             return .reviewing
+        case .newIssue, .issueAssigned, .issueMentioned, .issueReply:
+            return .issues
         }
     }
 }
@@ -149,6 +166,10 @@ extension PREvent {
         .prClosed:           .quiet,   // terminal state
         .ciPassedOnMyPR:     .quiet,   // good news — silent update
         .draftCreated:       .quiet,   // not actionable yet
+        .newIssue:           .notify,
+        .issueAssigned:      .notify,
+        .issueMentioned:     .notify,
+        .issueReply:         .notify,
     ]
 }
 
@@ -165,7 +186,11 @@ extension PREvent {
     /// - v1: `reviewRequested` default flipped `.quiet` → `.notify`.
     /// - v2: `newReviewOrComment` split by role; `newCommentOnReviewPR` inherits
     ///   the stored level so nobody's comment banners change on upgrade.
-    static let policyMigrationVersion = 2
+    /// - v3: issue events added. No rewrite is needed: their keys are absent in
+    ///   every stored policy, so `level(for:)` falls through to `defaults`
+    ///   (`.notify`). The bump only records that the shape was reviewed; no
+    ///   stored level is ever overwritten.
+    static let policyMigrationVersion = 3
 
     /// Pure. Upgrades a persisted `[PREvent.rawValue: AttentionLevel.rawValue]`
     /// dictionary to the current policy version.
@@ -205,6 +230,8 @@ extension PREvent {
         if storedVersion < 2, let level = next[legacy], next[split] == nil {
             next[split] = level
         }
+
+        // v3 — issue events: nothing to rewrite (absent keys follow defaults).
 
         return next
     }
@@ -271,6 +298,16 @@ enum AttentionPolicyChecks {
                "v1 must not re-run for a user already at v1")
         assert(PREvent.migratedPolicy(from: [nrc: "off"], storedVersion: 2)[ncr] == nil,
                "v2 must not re-run for a user already at v2")
+
+        // v3 — issue events notify by default and a stored level survives.
+        for event in [PREvent.newIssue, .issueAssigned, .issueMentioned, .issueReply] {
+            assert(event.isDeliverable, "issue event \(event.rawValue) must be deliverable")
+            assert(PREvent.defaults[event] == .notify, "issue event \(event.rawValue) must notify by default")
+            assert(event.group == .issues, "issue event \(event.rawValue) belongs to the Issues group")
+        }
+        assert(PREvent.policyMigrationVersion == 3, "policy migration version is 3")
+        assert(PREvent.migratedPolicy(from: [PREvent.newIssue.rawValue: "off"], storedVersion: 2)[PREvent.newIssue.rawValue] == "off",
+               "v3 must not overwrite a stored issue level")
 
         // MARK: Groups — every deliverable row lands in exactly one section.
         assert(PREventGroup.allCases.flatMap(\.events).count == PREvent.deliverable.count,

@@ -55,6 +55,9 @@ final class PRPoller {
     /// Set by `PRManager`; nil = no Done fetch performed.
     var onDonePRs: (([PRSnapshot]) -> Void)?
 
+    /// Issue state, polled alongside the PRs. Set by `PRManager`; nil = no issue fetch.
+    var issueStore: IssueStore?
+
     init(
         client:        GitHubClient,
         store:         PRStateStore,
@@ -237,7 +240,17 @@ final class PRPoller {
 
     // MARK: - Single poll
 
+    /// One full cycle: the PR fetch, then (when wired) the issue fetch. Issues run after
+    /// the PRs so an early return inside the PR poll never starves them, and a failure in
+    /// one never blocks the other.
     private func poll(token: String) async {
+        await pollPRs(token: token)
+        if let issueStore {
+            await issueStore.poll(client: client, token: token)
+        }
+    }
+
+    private func pollPRs(token: String) async {
         // Prune expired snoozes on every poll so postponed PRs silently return to
         // their normal group the moment their wake time passes — even while the
         // panel is closed. Render-time filtering already compares to `Date()`; this
