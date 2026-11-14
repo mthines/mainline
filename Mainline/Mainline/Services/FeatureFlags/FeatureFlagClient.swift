@@ -35,7 +35,7 @@ final class FeatureFlagClient {
 
     /// The device id is an IOKit lookup plus an HMAC, and a flag can be evaluated on every
     /// SwiftUI render; a lazy `static let` computes it once, on first need.
-    private static let deviceTargetingKey: String? = TelemetryService.anonymousUserId()
+    static let deviceTargetingKey: String? = TelemetryService.anonymousUserId()
 
     /// An invalid registry is a programming error: DEBUG asserts loudly (and
     /// `FeatureFlagChecks` validates the shipped registry on every dev launch); a release
