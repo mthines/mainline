@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         PRListExportChecks.run()
         PromptTemplateChecks.run()
         CommentTemplateChecks.run()
+        FeatureFlagChecks.run()
         #endif
 
         // Listen for open-settings requests from MenuBarView

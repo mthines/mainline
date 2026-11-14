@@ -648,6 +648,8 @@ final class MainlineSettings: ObservableObject {
         static let unreadPRIds          = "unreadPRIds"
         static let notifMutedNodeIds    = "notifMutedNodeIds"
         static let pinnedNodeIds        = "pinnedNodeIds"
+        static let featureFlagOverrides = "featureFlagOverrides"
+        static let featureFlagOwnerLogins = "featureFlagOwnerLogins"
         static let panelHeight          = "panelHeight"
         static let panelMinHeight       = "panelMinHeight"
         static let panelBackgroundOpacity = "panelBackgroundOpacity"
@@ -843,6 +845,17 @@ final class MainlineSettings: ObservableObject {
     /// PRs the user has PINNED. A pinned PR floats to the top of whatever
     /// actionability group / role section it already belongs to (it keeps its
     /// grouping — pinning only reorders within the group and shows a pin glyph).
+    /// Developer flag overrides: flag key → variant key. Set from Settings → Developer
+    /// (owner/DEBUG only); an override beats an experiment split and the default.
+    @Published var featureFlagOverrides: [String: String] {
+        didSet { defaults.set(featureFlagOverrides, forKey: Keys.featureFlagOverrides) }
+    }
+
+    /// GitHub logins that see the Developer pane in a release build (case-insensitive).
+    @Published var featureFlagOwnerLogins: [String] {
+        didSet { defaults.set(featureFlagOwnerLogins, forKey: Keys.featureFlagOwnerLogins) }
+    }
+
     /// Persisted as a nodeId list; membership is read through `pinnedNodeIds`.
     @Published var pinnedNodeIdsList: [String] {
         didSet { defaults.set(pinnedNodeIdsList, forKey: Keys.pinnedNodeIds) }
@@ -1473,6 +1486,9 @@ final class MainlineSettings: ObservableObject {
         unreadPRIdsList = defaults.stringArray(forKey: Keys.unreadPRIds) ?? []
         notifMutedNodeIdsList = defaults.stringArray(forKey: Keys.notifMutedNodeIds) ?? []
         pinnedNodeIdsList = defaults.stringArray(forKey: Keys.pinnedNodeIds) ?? []
+        // Pure loads — the absent didSet in init is harmless for reads (no writes here).
+        featureFlagOverrides = defaults.dictionary(forKey: Keys.featureFlagOverrides) as? [String: String] ?? [:]
+        featureFlagOwnerLogins = defaults.stringArray(forKey: Keys.featureFlagOwnerLogins) ?? FeatureFlagAccess.defaultOwnerLogins
         panelHeight     = defaults.object(forKey: Keys.panelHeight) == nil ? 1600 : defaults.integer(forKey: Keys.panelHeight)
         panelMinHeight  = defaults.object(forKey: Keys.panelMinHeight) == nil ? 600 : defaults.integer(forKey: Keys.panelMinHeight)
         // Panel backdrop — default 0 (stock translucent material, unchanged look).

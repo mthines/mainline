@@ -86,6 +86,9 @@ final class TelemetryService {
     private var pollCarriedForwardDroppedCounter: LongCounterSdk?
     private var appLaunchCounter: LongCounterSdk?
     private var writeActionsCounter: LongCounterSdk?
+    private var featureFlagCounter: LongCounterSdk?
+    private var loggedFlagExposures = Set<String>()
+    private let flagExposureLock = NSLock()
     private var triageInteractionsCounter: LongCounterSdk?
     private var notificationsFiredCounter: LongCounterSdk?
     private var notificationsSuppressedCounter: LongCounterSdk?
@@ -233,6 +236,12 @@ final class TelemetryService {
         appLaunchCounter = meter
             .counterBuilder(name: "mainline.app.launch")
             .setDescription("Number of app launches")
+            .setUnit("1")
+            .build()
+
+        featureFlagCounter = meter
+            .counterBuilder(name: "mainline.feature_flag.evaluations")
+            .setDescription("Feature-flag evaluations by flag key, resolved variant and reason")
             .setUnit("1")
             .build()
 
@@ -549,6 +558,34 @@ final class TelemetryService {
     ///   - result: "success" | "failure"
     ///   - duration: seconds from action start to completion
     ///   - failureCategory: error category when result == "failure"
+    /// A feature-flag evaluation, using OTel's `feature_flag.*` attribute names. The counter
+    /// counts every evaluation; the log is emitted once per distinct (key, variant, reason)
+    /// per process — the exposure an A/B comparison joins on via `enduser.id`.
+    /// Only flag key / variant / reason / provider go out — never PR, repo or login data.
+    func recordFlagEvaluation(key: String, variant: String?, reason: String, providerName: String) {
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+
+        let attrs: [String: AttributeValue] = [
+            "feature_flag.key": .string(key),
+            "feature_flag.result.variant": .string(variant ?? "unknown"),
+            "feature_flag.result.reason": .string(reason),
+            "feature_flag.provider.name": .string(providerName),
+        ]
+        featureFlagCounter?.add(value: 1, attribute: attrs)
+
+        let exposure = "\(key)|\(variant ?? "")|\(reason)"
+        flagExposureLock.lock()
+        let isFirst = loggedFlagExposures.insert(exposure).inserted
+        flagExposureLock.unlock()
+        guard isFirst else { return }
+        emitLog(
+            severity: reason == "error" ? .warn : .info,
+            body: "Feature flag evaluated",
+            attributes: attrs
+        )
+    }
+
     func recordWriteAction(
         _ action: String,
         mergeMethod: String?,
@@ -734,7 +771,7 @@ final class TelemetryService {
     /// (IOKit miss), it falls back to the stable per-install `installationId` rather than a
     /// fresh random UUID — otherwise `enduser.id` would change every launch and fragment
     /// the user into many one-off identities.
-    private static func anonymousUserId() -> String {
+    static func anonymousUserId() -> String {
         let key = SymmetricKey(data: Data("mainline-telemetry".utf8))
         let mac = HMAC<SHA256>.authenticationCode(for: Data(platformUUID().utf8), using: key)
         return Data(mac).map { String(format: "%02x", $0) }.joined()

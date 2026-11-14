@@ -18,6 +18,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
     case comments
     case privacy
     case help
+    case developer
 
     var id: String { rawValue }
 
@@ -34,6 +35,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .comments:      return "Comments"
         case .privacy:       return "Privacy"
         case .help:          return "Help"
+        case .developer:     return "Developer"
         }
     }
 
@@ -50,6 +52,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .comments:      return "text.bubble"
         case .privacy:       return "hand.raised.fill"
         case .help:          return "questionmark.circle.fill"
+        case .developer:     return "hammer"
         }
     }
 }
@@ -112,7 +115,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsCategory.allCases, selection: $selection) { category in
+            List(visibleCategories, selection: $selection) { category in
                 Label(category.title, systemImage: category.systemImage)
                     .tag(category)
             }
@@ -127,6 +130,14 @@ struct SettingsView: View {
             panelHeightDraft = settings.panelHeight
             panelMinHeightDraft = settings.panelMinHeight
         }
+    }
+
+    /// The Developer pane (flag overrides) is only listed for DEBUG builds or an owner login.
+    private var visibleCategories: [SettingsCategory] {
+        let showDeveloper = FeatureFlagAccess.developerPaneVisible(
+            login: settings.githubUsername, allowlist: settings.featureFlagOwnerLogins
+        )
+        return SettingsCategory.allCases.filter { $0 != .developer || showDeveloper }
     }
 
     // MARK: - Detail pane routing
@@ -153,6 +164,7 @@ struct SettingsView: View {
                 case .comments:      CommentsSettingsView(settings: settings, store: manager.commentStore)
                 case .privacy:       privacySection
                 case .help:          helpSection
+                case .developer:     DeveloperSettingsView(settings: settings)
                 }
             }
             .formStyle(.grouped)
