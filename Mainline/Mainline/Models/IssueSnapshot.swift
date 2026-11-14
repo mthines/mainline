@@ -196,7 +196,8 @@ enum IssueClassifier {
     /// Why this issue belongs in the Inbox, or nil when it is background noise.
     static func inboxReason(for issue: IssueSnapshot, myLogin: String) -> IssueInboxReason {
         if issue.isAssigned(to: myLogin) { return .assigned }
-        if issue.isAuthored(by: myLogin) { return .reply }
+        // An issue I opened counts only once somebody else has the last word.
+        if issue.isAuthored(by: myLogin), issue.awaitingMyReply(login: myLogin) { return .reply }
         if issue.mentionsMe { return .mentioned }
         return .newIssue
     }
@@ -278,6 +279,12 @@ enum IssueChecks {
         let off = IssueClassifier.inboxItems(items, myLogin: me, muted: [], showNew: false)
         assert(off.hiddenNew == 1 && !off.items.contains { $0.nodeId == "a" }, "new issues hidden when setting off")
         assert(IssueClassifier.needsMyTimeCount(items, myLogin: me, muted: ["c"], showNew: false) == 1, "muted excluded from badge count")
+
+        let mineQuiet = issue("q", author: "mads")
+        let mineAnswered = issue("r", author: "mads", comments: [drive])
+        let mine = IssueClassifier.inboxItems([mineQuiet, mineAnswered], myLogin: me, muted: [], showNew: true)
+        assert(!mine.items.contains { $0.nodeId == "q" }, "my issue with no reply to answer stays out of the Inbox")
+        assert(mine.items.map(\.nodeId) == ["r"], "my issue awaiting my reply is in the Inbox")
 
         IssueDiffChecks.run()
     }
