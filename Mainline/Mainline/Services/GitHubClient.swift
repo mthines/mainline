@@ -1826,7 +1826,6 @@ private struct IssueSearchResponse: Decodable {
     struct Payload: Decodable {
         struct Search: Decodable {
             struct PageInfo: Decodable { let hasNextPage: Bool?; let endCursor: String? }
-            let issueCount: Int?
             let pageInfo: PageInfo?
             let nodes: [IssueSearchNode?]?
         }
@@ -1872,7 +1871,6 @@ extension GitHubClient {
     private static let issueSearchDocument = """
     query($q: String!, $first: Int!, $after: String) {
       search(query: $q, type: ISSUE, first: $first, after: $after) {
-        issueCount
         pageInfo { hasNextPage endCursor }
         nodes {
           ... on Issue {
