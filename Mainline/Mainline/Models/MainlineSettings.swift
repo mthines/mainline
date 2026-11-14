@@ -842,9 +842,6 @@ final class MainlineSettings: ObservableObject {
         set { notifMutedNodeIdsList = Array(newValue) }
     }
 
-    /// PRs the user has PINNED. A pinned PR floats to the top of whatever
-    /// actionability group / role section it already belongs to (it keeps its
-    /// grouping — pinning only reorders within the group and shows a pin glyph).
     /// Developer flag overrides: flag key → variant key. Set from Settings → Developer
     /// (owner/DEBUG only); an override beats an experiment split and the default.
     @Published var featureFlagOverrides: [String: String] {
@@ -856,6 +853,9 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(featureFlagOwnerLogins, forKey: Keys.featureFlagOwnerLogins) }
     }
 
+    /// PRs the user has PINNED. A pinned PR floats to the top of whatever
+    /// actionability group / role section it already belongs to (it keeps its
+    /// grouping — pinning only reorders within the group and shows a pin glyph).
     /// Persisted as a nodeId list; membership is read through `pinnedNodeIds`.
     @Published var pinnedNodeIdsList: [String] {
         didSet { defaults.set(pinnedNodeIdsList, forKey: Keys.pinnedNodeIds) }

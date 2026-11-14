@@ -69,19 +69,44 @@ final class FeatureFlagClient {
     }
 
     func boolValue(_ key: String, default fallback: Bool = false) -> Bool {
-        if case .bool(let value)? = evaluate(key).value { return value }
-        return fallback
+        evaluateTyped(key) { (value: FlagValue) -> Bool? in
+            if case .bool(let v) = value { return v }
+            return nil
+        } ?? fallback
     }
 
     func isEnabled(_ key: String) -> Bool { boolValue(key) }
 
     func stringValue(_ key: String, default fallback: String) -> String {
-        if case .string(let value)? = evaluate(key).value { return value }
-        return fallback
+        evaluateTyped(key) { (value: FlagValue) -> String? in
+            if case .string(let v) = value { return v }
+            return nil
+        } ?? fallback
     }
 
     func numberValue(_ key: String, default fallback: Double) -> Double {
-        if case .number(let value)? = evaluate(key).value { return value }
-        return fallback
+        evaluateTyped(key) { (value: FlagValue) -> Double? in
+            if case .number(let v) = value { return v }
+            return nil
+        } ?? fallback
+    }
+
+    /// Records the resolution only when the caller actually receives its value; a type
+    /// mismatch is recorded as `error` (LoreKit's TYPE_MISMATCH), never as the variant
+    /// the caller did not get.
+    private func evaluateTyped<T>(_ key: String, _ extract: (FlagValue) -> T?) -> T? {
+        let resolution = resolveWithoutRecording(key)
+        if let value = resolution.value, let typed = extract(value) {
+            record(resolution)
+            return typed
+        }
+        record(FlagResolution(
+            flagKey: key,
+            value: nil,
+            variant: nil,
+            reason: .error,
+            errorMessage: resolution.errorMessage ?? "flag \"\(key)\" has a different type"
+        ))
+        return nil
     }
 }

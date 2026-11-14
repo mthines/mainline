@@ -550,14 +550,6 @@ final class TelemetryService {
 
     // MARK: - Write Actions
 
-    /// Record a write action (approve/merge/requestChanges/markReady/convertToDraft/close/reopen).
-    /// - Parameters:
-    ///   - action: "approve" | "merge" | "request_changes" | "mark_ready" |
-    ///     "convert_to_draft" | "close" | "reopen"
-    ///   - mergeMethod: resolved method for merge: "squash" | "merge" | "rebase" | nil
-    ///   - result: "success" | "failure"
-    ///   - duration: seconds from action start to completion
-    ///   - failureCategory: error category when result == "failure"
     /// A feature-flag evaluation, using OTel's `feature_flag.*` attribute names. The counter
     /// counts every evaluation; the log is emitted once per distinct (key, variant, reason)
     /// per process — the exposure an A/B comparison joins on via `enduser.id`.
@@ -586,6 +578,14 @@ final class TelemetryService {
         )
     }
 
+    /// Record a write action (approve/merge/requestChanges/markReady/convertToDraft/close/reopen).
+    /// - Parameters:
+    ///   - action: "approve" | "merge" | "request_changes" | "mark_ready" |
+    ///     "convert_to_draft" | "close" | "reopen"
+    ///   - mergeMethod: resolved method for merge: "squash" | "merge" | "rebase" | nil
+    ///   - result: "success" | "failure"
+    ///   - duration: seconds from action start to completion
+    ///   - failureCategory: error category when result == "failure"
     func recordWriteAction(
         _ action: String,
         mergeMethod: String?,
