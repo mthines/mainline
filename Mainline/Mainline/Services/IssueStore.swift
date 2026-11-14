@@ -93,8 +93,14 @@ final class IssueStore: ObservableObject {
         var involved: [IssueSnapshot] = []
         var broad: [IssueSnapshot] = []
         let pollStart = Date()
-        // Failures were silent: a first run whose queries keep failing never finishes seeding,
-        // and nothing showed it. Same counter the PR poll uses, own query type.
+        // A failed or partial fetch keeps a first run seeding, so each one is counted.
+        func noteResult(_ r: GitHubClient.IssueSearchResult) {
+            incomplete = incomplete || r.incomplete
+            guard r.incomplete && !r.truncated else { return }
+            failed = true
+            TelemetryService.shared.recordIssueFetchIncomplete(degraded: r.degraded)
+        }
+        // Same counter the PR poll uses, own query type.
         func recordFailure(_ error: Error) {
             TelemetryService.shared.recordPollFailed(
                 queryType: "issues", error: (error as? GitHubAPIError) ?? .unknown(0),
@@ -104,8 +110,7 @@ final class IssueStore: ObservableObject {
         do {
             let r = try await client.searchIssues(query: Self.involvesQuery, token: token, myLogin: myLogin)
             involved = r.issues
-            incomplete = incomplete || r.incomplete
-            failed = failed || (r.incomplete && !r.truncated)
+            noteResult(r)
         } catch {
             recordFailure(error)
             incomplete = true
@@ -117,8 +122,7 @@ final class IssueStore: ObservableObject {
             do {
                 let r = try await client.searchIssues(query: query, token: token, myLogin: myLogin)
                 broad.append(contentsOf: r.issues)
-                incomplete = incomplete || r.incomplete
-                failed = failed || (r.incomplete && !r.truncated)
+                noteResult(r)
             } catch {
                 recordFailure(error)
                 incomplete = true

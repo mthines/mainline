@@ -1922,10 +1922,12 @@ extension GitHubClient {
                 cursor = next
             }
             return IssueSearchResult(issues: issues, incomplete: true, truncated: true, degraded: false)
-        } catch GitHubAPIError.serverError {
+        } catch GitHubAPIError.serverError(let code) {
             try await Task.sleep(nanoseconds: 750_000_000)
             let page = try await searchIssuesPage(query: query, token: token, myLogin: myLogin,
                                                   first: Self.searchPageSizeDegraded, after: nil)
+            // Only after the retry succeeds, as in `searchPRs`.
+            TelemetryService.shared.recordPollServerErrorRecovered(queryType: "issues", statusCode: code)
             return IssueSearchResult(issues: page.issues, incomplete: true, truncated: false, degraded: true)
         }
     }

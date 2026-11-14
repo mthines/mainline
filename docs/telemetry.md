@@ -88,6 +88,9 @@ telemetry silently does nothing (correct for dev builds without the token).
 | `mainline.poll.errors`             | counter   | `poll.query_type`, `error.type`, `poll.recovered`        |
 | `mainline.poll.carried_forward`    | counter   | `poll.carry_forward_reason`                              |
 | `mainline.poll.carried_forward_dropped` | counter | —                                                     |
+| `mainline.issues.observed`         | counter   | —                                                        |
+| `mainline.issues.carried_forward`  | counter   | —                                                        |
+| `mainline.issues.incomplete_fetches` | counter | `issues.incomplete_reason` (`graphql_errors`, `degraded_page`) |
 | `mainline.write_actions`           | counter   | `write.action`, `write.result`, `write.merge_method`     |
 | `mainline.triage_interactions`     | counter   | `interaction.type`                                       |
 | `mainline.notifications.fired`     | counter   | `notification.event_type`, `notification.attention_level`|
@@ -132,7 +135,7 @@ All attributes use **bounded, low-cardinality values** — never raw user data.
 
 | Attribute            | Allowed values                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------ |
-| `poll.query_type`    | `"author"`, `"reviewer"`, `"committed"` (the opt-in committed-PR bot search) — derived from query identity, not content |
+| `poll.query_type`    | `"author"`, `"reviewer"`, `"committed"` (the opt-in committed-PR bot search), `"issues"` (issue searches) — derived from query identity, not content |
 | `poll.result`        | `"success"`, `"etag_304"`, `"failure"`, `"abandoned"`, `"app_shutdown"`                          |
 | `poll.degraded`      | `true` / `false` — `true` when the poll only succeeded on the reduced-page retry after a 5xx, so its result set is a SUBSET of the tab. Set on BOTH the success and failure paths, so `sum by (poll_degraded)` never gets an empty-labelled bucket |
 | `poll.recovered`     | `true` / `false` — on `mainline.poll.errors`. `true` is a 5xx the reduced-page retry rescued (the poll still succeeded); `false` is a poll that gave up. Read "polls that failed" as `poll.recovered="false"` |
