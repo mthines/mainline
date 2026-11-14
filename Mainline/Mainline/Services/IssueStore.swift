@@ -260,6 +260,10 @@ final class IssueStore: ObservableObject {
     func refilter() {
         let kept = issues.filter { settings.issueWatchLevel(forRepo: $0.repoFullName) != .off }
         if kept.count != issues.count {
+            // Remember the repos just turned Off so turning one back On before the next poll
+            // re-seeds it quietly instead of re-announcing every issue it already had.
+            offRepos.formUnion(issues.filter { settings.issueWatchLevel(forRepo: $0.repoFullName) == .off }
+                .map { $0.repoFullName.lowercased() })
             issues = kept
             baseline = baseline.filter { entry in kept.contains { $0.nodeId == entry.key } }
             persist(baseline)
