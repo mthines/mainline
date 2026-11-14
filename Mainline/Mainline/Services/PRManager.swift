@@ -1217,8 +1217,11 @@ final class PRManager: ObservableObject {
         // Load the persisted snapshot baseline BEFORE the first poll so the diff
         // engine compares against last-known state instead of an empty set (which
         // would fire a "New PR" banner for every open PR on launch).
-        await store.load()
+        // Issues first: loading PRs fires the `$snapshots` sink, whose scope rebuild reads
+        // `issueStore.issues`. An empty store there would clear a scope chip for an
+        // org that only has issues.
         await issueStore.load()
+        await store.load()
 
         let token = await KeychainHelper.loadToken()
         if let token, !token.isEmpty {
