@@ -1825,7 +1825,9 @@ enum PreviewDetectionChecks {
 private struct IssueSearchResponse: Decodable {
     struct Payload: Decodable {
         struct Search: Decodable {
+            struct PageInfo: Decodable { let hasNextPage: Bool?; let endCursor: String? }
             let issueCount: Int?
+            let pageInfo: PageInfo?
             let nodes: [IssueSearchNode?]?
         }
         let search: Search?
@@ -1868,9 +1870,10 @@ extension GitHubClient {
     static let issueCommentWindow = 5
 
     private static let issueSearchDocument = """
-    query($q: String!, $first: Int!) {
-      search(query: $q, type: ISSUE, first: $first) {
+    query($q: String!, $first: Int!, $after: String) {
+      search(query: $q, type: ISSUE, first: $first, after: $after) {
         issueCount
+        pageInfo { hasNextPage endCursor }
         nodes {
           ... on Issue {
             id number title url body createdAt updatedAt
@@ -1888,31 +1891,59 @@ extension GitHubClient {
     }
     """
 
-    /// Outcome of one issue search. `incomplete` means the page may be a subset of the
-    /// matching issues (GraphQL partial errors, or a full page with more behind it), so
-    /// the caller must carry previous issues forward rather than treat it as the whole set.
+    /// Pages read per issue search before giving up (`searchPageSize` each).
+    static let issueSearchMaxPages = 5
+
+    /// Outcome of one issue search. `incomplete` means the result may be a subset of the
+    /// matching issues, so the caller must carry previous issues forward rather than treat
+    /// it as the whole set. `truncated` means the only reason is the page cap: every page
+    /// read was whole and error-free, so the result is still good enough to seed from.
     struct IssueSearchResult {
         let issues: [IssueSnapshot]
         let incomplete: Bool
+        let truncated: Bool
         let degraded: Bool
     }
 
-    /// Searches open issues. A 5xx is retried once at half the page size, like `searchPRs`.
+    /// Searches open issues, following `pageInfo` up to `issueSearchMaxPages`. A 5xx is
+    /// retried once as a single half-size page, like `searchPRs`, and reported incomplete.
     func searchIssues(query: String, token: String, myLogin: String) async throws -> IssueSearchResult {
         do {
-            return try await searchIssuesPage(query: query, token: token, myLogin: myLogin,
-                                              first: Self.searchPageSize, degraded: false)
+            var issues: [IssueSnapshot] = []
+            var cursor: String?
+            for _ in 0..<Self.issueSearchMaxPages {
+                let page = try await searchIssuesPage(query: query, token: token, myLogin: myLogin,
+                                                      first: Self.searchPageSize, after: cursor)
+                issues.append(contentsOf: page.issues)
+                if page.hasErrors {
+                    return IssueSearchResult(issues: issues, incomplete: true, truncated: false, degraded: false)
+                }
+                guard page.hasNextPage, let next = page.endCursor else {
+                    return IssueSearchResult(issues: issues, incomplete: false, truncated: false, degraded: false)
+                }
+                cursor = next
+            }
+            return IssueSearchResult(issues: issues, incomplete: true, truncated: true, degraded: false)
         } catch GitHubAPIError.serverError {
             try await Task.sleep(nanoseconds: 750_000_000)
-            return try await searchIssuesPage(query: query, token: token, myLogin: myLogin,
-                                              first: Self.searchPageSizeDegraded, degraded: true)
+            let page = try await searchIssuesPage(query: query, token: token, myLogin: myLogin,
+                                                  first: Self.searchPageSizeDegraded, after: nil)
+            return IssueSearchResult(issues: page.issues, incomplete: true, truncated: false, degraded: true)
         }
     }
 
+    private struct IssueSearchPage {
+        let issues: [IssueSnapshot]
+        let hasErrors: Bool
+        let hasNextPage: Bool
+        let endCursor: String?
+    }
+
     private func searchIssuesPage(query: String, token: String, myLogin: String,
-                                  first: Int, degraded: Bool) async throws -> IssueSearchResult {
-        let data = try await postGraphQL(Self.issueSearchDocument,
-                                         variables: ["q": query, "first": first], token: token)
+                                  first: Int, after: String?) async throws -> IssueSearchPage {
+        var variables: [String: Any] = ["q": query, "first": first]
+        if let after { variables["after"] = after }
+        let data = try await postGraphQL(Self.issueSearchDocument, variables: variables, token: token)
         let decoded = try decodeGraphQL(IssueSearchResponse.self, from: data)
         let hasErrors = !(decoded.errors ?? []).isEmpty
         if (decoded.errors ?? []).containsForbidden { throw GitHubAPIError.unauthorized }
@@ -1922,10 +1953,9 @@ extension GitHubClient {
         }
         let nodes = (search.nodes ?? []).compactMap { $0 }
         let issues = nodes.compactMap { Self.makeIssueSnapshot(from: $0, myLogin: myLogin) }
-        let total = search.issueCount ?? issues.count
-        // A subset when: reduced page, partial errors, or more matches than one page holds.
-        let incomplete = degraded || hasErrors || total > nodes.count
-        return IssueSearchResult(issues: issues, incomplete: incomplete, degraded: degraded)
+        return IssueSearchPage(issues: issues, hasErrors: hasErrors,
+                               hasNextPage: search.pageInfo?.hasNextPage ?? false,
+                               endCursor: search.pageInfo?.endCursor)
     }
 
     private static func parseIssueDate(_ raw: String?) -> Date {

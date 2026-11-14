@@ -83,7 +83,10 @@ final class IssueStore: ObservableObject {
         let myLogin = settings.githubUsername
         guard !myLogin.isEmpty else { return }
 
+        // `incomplete`: carry previous issues forward. `failed`: a fetch failed or came back
+        // partial, which (unlike a cap-only truncation) must not end first-run seeding.
         var incomplete = false
+        var failed = false
         var involved: [IssueSnapshot] = []
         var broad: [IssueSnapshot] = []
 
@@ -91,8 +94,10 @@ final class IssueStore: ObservableObject {
             let r = try await client.searchIssues(query: Self.involvesQuery, token: token, myLogin: myLogin)
             involved = r.issues
             incomplete = incomplete || r.incomplete
+            failed = failed || (r.incomplete && !r.truncated)
         } catch {
             incomplete = true
+            failed = true
         }
 
         let targets = settings.issueAllTargets
@@ -101,8 +106,10 @@ final class IssueStore: ObservableObject {
                 let r = try await client.searchIssues(query: query, token: token, myLogin: myLogin)
                 broad.append(contentsOf: r.issues)
                 incomplete = incomplete || r.incomplete
+                failed = failed || (r.incomplete && !r.truncated)
             } catch {
                 incomplete = true
+                failed = true
             }
         }
 
@@ -141,11 +148,12 @@ final class IssueStore: ObservableObject {
         baseline = updated
         issues = Self.sorted(next)
 
-        // First run seeds silently. Seeding finishes only on a COMPLETE poll: a partial or
-        // failed first fetch must not end it (or be persisted as the baseline), or the
-        // issues it missed would all notify as new on the next poll.
+        // First run seeds silently. Seeding finishes only on a poll with no failed or partial
+        // fetch: such a first fetch must not end it (or be persisted as the baseline), or the
+        // issues it missed would all notify as new on the next poll. A search cut short only
+        // by the page cap still seeds, or a user past the cap would never finish seeding.
         let seeding = !hadPersistedHistory && !didRunFirstUpdate
-        if seeding && incomplete {
+        if seeding && failed {
             pruneUnread()
             TelemetryService.shared.recordIssuePoll(observed: next.count, carriedForward: carriedCount)
             return
