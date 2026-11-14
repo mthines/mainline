@@ -92,6 +92,14 @@ final class IssueStore: ObservableObject {
         var failed = false
         var involved: [IssueSnapshot] = []
         var broad: [IssueSnapshot] = []
+        let pollStart = Date()
+        // Failures were silent: a first run whose queries keep failing never finishes seeding,
+        // and nothing showed it. Same counter the PR poll uses, own query type.
+        func recordFailure(_ error: Error) {
+            TelemetryService.shared.recordPollFailed(
+                queryType: "issues", error: (error as? GitHubAPIError) ?? .unknown(0),
+                duration: Date().timeIntervalSince(pollStart))
+        }
 
         do {
             let r = try await client.searchIssues(query: Self.involvesQuery, token: token, myLogin: myLogin)
@@ -99,6 +107,7 @@ final class IssueStore: ObservableObject {
             incomplete = incomplete || r.incomplete
             failed = failed || (r.incomplete && !r.truncated)
         } catch {
+            recordFailure(error)
             incomplete = true
             failed = true
         }
@@ -111,6 +120,7 @@ final class IssueStore: ObservableObject {
                 incomplete = incomplete || r.incomplete
                 failed = failed || (r.incomplete && !r.truncated)
             } catch {
+                recordFailure(error)
                 incomplete = true
                 failed = true
             }
