@@ -80,10 +80,10 @@ Choose the metric in **Settings** → **Menu Bar**.
 | Metric            | Counts                                             |
 | ----------------- | ------------------------------------------------- |
 | **Total Open**    | All open PRs (default).                            |
-| **Needs attention** | PRs in the Needs attention group.               |
+| **Needs attention** | PRs that need your time (blocked on you, or ready for your review), plus issues that need you. |
 | **Failing CI**    | Open PRs with failing or errored CI.              |
 | **Review Requests** | PRs where you're a requested reviewer.          |
-| **Unread**        | PRs you haven't looked at yet.                    |
+| **Unread**        | PRs and issues you haven't looked at yet.         |
 
 The icon changes with severity: a neutral dot for a normal count, an orange circle when PRs need attention, and a warning triangle when something is blocking.
 

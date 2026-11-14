@@ -961,8 +961,9 @@ final class PRManager: ObservableObject {
             .sorted(by: PRSnapshot.triageOrder)
     }
 
-    /// Count of PRs that need attention. Single source of truth for the badge's
-    /// `.needsAHuman` metric.
+    /// PRs that need my time plus issues that need my time (the latter only when the
+    /// badge is global or the Inbox/Issues tab is selected). Single source of truth
+    /// for the badge's `.needsAHuman` metric.
     var needsAttentionCount: Int { needsAttentionPRs.count + issueNeedsMyTimeCount }
 
     /// Whether the badge covers issues: always when global, else only on the tabs that show them.
