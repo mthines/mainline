@@ -336,8 +336,11 @@ struct TriageDeckView: View {
                 searchActive: searchActive || manager.promptPickerTarget != nil || manager.commentPickerTarget != nil
             )
         )
-        .onAppear { installScrollMonitor() }
+        .onAppear { installScrollMonitor(); publishKeyFocus() }
         .onDisappear { removeScrollMonitor() }
+        // Keep the footer legend on the row the keyboard is actually on.
+        .onChange(of: selectedIndex) { _ in publishKeyFocus() }
+        .onChange(of: selectedIssueIndex) { _ in publishKeyFocus() }
         // Opening search, switching to/from the flat results, or changing the query
         // focuses the top row, so a stale index can't point off-screen or off the set
         // (Down from the field must land on row 0).
@@ -2014,6 +2017,20 @@ struct TriageDeckView: View {
     }
 
     // MARK: - Focused PR
+
+    /// Tells the footer legend what kind of row is focused. Called from selection changes
+    /// only (never from `body`), so it costs one `focusedPR` lookup per keypress.
+    private func publishKeyFocus() {
+        var state = KeyFocusState()
+        if selectedIssueIndex != nil {
+            state.kind = .issue
+        } else if let pr = focusedPR {
+            state.kind = .pr
+            state.prReadyToMerge = pr.readyToMerge
+            state.prHasPreview = !(pr.vercelPreviewUrl ?? "").isEmpty
+        }
+        if manager.keyFocus.deck != state { manager.keyFocus.deck = state }
+    }
 
     private var focusedPR: PRSnapshot? {
         // Focus is on an Inbox issue row: no PR is focused, so every PR verb no-ops.

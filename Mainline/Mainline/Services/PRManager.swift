@@ -386,6 +386,9 @@ final class PRManager: ObservableObject {
     let settings:       MainlineSettings
     let snoozeStore:    SnoozeStore
     let scopeStore:     ScopeStore
+    /// Which kind of row the keyboard is on (drives the footer legend). Its own object so
+    /// moving the highlight re-renders only the legend.
+    let keyFocus = KeyFocusStore()
     /// GitHub issues: fetch, baseline, unread. One instance serves the Issues tab and the Inbox group.
     let issueStore:     IssueStore
 

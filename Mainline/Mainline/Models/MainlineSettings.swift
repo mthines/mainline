@@ -146,6 +146,100 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+// MARK: - Key hints (the footer legend)
+
+/// What the keyboard is acting on right now. The legend lists only the keys that apply.
+struct KeyFocusState: Equatable {
+    enum Kind: Equatable { case none, pr, issue }
+    var kind: Kind = .none
+    var prReadyToMerge = false
+    var prHasPreview = false
+    var issueArchived = false
+}
+
+struct KeyHint: Equatable {
+    let glyph: String
+    let label: String
+    var text: String { "\(glyph) \(label)" }
+}
+
+/// The single place that decides which keys the legend shows. Pure: glyphs come from the
+/// LIVE bindings (never stale), unbound shortcuts are skipped, and a verb that cannot act
+/// on the focused row (merge on an unmergeable PR, preview on a PR with none, PR verbs on
+/// an issue) is not offered.
+enum KeyHints {
+    static func hints(for focus: KeyFocusState, tab: ReviewTab, writeActionsEnabled: Bool,
+                      bindings b: InAppShortcutBindings) -> [KeyHint] {
+        func glyph(_ shortcut: InAppShortcut) -> String? {
+            let binding = b.binding(for: shortcut)
+            return binding.key.isEmpty ? nil : MainlineSettings.glyph(for: binding)
+        }
+        var out: [KeyHint] = []
+        func add(_ shortcut: InAppShortcut, _ label: String) {
+            if let g = glyph(shortcut) { out.append(KeyHint(glyph: g, label: label)) }
+        }
+        if let down = glyph(.navigateDown), let up = glyph(.navigateUp) {
+            out.append(KeyHint(glyph: "\(down)/\(up)", label: "move"))
+        }
+        switch focus.kind {
+        case .issue:
+            out.append(KeyHint(glyph: "↵", label: "open"))
+            add(.markSeen, "seen")
+            add(.dismiss, focus.issueArchived ? "restore" : "archive")
+            add(.toggleMute, "mute")
+            add(.copyBranch, "copy link")
+        case .pr:
+            add(.peek, "peek")
+            out.append(KeyHint(glyph: "↵", label: "open"))
+            add(.search, "find")
+            add(.togglePin, "pin")
+            add(.runPrompt, "agent")
+            if writeActionsEnabled { add(.addComment, "comment") }
+            if focus.prHasPreview { add(.openPreview, "preview") }
+            if focus.prReadyToMerge { add(.merge, "merge") }
+            add(.snooze, "later")
+            if tab == .inbox { add(.toggleMute, "mute") }
+            add(.undo, "undo")
+        case .none:
+            add(.search, "find")
+        }
+        out.append(KeyHint(glyph: "right-click ▸", label: "all"))
+        return out
+    }
+}
+
+/// Where the focused row publishes its kind. Its own object (not `PRManager`) so a J/K
+/// press re-renders only the legend, never the deck.
+@MainActor
+final class KeyFocusStore: ObservableObject {
+    @Published var deck = KeyFocusState()
+    @Published var issues = KeyFocusState()
+}
+
+#if DEBUG
+enum KeyHintChecks {
+    static func run() {
+        let b = InAppShortcutBindings.defaults
+        func labels(_ f: KeyFocusState, tab: ReviewTab = .inbox, write: Bool = false) -> [String] {
+            KeyHints.hints(for: f, tab: tab, writeActionsEnabled: write, bindings: b).map(\.label)
+        }
+        let issue = labels(KeyFocusState(kind: .issue))
+        assert(issue == ["move", "open", "seen", "archive", "mute", "copy link", "all"], "issue legend: \(issue)")
+        assert(labels(KeyFocusState(kind: .issue, issueArchived: true)).contains("restore"), "archived issue offers restore")
+        let plain = labels(KeyFocusState(kind: .pr))
+        assert(!plain.contains("merge") && !plain.contains("preview") && !plain.contains("comment"),
+               "merge/preview/comment are offered only when they can act: \(plain)")
+        let full = labels(KeyFocusState(kind: .pr, prReadyToMerge: true, prHasPreview: true), write: true)
+        assert(full.contains("merge") && full.contains("preview") && full.contains("comment"), "state-gated verbs appear")
+        assert(!labels(KeyFocusState(kind: .pr), tab: .forMe).contains("mute"), "mute is an Inbox verb")
+        assert(!plain.contains("archive") && !issue.contains("merge"), "verbs never cross row kinds")
+        assert(KeyHints.hints(for: KeyFocusState(kind: .issue), tab: .issues, writeActionsEnabled: false, bindings: b)
+                .first?.glyph == "\(MainlineSettings.glyph(for: b.binding(for: .navigateDown)))/\(MainlineSettings.glyph(for: b.binding(for: .navigateUp)))",
+               "move glyph follows the bindings")
+    }
+}
+#endif
+
 // MARK: - ShortcutBinding
 
 /// A per-action binding: one base key character plus an optional modifier set.

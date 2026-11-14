@@ -52,6 +52,33 @@ extension View {
     }
 }
 
+// MARK: - Footer legend
+
+/// The always-visible key strip. It lists only what the focused row can do, so it stays
+/// short as verbs are added instead of truncating (see `KeyHints`).
+struct KeyboardLegend: View {
+    @ObservedObject var store: KeyFocusStore
+    @ObservedObject var settings: MainlineSettings
+
+    var body: some View {
+        let focus = settings.selectedTab == .issues ? store.issues : store.deck
+        let hints = KeyHints.hints(for: focus, tab: settings.selectedTab,
+                                   writeActionsEnabled: settings.writeActionsEnabled,
+                                   bindings: settings.shortcutBindings)
+        HStack(spacing: 0) {
+            Text(hints.map(\.text).joined(separator: "   ·   "))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+}
+
 // MARK: - Watch-level menu items
 
 /// The three watch levels for one repo (current one checked), plus an org-wide action.
@@ -315,7 +342,19 @@ struct IssuesView: View {
         .background(KeyCaptureView(handler: { handleKey($0, order: order) }, onDismiss: {}))
         .onChange(of: order.map(\.nodeId)) { ids in
             if selectedIndex >= ids.count { selectedIndex = max(ids.count - 1, 0) }
+            publishKeyFocus(order: order)
         }
+        .onChange(of: selectedIndex) { _ in publishKeyFocus(order: order) }
+        .onAppear { publishKeyFocus(order: order) }
+    }
+
+    private func publishKeyFocus(order: [IssueSnapshot]) {
+        var state = KeyFocusState()
+        if selectedIndex < order.count {
+            state.kind = .issue
+            state.issueArchived = manager.issueStore.isArchived(order[selectedIndex])
+        }
+        if manager.keyFocus.issues != state { manager.keyFocus.issues = state }
     }
 
     static func sections(_ issues: [IssueSnapshot], myLogin: String,
