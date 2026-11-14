@@ -16,6 +16,9 @@ final class IssueStore: ObservableObject {
     private var baseline: [String: IssueSnapshot] = [:]
     private var hadPersistedHistory = false
     private var didRunFirstUpdate = false
+    /// Lowercased repos that were Off at the last poll. Their issues never reach the baseline,
+    /// so a repo switched back on is seeded for one poll instead of re-announcing everything.
+    private var offRepos: Set<String> = []
 
     private let settings: MainlineSettings
     private let notifications: NotificationService
@@ -139,9 +142,14 @@ final class IssueStore: ObservableObject {
         }
         let next = carriedIssues.filter { settings.issueWatchLevel(forRepo: $0.repoFullName) != .off }
 
+        let seedRepos = offRepos.filter { settings.issueWatchLevel(forRepo: $0) != .off }
+        offRepos = offRepos.union((involved + broad).map { $0.repoFullName.lowercased() })
+            .filter { settings.issueWatchLevel(forRepo: $0) == .off }
+
         let transitions = IssueDiffEngine.diff(
             previous: baseline, next: next, myLogin: myLogin,
-            watchLevel: { [settings] in settings.issueWatchLevel(forRepo: $0) }, now: Date())
+            watchLevel: { [settings] in settings.issueWatchLevel(forRepo: $0) },
+            seedRepos: seedRepos, now: Date())
 
         var updated: [String: IssueSnapshot] = [:]
         for issue in next { updated[issue.nodeId] = issue }

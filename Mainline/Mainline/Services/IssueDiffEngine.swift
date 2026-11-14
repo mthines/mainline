@@ -38,14 +38,17 @@ enum IssueDiffEngine {
     /// switched from Off to All issues from announcing its whole backlog).
     static let newIssueMaxAge: TimeInterval = 3 * 24 * 3600
 
-    /// Pure diff. `watchLevel` resolves a repo's level. Never yields anything for an Off repo.
+    /// Pure diff. `watchLevel` resolves a repo's level. Never yields anything for an Off repo,
+    /// nor for a repo in `seedRepos` (lowercased names): one switched on from Off has no baseline,
+    /// so its existing assignments and mentions are seeded silently rather than announced.
     static func diff(previous: [String: IssueSnapshot], next: [IssueSnapshot], myLogin: String,
-                     watchLevel: (String) -> IssueWatchLevel, now: Date) -> [IssueTransition] {
+                     watchLevel: (String) -> IssueWatchLevel, seedRepos: Set<String> = [],
+                     now: Date) -> [IssueTransition] {
         guard !myLogin.isEmpty else { return [] }
         var out: [IssueTransition] = []
         for issue in next {
             let level = watchLevel(issue.repoFullName)
-            if level == .off { continue }
+            if level == .off || seedRepos.contains(issue.repoFullName.lowercased()) { continue }
             let old = previous[issue.nodeId]
 
             if issue.isAuthored(by: myLogin) {
@@ -141,6 +144,14 @@ enum IssueDiffChecks {
                "my own comment is not a reply")
         assert(IssueDiffEngine.diff(previous: ["o": replied], next: [replied], myLogin: me, watchLevel: mine, now: now).isEmpty,
                "an already-seen reply is silent")
+
+        // A repo switched on from Off has no baseline: its existing assignments seed silently.
+        assert(IssueDiffEngine.diff(previous: [:], next: [assigned, mentioned], myLogin: me, watchLevel: mine,
+                                    seedRepos: ["acme/app"], now: now).isEmpty,
+               "a repo re-enabled from Off seeds silently")
+        assert(IssueDiffEngine.diff(previous: [:], next: [mk("x", repo: "acme/other", assignees: ["mads"])], myLogin: me,
+                                    watchLevel: mine, seedRepos: ["acme/app"], now: now).map(\.kind) == ["assigned"],
+               "seeding one repo leaves the others notifying")
 
         let kept = IssueDiffEngine.carryingForward(fetched: [], previous: ["a": a], incomplete: true)
         assert(kept.issues.count == 1 && kept.carried == 1, "incomplete fetch carries previous issues forward")
