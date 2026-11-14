@@ -111,3 +111,7 @@ Drag **Background opacity** in **Settings** → **Appearance** → **Panel** tow
 **Translucent**, leaves the stock frosted-glass look untouched; anything in
 between is a partial wash, so you can keep some of the translucency and still
 read the list.
+
+## Issues tab
+
+The Issues tab appears once a repo is set to All issues or any issue is loaded. Sections: Needs you, Assigned, Waiting on reporter, and a collapsed Muted group. The Inbox can also show new issues (setting "Show new issues in Inbox").

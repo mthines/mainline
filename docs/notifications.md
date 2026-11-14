@@ -58,3 +58,7 @@ Mainline stores it as a per-event table and falls back to the built-in defaults 
 Notifications use deterministic IDs, one per PR per event.
 A rapid second poll replaces the existing banner rather than stacking a duplicate.
 See [Architecture → Notifications](./architecture.md#notifications) for the internals.
+
+## Issue notifications
+
+Issues add four events under Issues: new issue, assigned to you, mentioned, and new reply. Each is on by default. Muted issues never notify. See "Show new issues in Inbox" in [settings](settings.md) for how issues reach the Inbox.

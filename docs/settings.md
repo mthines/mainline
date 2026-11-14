@@ -131,3 +131,9 @@ The same logic is documented in [The panel](./the-panel.md).
 Non-secret settings live in macOS `UserDefaults` under the `com.mainline.github-pr-notifier` bundle.
 Your GitHub token is the one exception — it's stored in the Keychain, never in `UserDefaults`.
 For the full list of `UserDefaults` keys and their types, see [`../CLAUDE.md`](../CLAUDE.md#userdefaults-keys).
+
+## Issues
+
+The Issues tab follows GitHub issues. Pick a level per organization or repository in Settings → Issues (or right-click a repo chip): **All issues**, **Only mine** (default; issues you opened, are assigned, mentioned in, or replied to), or **Off**.
+
+Turn on **Show new issues in Inbox** to see up to three new issues in the Inbox; the rest show as "new issues → Issues tab". The first poll only records a baseline and sends no notifications.
