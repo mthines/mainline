@@ -587,7 +587,7 @@ struct MenuBarView: View {
                 }
             }
         )) {
-            ForEach(ReviewTab.allCases) { tab in
+            ForEach(visibleTabs) { tab in
                 Text(tabLabel(for: tab)).tag(tab)
             }
         }
@@ -597,8 +597,22 @@ struct MenuBarView: View {
         .padding(.vertical, 8)
     }
 
+    /// Issues is not a PR tab: it appears only when there is something to follow, i.e.
+    /// some repo/org is at "All issues" or any issue is currently tracked. It stays visible
+    /// while selected so the picker never loses the active tab.
+    private var visibleTabs: [ReviewTab] {
+        let showIssues = settings.hasAllIssuesRepo
+            || !manager.issueStore.issues.isEmpty
+            || settings.selectedTab == .issues
+        return ReviewTab.allCases.filter { $0 != .issues || showIssues }
+    }
+
+    /// Issues tab count = unread issues (one set, shared with the Inbox group).
+    private var issuesUnreadCount: Int { manager.issueStore.unreadIds.count }
+
     private func tabLabel(for tab: ReviewTab) -> String {
         switch tab {
+        case .issues:  return issuesUnreadCount > 0 ? "Issues (\(issuesUnreadCount))" : tab.title
         case .forMe:   return forMeCount > 0   ? "For me (\(forMeCount))"     : tab.title
         case .created: return createdCount > 0 ? "Created (\(createdCount))" : tab.title
         case .inbox:   return inboxCount > 0   ? "Inbox (\(inboxCount))"      : tab.title
@@ -812,11 +826,13 @@ struct MenuBarView: View {
         // While searching, always render the deck (with a query it shows its own
         // "No matching PRs" state) so a valid match isn't hidden by the tab-level
         // empty short-circuit.
-        let isEmpty = !manager.hasToken || (!manager.searchActive && (
-            settings.selectedTab == .inbox
-                ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty
-                : manager.prs.isEmpty
-        ))
+        let isEmpty = !manager.hasToken || (settings.selectedTab == .issues
+            ? manager.issueStore.issues.isEmpty
+            : (!manager.searchActive && (
+                settings.selectedTab == .inbox
+                    ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty
+                    : manager.prs.isEmpty
+            )))
         if isEmpty {
             emptyState
         } else {
@@ -840,6 +856,9 @@ struct MenuBarView: View {
     @ViewBuilder
     private var bodyContent: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if settings.selectedTab == .issues {
+                IssuesView(manager: manager, settings: settings)
+            } else {
             // The keyboard-navigable triage deck, grouped into collapsible
             // actionability sections, scoped to the selected tab. Its
             // "Needs attention" group (`ActionGroup.needsAttention`) is the single
@@ -854,6 +873,7 @@ struct MenuBarView: View {
                 manager: manager,
                 settings: settings
             )
+            }
         }
     }
 
@@ -923,6 +943,7 @@ struct MenuBarView: View {
         case .forMe:   return "Nothing to review"
         case .created: return "No PRs created"
         case .inbox:   return "Inbox clear"
+        case .issues:  return "No issues to follow"
         }
     }
 

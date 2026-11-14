@@ -286,7 +286,7 @@ struct TriageDeckView: View {
             } else if inboxMode {
                 // Inbox view: role sections ("Needs your review" / "Your PRs") +
                 // a collapsed "Muted / low-priority" group at the bottom.
-                if inboxSections.isEmpty && mutedPRs.isEmpty {
+                if inboxSections.isEmpty && mutedPRs.isEmpty && !hasInboxIssues {
                     emptyState
                 } else {
                     inboxList
@@ -663,10 +663,112 @@ struct TriageDeckView: View {
                     )
                 }
             }
+            // Issues rank after blocked PRs and reviews, before the Muted group.
+            inboxIssuesGroup
             if !mutedPRs.isEmpty {
                 mutedGroupView
             }
         }
+    }
+
+    // MARK: Inbox issue group
+
+    /// Most issue rows the Inbox group shows before collapsing the rest into "+N more".
+    private static let inboxIssueCap = 3
+
+    private var inboxIssueSelection: IssueClassifier.InboxSelection {
+        IssueClassifier.inboxItems(
+            manager.issueStore.issues, myLogin: settings.githubUsername,
+            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox)
+    }
+
+    private var hasInboxIssues: Bool {
+        let selection = inboxIssueSelection
+        return !selection.items.isEmpty || selection.hiddenNew > 0
+    }
+
+    private var inboxIssuesExpansion: Binding<Bool> {
+        let key = "inbox:issues"
+        return Binding(
+            get: { !settings.collapsedSectionsRaw.contains(key) },
+            set: { expanded in
+                var raw = settings.collapsedSectionsRaw
+                if expanded {
+                    raw.removeAll { $0 == key }
+                } else if !raw.contains(key) {
+                    raw.append(key)
+                }
+                settings.collapsedSectionsRaw = raw
+            }
+        )
+    }
+
+    /// Issues in the Inbox: assigned, mentions and replies always; new issues from
+    /// All-issues repos only with "Show new issues in Inbox" (otherwise one line that
+    /// points at the Issues tab). Reads the SAME unread set as the Issues tab.
+    @ViewBuilder
+    private var inboxIssuesGroup: some View {
+        let selection = inboxIssueSelection
+        if !selection.items.isEmpty || selection.hiddenNew > 0 {
+            let expansion = inboxIssuesExpansion
+            let shown = Array(selection.items.prefix(Self.inboxIssueCap))
+            let extra = selection.items.count - shown.count
+            Button {
+                expansion.wrappedValue.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Issues")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.primary)
+                    Text("\(selection.items.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
+                    Spacer()
+                    Image(systemName: expansion.wrappedValue ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, RowMetrics.horizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expansion.wrappedValue {
+                ForEach(shown) { issue in
+                    IssueRowView(issue: issue, isUnread: manager.issueStore.isUnread(issue.nodeId),
+                                 isMuted: false, manager: manager, settings: settings)
+                }
+                if extra > 0 {
+                    inboxIssueLink("+\(extra) more")
+                }
+                if selection.hiddenNew > 0 {
+                    inboxIssueLink(selection.hiddenNew == 1
+                                   ? "1 new issue → Issues tab"
+                                   : "\(selection.hiddenNew) new issues → Issues tab")
+                }
+            }
+        }
+    }
+
+    private func inboxIssueLink(_ text: String) -> some View {
+        Button {
+            settings.selectedTab = .issues
+        } label: {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, RowMetrics.horizontalPadding)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func inboxRolePRs(for role: InboxRole) -> [PRSnapshot] {
