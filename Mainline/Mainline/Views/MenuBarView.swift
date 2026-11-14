@@ -821,6 +821,15 @@ struct MenuBarView: View {
     /// it via `BodyHeightKey`; `onPreferenceChange` stores it in `measuredBodyHeight`.
     /// The `.frame(height:)` uses `scrollRegionHeight`, which is guarded finite and
     /// clamped — no NaN/∞/negative can reach the hosting view.
+    /// Whether the Inbox's issue group has anything to show — the same selection
+    /// `TriageDeckView` renders, so an Inbox with issues but no PRs isn't "empty".
+    private var hasInboxIssues: Bool {
+        let selection = IssueClassifier.inboxItems(
+            manager.issueStore.issues, myLogin: settings.githubUsername,
+            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox)
+        return !selection.items.isEmpty || selection.hiddenNew > 0
+    }
+
     @ViewBuilder
     private var scrollableBody: some View {
         // While searching, always render the deck (with a query it shows its own
@@ -830,7 +839,7 @@ struct MenuBarView: View {
             ? manager.issueStore.issues.isEmpty
             : (!manager.searchActive && (
                 settings.selectedTab == .inbox
-                    ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty
+                    ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty && !hasInboxIssues
                     : manager.prs.isEmpty
             )))
         if isEmpty {

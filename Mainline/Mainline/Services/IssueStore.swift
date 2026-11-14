@@ -118,7 +118,19 @@ final class IssueStore: ObservableObject {
 
         let carry = IssueDiffEngine.carryingForward(fetched: Array(merged.values), previous: baseline,
                                                     incomplete: incomplete)
-        let next = carry.issues.filter { settings.issueWatchLevel(forRepo: $0.repoFullName) != .off }
+        var carriedIssues = carry.issues
+        var carriedCount = carry.carried
+        if carry.carried > 0 {
+            // Vet what was carried blind: an issue closed since it was last seen must not
+            // linger, since an `is:open` search can never return it to clear it.
+            let carriedIds = carry.issues.map(\.nodeId).filter { merged[$0] == nil }
+            if let states = try? await client.fetchIssueStates(nodeIds: carriedIds, token: token) {
+                let closed = Set(carriedIds.filter { states[$0] == "CLOSED" })
+                carriedIssues.removeAll { closed.contains($0.nodeId) }
+                carriedCount -= closed.count
+            }
+        }
+        let next = carriedIssues.filter { settings.issueWatchLevel(forRepo: $0.repoFullName) != .off }
 
         let transitions = IssueDiffEngine.diff(
             previous: baseline, next: next, myLogin: myLogin,
@@ -128,17 +140,25 @@ final class IssueStore: ObservableObject {
         for issue in next { updated[issue.nodeId] = issue }
         baseline = updated
         issues = Self.sorted(next)
-        persist(updated)
 
-        let suppress = !hadPersistedHistory && !didRunFirstUpdate
+        // First run seeds silently. Seeding finishes only on a COMPLETE poll: a partial or
+        // failed first fetch must not end it (or be persisted as the baseline), or the
+        // issues it missed would all notify as new on the next poll.
+        let seeding = !hadPersistedHistory && !didRunFirstUpdate
+        if seeding && incomplete {
+            pruneUnread()
+            TelemetryService.shared.recordIssuePoll(observed: next.count, carriedForward: carriedCount)
+            return
+        }
         didRunFirstUpdate = true
-        if !suppress {
+        persist(updated)
+        if !seeding {
             notifications.fireIssueTransitions(transitions, settings: settings)
-            markUnread(transitions.map { $0.issue.nodeId })
+            markUnread(transitions.filter { settings.level(for: $0.event) != .off }.map { $0.issue.nodeId })
         }
         pruneUnread()
 
-        TelemetryService.shared.recordIssuePoll(observed: next.count, carriedForward: carry.carried)
+        TelemetryService.shared.recordIssuePoll(observed: next.count, carriedForward: carriedCount)
     }
 
     // MARK: - Unread / mute (one set serves the Issues tab and the Inbox)

@@ -526,6 +526,22 @@ final class GitHubClient {
         return states
     }
 
+    /// The current state (`OPEN` / `CLOSED`) of each issue, keyed by node id —
+    /// used to vet issues `IssueStore` is about to carry forward after an
+    /// incomplete fetch, so a closed issue doesn't linger forever. An id GitHub
+    /// can't resolve is ABSENT: unknown is never read as closed.
+    func fetchIssueStates(nodeIds: [String], token: String) async throws -> [String: String] {
+        var states: [String: String] = [:]
+        for chunk in Self.chunked(nodeIds, size: Self.nodesPerRequest) {
+            let data = try await postGraphQL(Self.issueStatesQueryDocument, variables: ["ids": chunk], token: token)
+            let decoded = try decodeGraphQL(GraphQLNodeStatesResponse.self, from: data)
+            for case let node? in decoded.data?.nodes ?? [] {
+                if let id = node.id, let state = node.state { states[id] = state }
+            }
+        }
+        return states
+    }
+
     private static func chunked(_ ids: [String], size: Int) -> [[String]] {
         stride(from: 0, to: ids.count, by: size).map { Array(ids[$0..<min($0 + size, ids.count)]) }
     }
@@ -1102,6 +1118,15 @@ final class GitHubClient {
     query($ids: [ID!]!) {
       nodes(ids: $ids) {
         ... on PullRequest { id state }
+      }
+    }
+    """
+
+    /// Just the state of a set of issues — see `fetchIssueStates`.
+    private static let issueStatesQueryDocument = """
+    query($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Issue { id state }
       }
     }
     """
