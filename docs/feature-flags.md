@@ -63,7 +63,7 @@ experiment: FlagExperiment(enabled: true, arms: [
 ])
 ```
 
-To ramp, raise the `on` weight in a later release (10, 50, 100). A Mac's bucket is stable, so Macs already on `on` stay on it as the weight grows. Setting `enabled: false` returns everyone to `defaultVariant` without deleting the arms.
+To ramp, raise the `on` weight in a later release (10, 50, 100). A Mac's bucket is stable, so Macs already on `on` stay on it as the weight grows. That holds only while the arm order stays the same between releases and the ramped arm is the last one: reordering arms, or raising a middle arm of an A/B/n split, moves Macs between arms. Setting `enabled: false` returns everyone to `defaultVariant` without deleting the arms.
 
 Bucketing is `FNV-1a-32(utf16("<flagKey>:<targetingKey>")) % 100`, then a walk of cumulative weights. The hash covers UTF-16 code units and uses wrapping multiplication, so it matches LoreKit byte for byte. The targeting key is `TelemetryService.anonymousUserId()`, the same value sent as `enduser.id`, so an arm joins to existing telemetry. It is computed only when an enabled experiment needs it. The key is a hash of the hardware UUID, stable per Mac.
 

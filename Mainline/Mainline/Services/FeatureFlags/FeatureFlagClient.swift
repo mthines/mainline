@@ -24,7 +24,7 @@ final class FeatureFlagClient {
     init(
         registry: [FlagDefinition] = FeatureFlagClient.validRegistry(FeatureFlagRegistry.flags),
         overrides: @escaping () -> [String: String] = { MainlineSettings.shared.featureFlagOverrides },
-        targetingKey: @escaping () -> String? = { TelemetryService.anonymousUserId() },
+        targetingKey: @escaping () -> String? = { FeatureFlagClient.deviceTargetingKey },
         record: @escaping (FlagResolution) -> Void = FeatureFlagClient.recordToTelemetry
     ) {
         self.registry = registry
@@ -33,6 +33,10 @@ final class FeatureFlagClient {
         self.record = record
     }
 
+    /// The device id is an IOKit lookup plus an HMAC, and a flag can be evaluated on every
+    /// SwiftUI render; a lazy `static let` computes it once, on first need.
+    private static let deviceTargetingKey: String? = TelemetryService.anonymousUserId()
+
     /// An invalid registry is a programming error: DEBUG asserts loudly (and
     /// `FeatureFlagChecks` validates the shipped registry on every dev launch); a release
     /// build keeps only the definitions that pass, so one bad entry cannot crash the app.
@@ -40,7 +44,9 @@ final class FeatureFlagClient {
         let errors = FeatureFlagRegistry.validate(defs)
         assert(errors.isEmpty, "Invalid feature-flag registry: \(errors.joined(separator: "; "))")
         if errors.isEmpty { return defs }
-        return defs.filter { FeatureFlagRegistry.validate([$0]).isEmpty }
+        // Checking each definition alone cannot see a duplicate key, so keep the first only.
+        var seen = Set<String>()
+        return defs.filter { FeatureFlagRegistry.validate([$0]).isEmpty && seen.insert($0.key).inserted }
     }
 
     static func recordToTelemetry(_ resolution: FlagResolution) {
