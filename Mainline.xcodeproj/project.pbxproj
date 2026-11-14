@@ -56,6 +56,14 @@
 		PC000000000000000000A903 /* PromptPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A903 /* PromptPickerView.swift */; };
 		PC000000000000000000A904 /* PromptsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A904 /* PromptsSettingsView.swift */; };
 		PX000000000000000000000B1 /* PRListExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = PX000000000000000000000A1 /* PRListExport.swift */; };
+		PC0000000000000000FF0001 /* FeatureFlagSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0001 /* FeatureFlagSchema.swift */; };
+		PC0000000000000000FF0002 /* FeatureFlagRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0002 /* FeatureFlagRegistry.swift */; };
+		PC0000000000000000FF0003 /* FeatureFlagBucketing.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0003 /* FeatureFlagBucketing.swift */; };
+		PC0000000000000000FF0004 /* FeatureFlagProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0004 /* FeatureFlagProvider.swift */; };
+		PC0000000000000000FF0005 /* FeatureFlagAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0005 /* FeatureFlagAccess.swift */; };
+		PC0000000000000000FF0006 /* FeatureFlagClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0006 /* FeatureFlagClient.swift */; };
+		PC0000000000000000FF0007 /* FeatureFlagChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0007 /* FeatureFlagChecks.swift */; };
+		PC0000000000000000FF0008 /* DeveloperSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0008 /* DeveloperSettingsView.swift */; };
 		PC00000000000000000000E1 /* IssueSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000000E1 /* IssueSnapshot.swift */; };
 		PC00000000000000000000E2 /* IssueDiffEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000000E2 /* IssueDiffEngine.swift */; };
 		PC00000000000000000000E3 /* IssueStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000000E3 /* IssueStore.swift */; };
@@ -112,6 +120,14 @@
 		PF000000000000000000A903 /* PromptPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptPickerView.swift; sourceTree = "<group>"; };
 		PF000000000000000000A904 /* PromptsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptsSettingsView.swift; sourceTree = "<group>"; };
 		PX000000000000000000000A1 /* PRListExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRListExport.swift; sourceTree = "<group>"; };
+		PF0000000000000000FF0001 /* FeatureFlagSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagSchema.swift; sourceTree = "<group>"; };
+		PF0000000000000000FF0002 /* FeatureFlagRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagRegistry.swift; sourceTree = "<group>"; };
+		PF0000000000000000FF0003 /* FeatureFlagBucketing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagBucketing.swift; sourceTree = "<group>"; };
+		PF0000000000000000FF0004 /* FeatureFlagProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagProvider.swift; sourceTree = "<group>"; };
+		PF0000000000000000FF0005 /* FeatureFlagAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagAccess.swift; sourceTree = "<group>"; };
+		PF0000000000000000FF0006 /* FeatureFlagClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagClient.swift; sourceTree = "<group>"; };
+		PF0000000000000000FF0007 /* FeatureFlagChecks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagChecks.swift; sourceTree = "<group>"; };
+		PF0000000000000000FF0008 /* DeveloperSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettingsView.swift; sourceTree = "<group>"; };
 		PF00000000000000000000E1 /* IssueSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueSnapshot.swift; sourceTree = "<group>"; };
 		PF00000000000000000000E2 /* IssueDiffEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDiffEngine.swift; sourceTree = "<group>"; };
 		PF00000000000000000000E3 /* IssueStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueStore.swift; sourceTree = "<group>"; };
@@ -167,6 +183,20 @@
 			path = Models;
 			sourceTree = "<group>";
 		};
+		PG0000000000000000000FF0 /* FeatureFlags */ = {
+			isa = PBXGroup;
+			children = (
+				PF0000000000000000FF0001 /* FeatureFlagSchema.swift */,
+				PF0000000000000000FF0002 /* FeatureFlagRegistry.swift */,
+				PF0000000000000000FF0003 /* FeatureFlagBucketing.swift */,
+				PF0000000000000000FF0004 /* FeatureFlagProvider.swift */,
+				PF0000000000000000FF0005 /* FeatureFlagAccess.swift */,
+				PF0000000000000000FF0006 /* FeatureFlagClient.swift */,
+				PF0000000000000000FF0007 /* FeatureFlagChecks.swift */,
+			);
+			path = FeatureFlags;
+			sourceTree = "<group>";
+		};
 		PG0000000000000000000004 /* Services */ = {
 			isa = PBXGroup;
 			children = (
@@ -194,6 +224,7 @@
 				PF00000000000000000000E2 /* IssueDiffEngine.swift */,
 				PF00000000000000000000E3 /* IssueStore.swift */,
 				PF000000000000000000A901 /* PromptTemplate.swift */,
+				PG0000000000000000000FF0 /* FeatureFlags */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -216,6 +247,7 @@
 				OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */,
 				IB000000000000000000000A2 /* InboxSettingsView.swift */,
 				HP000000000000000000000A1 /* HelpSettingsView.swift */,
+				PF0000000000000000FF0008 /* DeveloperSettingsView.swift */,
 				PF00000000000000000000E4 /* IssuesSettingsView.swift */,
 				PF00000000000000000000E5 /* IssuesView.swift */,
 			);
@@ -328,6 +360,14 @@
 				PC0000000000000000000011 /* TriageClassifier.swift in Sources */,
 				PC0000000000000000000013 /* SnoozeStore.swift in Sources */,
 				PC000000000000000000009A /* StackEngine.swift in Sources */,
+				PC0000000000000000FF0001 /* FeatureFlagSchema.swift in Sources */,
+				PC0000000000000000FF0002 /* FeatureFlagRegistry.swift in Sources */,
+				PC0000000000000000FF0003 /* FeatureFlagBucketing.swift in Sources */,
+				PC0000000000000000FF0004 /* FeatureFlagProvider.swift in Sources */,
+				PC0000000000000000FF0005 /* FeatureFlagAccess.swift in Sources */,
+				PC0000000000000000FF0006 /* FeatureFlagClient.swift in Sources */,
+				PC0000000000000000FF0007 /* FeatureFlagChecks.swift in Sources */,
+				PC0000000000000000FF0008 /* DeveloperSettingsView.swift in Sources */,
 				PC0000000000000000000014 /* MenuBarIconView.swift in Sources */,
 				PC0000000000000000000016 /* TriageDeckView.swift in Sources */,
 				PC0000000000000000000017 /* PRPeekView.swift in Sources */,

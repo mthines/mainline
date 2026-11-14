@@ -188,3 +188,7 @@ products: OpenTelemetryApi, OpenTelemetrySdk, OpenTelemetryProtocolExporterHTTP
 ```
 
 Wired into `Mainline.xcodeproj/project.pbxproj` using `OT000…`-prefixed IDs.
+
+## Feature-flag evaluations
+
+`FeatureFlagClient` records each flag evaluation through `TelemetryService.recordFlagEvaluation` (no-op while telemetry is off): counter `mainline.feature_flag.evaluations` and an info log "Feature flag evaluated" once per distinct (key, variant, reason) per launch. Attributes use OTel's names: `feature_flag.key`, `feature_flag.result.variant`, `feature_flag.result.reason` (`override`/`split`/`static`/`error`), `feature_flag.provider.name` (`mainline-flags`). Only these four; never PR, repo, branch, or login data. Join arms to other telemetry on `enduser.id`. See `docs/feature-flags.md`.
