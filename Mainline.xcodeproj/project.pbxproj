@@ -64,6 +64,11 @@
 		PC0000000000000000FF0006 /* FeatureFlagClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0006 /* FeatureFlagClient.swift */; };
 		PC0000000000000000FF0007 /* FeatureFlagChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0007 /* FeatureFlagChecks.swift */; };
 		PC0000000000000000FF0008 /* DeveloperSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0008 /* DeveloperSettingsView.swift */; };
+		PC00000000000000000000E1 /* IssueSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000000E1 /* IssueSnapshot.swift */; };
+		PC00000000000000000000E2 /* IssueDiffEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000000E2 /* IssueDiffEngine.swift */; };
+		PC00000000000000000000E3 /* IssueStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000000E3 /* IssueStore.swift */; };
+		PC00000000000000000000E4 /* IssuesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000000E4 /* IssuesSettingsView.swift */; };
+		PC00000000000000000000E5 /* IssuesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000000E5 /* IssuesView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -123,6 +128,11 @@
 		PF0000000000000000FF0006 /* FeatureFlagClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagClient.swift; sourceTree = "<group>"; };
 		PF0000000000000000FF0007 /* FeatureFlagChecks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagChecks.swift; sourceTree = "<group>"; };
 		PF0000000000000000FF0008 /* DeveloperSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettingsView.swift; sourceTree = "<group>"; };
+		PF00000000000000000000E1 /* IssueSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueSnapshot.swift; sourceTree = "<group>"; };
+		PF00000000000000000000E2 /* IssueDiffEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDiffEngine.swift; sourceTree = "<group>"; };
+		PF00000000000000000000E3 /* IssueStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueStore.swift; sourceTree = "<group>"; };
+		PF00000000000000000000E4 /* IssuesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssuesSettingsView.swift; sourceTree = "<group>"; };
+		PF00000000000000000000E5 /* IssuesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssuesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -168,6 +178,7 @@
 				PF0000000000000000000003 /* PRTransition.swift */,
 				PF0000000000000000000004 /* MainlineSettings.swift */,
 				PF000000000000000000001E /* AttentionPolicy.swift */,
+				PF00000000000000000000E1 /* IssueSnapshot.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -210,6 +221,8 @@
 				PF0000000000000000000B01 /* CommentTemplate.swift */,
 				PF0000000000000000000B02 /* CommentTemplateStore.swift */,
 				PF000000000000000000A902 /* PromptTemplateStore.swift */,
+				PF00000000000000000000E2 /* IssueDiffEngine.swift */,
+				PF00000000000000000000E3 /* IssueStore.swift */,
 				PF000000000000000000A901 /* PromptTemplate.swift */,
 				PG0000000000000000000FF0 /* FeatureFlags */,
 			);
@@ -235,6 +248,8 @@
 				IB000000000000000000000A2 /* InboxSettingsView.swift */,
 				HP000000000000000000000A1 /* HelpSettingsView.swift */,
 				PF0000000000000000FF0008 /* DeveloperSettingsView.swift */,
+				PF00000000000000000000E4 /* IssuesSettingsView.swift */,
+				PF00000000000000000000E5 /* IssuesView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -374,6 +389,11 @@
 				PC0000000000000000000B03 /* CommentPickerView.swift in Sources */,
 				PC0000000000000000000B04 /* CommentsSettingsView.swift in Sources */,
 				PC000000000000000000A902 /* PromptTemplateStore.swift in Sources */,
+				PC00000000000000000000E1 /* IssueSnapshot.swift in Sources */,
+				PC00000000000000000000E2 /* IssueDiffEngine.swift in Sources */,
+				PC00000000000000000000E3 /* IssueStore.swift in Sources */,
+				PC00000000000000000000E4 /* IssuesSettingsView.swift in Sources */,
+				PC00000000000000000000E5 /* IssuesView.swift in Sources */,
 				PC000000000000000000A901 /* PromptTemplate.swift in Sources */,
 				OT00000000000000000000B1 /* TelemetryService.swift in Sources */,
 				OT00000000000000000000B2 /* TelemetryOptInBanner.swift in Sources */,

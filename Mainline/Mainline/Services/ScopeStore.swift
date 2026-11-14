@@ -62,10 +62,15 @@ final class ScopeStore: ObservableObject {
     /// Derive the global set of available scopes from the full PR list.
     /// Call after every poll. Drives only `selectedScope` invalidation — the
     /// displayed chips/counts are tab-aware and computed on `PRManager`.
-    func rebuild(from prs: [PRSnapshot]) {
+    /// `extraOrgs` are orgs that only issues come from: without them, a scope chosen on
+    /// the Issues tab would look "gone" here (no PR in that org) and be reset.
+    func rebuild(from prs: [PRSnapshot], extraOrgs: [String] = []) {
         var counts: [PRScope: Int] = [:]
         for pr in prs where !pr.org.isEmpty {
             counts[PRScope.org(pr.org), default: 0] += 1
+        }
+        for org in extraOrgs where !org.isEmpty {
+            counts[PRScope.org(org), default: 0] += 1
         }
 
         // Sort by count descending, then name ascending

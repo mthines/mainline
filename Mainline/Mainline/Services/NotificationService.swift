@@ -254,6 +254,43 @@ final class NotificationService {
         }
     }
 
+    // MARK: - Issue transitions
+
+    /// Fires issue notifications per the attention policy. IDs are deterministic
+    /// (`mainline.issue.<kind>.<nodeId>`) so rapid polls replace rather than stack banners.
+    /// Muted issues never notify. Returns how many banners were actually posted.
+    @discardableResult
+    func fireIssueTransitions(_ transitions: [IssueTransition], settings: MainlineSettings) -> Int {
+        var posted = 0
+        for transition in transitions {
+            let issue = transition.issue
+            if settings.mutedIssueIds.contains(issue.nodeId) { continue }
+            let event = transition.event
+            let level = settings.level(for: event)
+            guard level != .off else { continue }
+
+            if level == .notify {
+                let title: String
+                switch transition {
+                case .newIssue:  title = "New issue in \(issue.repoFullName)"
+                case .assigned:  title = "Issue assigned to you"
+                case .mentioned: title = "You were mentioned in an issue"
+                case .reply:     title = "New reply on your issue"
+                }
+                fire(id: "mainline.issue.\(transition.kind).\(issue.nodeId)",
+                     title: title,
+                     body: "\(issue.repoFullName)#\(issue.number) \(issue.title)",
+                     url: issue.url)
+                posted += 1
+            }
+            TelemetryService.shared.recordNotificationFired(
+                eventType: event.rawValue,
+                attentionLevel: level == .notify ? "notify" : "quiet"
+            )
+        }
+        return posted
+    }
+
     // MARK: - Private
 
     private func fire(id: String, title: String, body: String, url: String) {

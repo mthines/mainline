@@ -40,6 +40,7 @@ enum ReviewTab: String, Codable, Equatable, CaseIterable, Identifiable {
     case inbox    // derived union of forMe + created with mute filtering (first/primary tab)
     case forMe    // review-requested / assigned to me
     case created  // authored by me
+    case issues   // GitHub issues (not PRs); shown only when there is something to follow
 
     var id: String { rawValue }
 
@@ -48,6 +49,7 @@ enum ReviewTab: String, Codable, Equatable, CaseIterable, Identifiable {
         case .forMe:   return "For me"
         case .created: return "Created"
         case .inbox:   return "Inbox"
+        case .issues:  return "Issues"
         }
     }
 
@@ -62,6 +64,7 @@ enum ReviewTab: String, Codable, Equatable, CaseIterable, Identifiable {
         switch self {
         case .forMe:            return "reviewer"
         case .created, .inbox:  return "author"
+        case .issues:           return "issues"
         }
     }
 }

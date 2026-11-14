@@ -11,6 +11,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
     case github
     case notifications
     case inbox
+    case issues
     case menuBar
     case appearance
     case keyboard
@@ -28,6 +29,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .github:        return "GitHub"
         case .notifications: return "Notifications"
         case .inbox:         return "Inbox"
+        case .issues:        return "Issues"
         case .menuBar:       return "Menu Bar"
         case .appearance:    return "Appearance"
         case .keyboard:      return "Keyboard"
@@ -45,6 +47,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .github:        return "key.fill"
         case .notifications: return "bell.fill"
         case .inbox:         return "tray.fill"
+        case .issues:        return "exclamationmark.bubble"
         case .menuBar:       return "menubar.rectangle"
         case .appearance:    return "slider.horizontal.3"
         case .keyboard:      return "keyboard"
@@ -157,6 +160,7 @@ struct SettingsView: View {
                 case .github:        githubSection
                 case .notifications: notificationsSection
                 case .inbox:         inboxSection
+                case .issues:        IssuesSettingsView(settings: settings, manager: manager)
                 case .menuBar:       menuBarSection
                 case .appearance:    appearanceSection
                 case .keyboard:      keyboardSection

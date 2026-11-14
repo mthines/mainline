@@ -587,7 +587,7 @@ struct MenuBarView: View {
                 }
             }
         )) {
-            ForEach(ReviewTab.allCases) { tab in
+            ForEach(visibleTabs) { tab in
                 Text(tabLabel(for: tab)).tag(tab)
             }
         }
@@ -597,8 +597,27 @@ struct MenuBarView: View {
         .padding(.vertical, 8)
     }
 
+    /// Issues is not a PR tab: it appears only when there is something to follow, i.e.
+    /// some repo/org is at "All issues" or any issue is currently tracked. It stays visible
+    /// while selected so the picker never loses the active tab.
+    private var visibleTabs: [ReviewTab] {
+        let showIssues = settings.hasAllIssuesRepo
+            || !manager.issueStore.issues.isEmpty
+            || settings.selectedTab == .issues
+        return ReviewTab.allCases.filter { $0 != .issues || showIssues }
+    }
+
+    /// Issues tab count: what the tab lists — followed issues that are not archived or
+    /// muted and sit inside the scope chip — like every other tab's total. (It used to count
+    /// only unread issues, so a tab with everything read showed no number at all.)
+    private var issuesCount: Int {
+        let muted = Set(settings.mutedIssueIds)
+        return manager.visibleIssues.filter { !muted.contains($0.nodeId) }.count
+    }
+
     private func tabLabel(for tab: ReviewTab) -> String {
         switch tab {
+        case .issues:  return issuesCount > 0 ? "Issues (\(issuesCount))" : tab.title
         case .forMe:   return forMeCount > 0   ? "For me (\(forMeCount))"     : tab.title
         case .created: return createdCount > 0 ? "Created (\(createdCount))" : tab.title
         case .inbox:   return inboxCount > 0   ? "Inbox (\(inboxCount))"      : tab.title
@@ -640,9 +659,10 @@ struct MenuBarView: View {
                         let count = manager.scopeCounts[scope] ?? 0
                         scopeChip(label: "\(scope.displayName) \(count)", scope: scope)
                     }
-                    Divider().frame(height: 16)
+                    if settings.selectedTab != .issues { Divider().frame(height: 16) }
                 }
-                draftsChip
+                // Issues have no drafts, so the toggle would do nothing there.
+                if settings.selectedTab != .issues { draftsChip }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -807,16 +827,25 @@ struct MenuBarView: View {
     /// it via `BodyHeightKey`; `onPreferenceChange` stores it in `measuredBodyHeight`.
     /// The `.frame(height:)` uses `scrollRegionHeight`, which is guarded finite and
     /// clamped — no NaN/∞/negative can reach the hosting view.
+    /// Whether the Inbox's issue group has anything to show — the same selection
+    /// `TriageDeckView` renders, so an Inbox with issues but no PRs isn't "empty".
+    private var hasInboxIssues: Bool {
+        let selection = manager.inboxIssueSelection
+        return !selection.items.isEmpty || selection.hiddenNew > 0
+    }
+
     @ViewBuilder
     private var scrollableBody: some View {
         // While searching, always render the deck (with a query it shows its own
         // "No matching PRs" state) so a valid match isn't hidden by the tab-level
         // empty short-circuit.
-        let isEmpty = !manager.hasToken || (!manager.searchActive && (
-            settings.selectedTab == .inbox
-                ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty
-                : manager.prs.isEmpty
-        ))
+        let isEmpty = !manager.hasToken || (settings.selectedTab == .issues
+            ? manager.issueStore.issues.isEmpty
+            : (!manager.searchActive && (
+                settings.selectedTab == .inbox
+                    ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty && !hasInboxIssues
+                    : manager.prs.isEmpty
+            )))
         if isEmpty {
             emptyState
         } else {
@@ -840,6 +869,9 @@ struct MenuBarView: View {
     @ViewBuilder
     private var bodyContent: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if settings.selectedTab == .issues {
+                IssuesView(manager: manager, settings: settings)
+            } else {
             // The keyboard-navigable triage deck, grouped into collapsible
             // actionability sections, scoped to the selected tab. Its
             // "Needs attention" group (`ActionGroup.needsAttention`) is the single
@@ -854,6 +886,7 @@ struct MenuBarView: View {
                 manager: manager,
                 settings: settings
             )
+            }
         }
     }
 
@@ -923,6 +956,7 @@ struct MenuBarView: View {
         case .forMe:   return "Nothing to review"
         case .created: return "No PRs created"
         case .inbox:   return "Inbox clear"
+        case .issues:  return "No issues to follow"
         }
     }
 
@@ -932,45 +966,9 @@ struct MenuBarView: View {
     /// row context menu — replaces the ⌘K command palette as the "what can I do
     /// here?" affordance.
     private var keyboardLegend: some View {
-        // Built from the LIVE bindings so the glyphs always match Settings →
-        // Keyboard (never stale), and wrapped over up to two lines so every verb
-        // stays readable instead of truncating to one clipped line.
-        let b = settings.shortcutBindings
-        func g(_ s: InAppShortcut) -> String { MainlineSettings.glyph(for: b.binding(for: s)) }
-        var parts: [String] = [
-            "\(g(.navigateDown))/\(g(.navigateUp)) move",
-            "\(g(.peek)) peek",
-            "↵ open",
-            "\(g(.search)) find",
-            "\(g(.togglePin)) pin",
-            "\(g(.openPreview)) preview",
-            "\(g(.merge)) merge",
-            "\(g(.snooze)) later",
-        ]
-        // Right after "pin"; hidden while unbound (an upgrade whose default "a" was taken).
-        if !b.runPrompt.key.isEmpty, let pinIndex = parts.firstIndex(where: { $0.hasSuffix(" pin") }) {
-            parts.insert("\(g(.runPrompt)) agent", at: pinIndex + 1)
-        }
-        if settings.writeActionsEnabled, !b.addComment.key.isEmpty, let pinIndex = parts.firstIndex(where: { $0.hasSuffix(" pin") }) {
-            parts.insert("\(g(.addComment)) comment", at: pinIndex + 1)
-        }
-        if settings.selectedTab == .inbox {
-            parts.append("\(g(.toggleMute)) mute")
-        }
-        parts.append("\(g(.undo)) undo")
-        parts.append("right-click ▸ all")
-
-        return HStack(spacing: 0) {
-            Text(parts.joined(separator: "   ·   "))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        // Which keys to list is decided by `KeyHints` (pure, from the LIVE bindings and
+        // the focused row); this view only draws it.
+        KeyboardLegend(store: manager.keyFocus, settings: settings)
     }
 
         // MARK: - Footer (AC-21: 44pt hit targets, Quit separated)

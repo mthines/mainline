@@ -386,6 +386,11 @@ final class PRManager: ObservableObject {
     let settings:       MainlineSettings
     let snoozeStore:    SnoozeStore
     let scopeStore:     ScopeStore
+    /// Which kind of row the keyboard is on (drives the footer legend). Its own object so
+    /// moving the highlight re-renders only the legend.
+    let keyFocus = KeyFocusStore()
+    /// GitHub issues: fetch, baseline, unread. One instance serves the Issues tab and the Inbox group.
+    let issueStore:     IssueStore
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -871,6 +876,14 @@ final class PRManager: ObservableObject {
     /// counts follow the selected tab, drafts, For-me, and snooze filters.
     var scopeCounts: [PRScope: Int] {
         var counts: [PRScope: Int] = [:]
+        // The Issues tab chips count its own population: followed, un-archived, un-muted issues.
+        if settings.selectedTab == .issues {
+            let muted = Set(settings.mutedIssueIds)
+            for issue in issueStore.active where !issue.displayOrg.isEmpty && !muted.contains(issue.nodeId) {
+                counts[.org(issue.displayOrg), default: 0] += 1
+            }
+            return counts
+        }
         for pr in scopeSelectorBasePRs where !pr.org.isEmpty {
             counts[.org(pr.org), default: 0] += 1
         }
@@ -948,9 +961,66 @@ final class PRManager: ObservableObject {
             .sorted(by: PRSnapshot.triageOrder)
     }
 
-    /// Count of PRs that need attention. Single source of truth for the badge's
-    /// `.needsAHuman` metric.
-    var needsAttentionCount: Int { needsAttentionPRs.count }
+    /// PRs that need my time plus issues that need my time (the latter only when the
+    /// badge is global or the Inbox/Issues tab is selected). Single source of truth
+    /// for the badge's `.needsAHuman` metric.
+    var needsAttentionCount: Int { needsAttentionPRs.count + issueNeedsMyTimeCount }
+
+    /// Whether the badge covers issues: always when global, else only on the tabs that show them.
+    private var issueViewsIncluded: Bool {
+        let tab = settings.selectedTab
+        return !settings.menuBarScopeFollowsSelection || tab == .inbox || tab == .issues
+    }
+
+    /// Issues that need the viewer's time: assigned, mentioned, replied-on, plus new
+    /// issues when "Show new issues in Inbox" is on. Counted through
+    /// `IssueClassifier.needsMyTimeCount`, i.e. the SAME deduplicated list the Inbox
+    /// group draws, so an issue is counted exactly once. Only part of the badge while
+    /// the current view includes issues (Inbox / Issues tab) or the badge is global.
+    var issueNeedsMyTimeCount: Int {
+        guard issueViewsIncluded else { return 0 }
+        return IssueClassifier.needsMyTimeCount(
+            badgeIssues, myLogin: settings.githubUsername,
+            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox,
+            newIssueAllowed: { [settings] in settings.issueWatchLevel(forRepo: $0) == .allIssues },
+            now: Date())
+    }
+
+    /// The issues the badge counts: the scope-chip selection when the badge follows the
+    /// current view (like the PR counts), otherwise every active issue.
+    private var badgeIssues: [IssueSnapshot] {
+        settings.menuBarScopeFollowsSelection ? visibleIssues : issueStore.active
+    }
+
+    // MARK: - Issues in view (archive + scope chip)
+
+    /// Whether an issue falls under a scope chip. Case-insensitive, like GitHub logins.
+    private static func issue(_ issue: IssueSnapshot, matches scope: PRScope) -> Bool {
+        switch scope {
+        case .org(let o):  return issue.org == o.lowercased()
+        case .repo(let r): return issue.repoFullName.lowercased() == r.lowercased()
+        }
+    }
+
+    private func inSelectedScope(_ list: [IssueSnapshot]) -> [IssueSnapshot] {
+        guard let scope = scopeStore.selectedScope else { return list }
+        return list.filter { Self.issue($0, matches: scope) }
+    }
+
+    /// Issues the Issues tab and the Inbox group draw: not archived, inside the scope chip.
+    var visibleIssues: [IssueSnapshot] { inSelectedScope(issueStore.active) }
+
+    /// Archived issues inside the scope chip (the restorable "Archived" group).
+    var archivedIssues: [IssueSnapshot] { inSelectedScope(issueStore.archived) }
+
+    /// The Inbox's issue group: the one selection both the view and the empty check read.
+    var inboxIssueSelection: IssueClassifier.InboxSelection {
+        IssueClassifier.inboxItems(
+            visibleIssues, myLogin: settings.githubUsername,
+            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox,
+            newIssueAllowed: { [settings] in settings.issueWatchLevel(forRepo: $0) == .allIssues },
+            now: Date())
+    }
 
     /// Count of PRs the user personally needs to act on (Layer A badge logic).
     /// - Authored PR with failing CI  → merge blocker
@@ -1003,7 +1073,9 @@ final class PRManager: ObservableObject {
             return .attention(count)
 
         case .unread:
+            // Issues share the badge: the same unread set the Issues tab and Inbox use.
             let count = scoped.filter { unreadPRIds.contains($0.nodeId) }.count
+                + (issueViewsIncluded ? badgeIssues.filter { issueStore.unreadIds.contains($0.nodeId) }.count : 0)
             return .attention(count)
 
         case .totalOpen:
@@ -1057,12 +1129,18 @@ final class PRManager: ObservableObject {
         self.client        = GitHubClient(settings: settings)
         self.snoozeStore   = SnoozeStore(settings: settings)
         self.scopeStore    = ScopeStore()
+        self.issueStore    = IssueStore(settings: settings, notifications: notifications)
         self.poller        = PRPoller(
             client:        GitHubClient(settings: settings),
             store:         store,
             notifications: notifications,
             settings:      settings
         )
+
+        poller.issueStore = issueStore
+        issueStore.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
 
         // Receive the display-only Done set from the poller. Assigned on the main
         // actor (poller is @MainActor); stored separately from `prs` so it never
@@ -1104,7 +1182,8 @@ final class PRManager: ObservableObject {
         store.$snapshots
             .map { dict in Array(dict.values) }
             .sink { [weak self] prs in
-                self?.scopeStore.rebuild(from: prs)
+                self?.scopeStore.rebuild(from: prs,
+                                         extraOrgs: self?.issueStore.issues.map(\.displayOrg) ?? [])
                 // Catch a merged PR still lingering in the live set, then reconcile pins.
                 self?.applyUnpinOnMerge(prs)
                 Task { await self?.refreshPinnedFetches() }
@@ -1149,6 +1228,10 @@ final class PRManager: ObservableObject {
         // Load the persisted snapshot baseline BEFORE the first poll so the diff
         // engine compares against last-known state instead of an empty set (which
         // would fire a "New PR" banner for every open PR on launch).
+        // Issues first: loading PRs fires the `$snapshots` sink, whose scope rebuild reads
+        // `issueStore.issues`. An empty store there would clear a scope chip for an
+        // org that only has issues.
+        await issueStore.load()
         await store.load()
 
         let token = await KeychainHelper.loadToken()
@@ -1477,6 +1560,17 @@ final class PRManager: ObservableObject {
     func markSeen(_ pr: PRSnapshot) {
         unreadPRIds.remove(pr.nodeId)
         settings.unreadPRIdsList = Array(unreadPRIds)
+    }
+
+    /// Marks an issue as seen (opened). The one read-state set for both issue views.
+    func markIssueSeen(_ issue: IssueSnapshot) {
+        issueStore.markSeen(issue.nodeId)
+    }
+
+    /// Opens an issue in the browser and marks it seen.
+    func openIssue(_ issue: IssueSnapshot) {
+        markIssueSeen(issue)
+        if let url = URL(string: issue.url) { NSWorkspace.shared.open(url) }
     }
 
     /// Marks all currently visible PRs as seen.

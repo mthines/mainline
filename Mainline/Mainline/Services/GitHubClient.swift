@@ -526,6 +526,22 @@ final class GitHubClient {
         return states
     }
 
+    /// The current state (`OPEN` / `CLOSED`) of each issue, keyed by node id —
+    /// used to vet issues `IssueStore` is about to carry forward after an
+    /// incomplete fetch, so a closed issue doesn't linger forever. An id GitHub
+    /// can't resolve is ABSENT: unknown is never read as closed.
+    func fetchIssueStates(nodeIds: [String], token: String) async throws -> [String: String] {
+        var states: [String: String] = [:]
+        for chunk in Self.chunked(nodeIds, size: Self.nodesPerRequest) {
+            let data = try await postGraphQL(Self.issueStatesQueryDocument, variables: ["ids": chunk], token: token)
+            let decoded = try decodeGraphQL(GraphQLNodeStatesResponse.self, from: data)
+            for case let node? in decoded.data?.nodes ?? [] {
+                if let id = node.id, let state = node.state { states[id] = state }
+            }
+        }
+        return states
+    }
+
     private static func chunked(_ ids: [String], size: Int) -> [[String]] {
         stride(from: 0, to: ids.count, by: size).map { Array(ids[$0..<min($0 + size, ids.count)]) }
     }
@@ -805,6 +821,7 @@ final class GitHubClient {
         case .created: return "author:@me"
         case .forMe:   return "review-requested:@me"
         case .inbox:   return "author:@me"   // Inbox derives from both; use author as a fallback
+        case .issues:  return "author:@me"   // Issues have no Done query; never reached
         }
     }
 
@@ -1101,6 +1118,15 @@ final class GitHubClient {
     query($ids: [ID!]!) {
       nodes(ids: $ids) {
         ... on PullRequest { id state }
+      }
+    }
+    """
+
+    /// Just the state of a set of issues — see `fetchIssueStates`.
+    private static let issueStatesQueryDocument = """
+    query($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Issue { id state }
       }
     }
     """
@@ -1793,3 +1819,171 @@ enum PreviewDetectionChecks {
     }
 }
 #endif
+
+// MARK: - Issues (GraphQL search)
+
+private struct IssueSearchResponse: Decodable {
+    struct Payload: Decodable {
+        struct Search: Decodable {
+            struct PageInfo: Decodable { let hasNextPage: Bool?; let endCursor: String? }
+            let pageInfo: PageInfo?
+            let nodes: [IssueSearchNode?]?
+        }
+        let search: Search?
+    }
+    let data: Payload?
+    let errors: [GraphQLError]?
+}
+
+private struct IssueSearchNode: Decodable {
+    struct Assignees: Decodable { let nodes: [GraphQLActor?]? }
+    struct Comments: Decodable {
+        struct Node: Decodable {
+            let author: GraphQLActor?
+            let createdAt: String?
+            let authorAssociation: String?
+            let body: String?
+        }
+        let totalCount: Int?
+        let nodes: [Node?]?
+    }
+    struct Repo: Decodable { let nameWithOwner: String? }
+
+    let id: String?
+    let number: Int?
+    let title: String?
+    let url: String?
+    let body: String?
+    let createdAt: String?
+    let updatedAt: String?
+    let author: GraphQLActor?
+    let repository: Repo?
+    let assignees: Assignees?
+    let labels: GraphQLLabels?
+    let comments: Comments?
+}
+
+extension GitHubClient {
+    /// Number of trailing comments fetched per issue (enough for "who spoke last" and
+    /// a maintainer-reply check without fanning out).
+    static let issueCommentWindow = 5
+
+    private static let issueSearchDocument = """
+    query($q: String!, $first: Int!, $after: String) {
+      search(query: $q, type: ISSUE, first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          ... on Issue {
+            id number title url body createdAt updatedAt
+            author { __typename login }
+            repository { nameWithOwner }
+            assignees(first: 10) { nodes { login } }
+            labels(first: 10) { nodes { name } }
+            comments(last: \(issueCommentWindow)) {
+              totalCount
+              nodes { author { __typename login } createdAt authorAssociation body }
+            }
+          }
+        }
+      }
+    }
+    """
+
+    /// Pages read per issue search before giving up (`searchPageSize` each).
+    static let issueSearchMaxPages = 5
+
+    /// Outcome of one issue search. `incomplete` means the result may be a subset of the
+    /// matching issues, so the caller must carry previous issues forward rather than treat
+    /// it as the whole set. `truncated` means the only reason is the page cap: every page
+    /// read was whole and error-free, so the result is still good enough to seed from.
+    struct IssueSearchResult {
+        let issues: [IssueSnapshot]
+        let incomplete: Bool
+        let truncated: Bool
+        let degraded: Bool
+    }
+
+    /// Searches open issues, following `pageInfo` up to `issueSearchMaxPages`. A 5xx is
+    /// retried once as a single half-size page, like `searchPRs`, and reported incomplete.
+    func searchIssues(query: String, token: String, myLogin: String) async throws -> IssueSearchResult {
+        do {
+            var issues: [IssueSnapshot] = []
+            var cursor: String?
+            for _ in 0..<Self.issueSearchMaxPages {
+                let page = try await searchIssuesPage(query: query, token: token, myLogin: myLogin,
+                                                      first: Self.searchPageSize, after: cursor)
+                issues.append(contentsOf: page.issues)
+                if page.hasErrors {
+                    return IssueSearchResult(issues: issues, incomplete: true, truncated: false, degraded: false)
+                }
+                guard page.hasNextPage, let next = page.endCursor else {
+                    return IssueSearchResult(issues: issues, incomplete: false, truncated: false, degraded: false)
+                }
+                cursor = next
+            }
+            return IssueSearchResult(issues: issues, incomplete: true, truncated: true, degraded: false)
+        } catch GitHubAPIError.serverError(let code) {
+            try await Task.sleep(nanoseconds: 750_000_000)
+            let page = try await searchIssuesPage(query: query, token: token, myLogin: myLogin,
+                                                  first: Self.searchPageSizeDegraded, after: nil)
+            // Only after the retry succeeds, as in `searchPRs`.
+            TelemetryService.shared.recordPollServerErrorRecovered(queryType: "issues", statusCode: code)
+            return IssueSearchResult(issues: page.issues, incomplete: true, truncated: false, degraded: true)
+        }
+    }
+
+    private struct IssueSearchPage {
+        let issues: [IssueSnapshot]
+        let hasErrors: Bool
+        let hasNextPage: Bool
+        let endCursor: String?
+    }
+
+    private func searchIssuesPage(query: String, token: String, myLogin: String,
+                                  first: Int, after: String?) async throws -> IssueSearchPage {
+        var variables: [String: Any] = ["q": query, "first": first]
+        if let after { variables["after"] = after }
+        let data = try await postGraphQL(Self.issueSearchDocument, variables: variables, token: token)
+        let decoded = try decodeGraphQL(IssueSearchResponse.self, from: data)
+        let hasErrors = !(decoded.errors ?? []).isEmpty
+        if (decoded.errors ?? []).containsForbidden { throw GitHubAPIError.unauthorized }
+        guard let search = decoded.data?.search else {
+            if hasErrors { throw GitHubAPIError.unknown(200) }
+            throw GitHubAPIError.unknown(0)
+        }
+        let nodes = (search.nodes ?? []).compactMap { $0 }
+        let issues = nodes.compactMap { Self.makeIssueSnapshot(from: $0, myLogin: myLogin) }
+        return IssueSearchPage(issues: issues, hasErrors: hasErrors,
+                               hasNextPage: search.pageInfo?.hasNextPage ?? false,
+                               endCursor: search.pageInfo?.endCursor)
+    }
+
+    private static func parseIssueDate(_ raw: String?) -> Date {
+        guard let raw else { return Date(timeIntervalSince1970: 0) }
+        let f = ISO8601DateFormatter()
+        return f.date(from: raw) ?? Date(timeIntervalSince1970: 0)
+    }
+
+    private static func makeIssueSnapshot(from node: IssueSearchNode, myLogin: String) -> IssueSnapshot? {
+        guard let id = node.id, let number = node.number, let title = node.title,
+              let url = node.url, let repo = node.repository?.nameWithOwner else { return nil }
+        let commentNodes = (node.comments?.nodes ?? []).compactMap { $0 }
+        let replies = commentNodes.map {
+            IssueReply(author: $0.author?.login ?? "", createdAt: parseIssueDate($0.createdAt),
+                       association: $0.authorAssociation ?? "NONE")
+        }
+        let mentioned = IssueSnapshot.mentions(node.body ?? "", login: myLogin)
+            || commentNodes.contains { IssueSnapshot.mentions($0.body ?? "", login: myLogin) }
+        return IssueSnapshot(
+            nodeId: id, number: number, title: title, url: url, repoFullName: repo,
+            author: node.author?.login ?? "",
+            authorIsBot: node.author?.typename == "Bot",
+            assignees: (node.assignees?.nodes ?? []).compactMap { $0?.login },
+            labels: (node.labels?.nodes ?? []).compactMap { $0.name },
+            createdAt: parseIssueDate(node.createdAt),
+            updatedAt: parseIssueDate(node.updatedAt),
+            commentCount: node.comments?.totalCount ?? replies.count,
+            comments: replies,
+            mentionsMe: mentioned)
+    }
+}
