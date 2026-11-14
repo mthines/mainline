@@ -981,7 +981,8 @@ final class PRManager: ObservableObject {
         return IssueClassifier.needsMyTimeCount(
             badgeIssues, myLogin: settings.githubUsername,
             muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox,
-            newIssueAllowed: { [settings] in settings.issueWatchLevel(forRepo: $0) == .allIssues })
+            newIssueAllowed: { [settings] in settings.issueWatchLevel(forRepo: $0) == .allIssues },
+            now: Date())
     }
 
     /// The issues the badge counts: the scope-chip selection when the badge follows the
@@ -1016,7 +1017,8 @@ final class PRManager: ObservableObject {
         IssueClassifier.inboxItems(
             visibleIssues, myLogin: settings.githubUsername,
             muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox,
-            newIssueAllowed: { [settings] in settings.issueWatchLevel(forRepo: $0) == .allIssues })
+            newIssueAllowed: { [settings] in settings.issueWatchLevel(forRepo: $0) == .allIssues },
+            now: Date())
     }
 
     /// Count of PRs the user personally needs to act on (Layer A badge logic).

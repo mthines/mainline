@@ -222,9 +222,12 @@ enum IssueClassifier {
     /// `newIssueAllowed` says whether a repo follows new issues at all (All issues). The
     /// `involves:@me` search also returns issues the user only commented on, so without
     /// this an Only-mine repo would surface them as "new".
+    /// With `now` set, an issue older than `IssueDiffEngine.newIssueMaxAge` is backlog, not
+    /// new, the same bound the notification uses.
     static func inboxItems(_ issues: [IssueSnapshot], myLogin: String, muted: Set<String>,
                            showNew: Bool,
-                           newIssueAllowed: (String) -> Bool = { _ in true }) -> InboxSelection {
+                           newIssueAllowed: (String) -> Bool = { _ in true },
+                           now: Date? = nil) -> InboxSelection {
         var seen = Set<String>()
         var kept: [(IssueInboxReason, IssueSnapshot)] = []
         var hidden = 0
@@ -232,6 +235,7 @@ enum IssueClassifier {
             let reason = inboxReason(for: issue, myLogin: myLogin)
             if reason == .newIssue {
                 guard newIssueAllowed(issue.repoFullName) else { continue }
+                if let now, now.timeIntervalSince(issue.createdAt) > IssueDiffEngine.newIssueMaxAge { continue }
                 // Only unanswered, unassigned issues count as "new" for the Inbox.
                 guard section(for: issue, myLogin: myLogin, muted: false) == .needsYou else { continue }
                 if !showNew { hidden += 1; continue }
@@ -247,9 +251,10 @@ enum IssueClassifier {
     /// Issues that need the viewer's time (feeds the menu-bar badge). Each issue counted once.
     static func needsMyTimeCount(_ issues: [IssueSnapshot], myLogin: String, muted: Set<String>,
                                  showNew: Bool,
-                                 newIssueAllowed: (String) -> Bool = { _ in true }) -> Int {
+                                 newIssueAllowed: (String) -> Bool = { _ in true },
+                                 now: Date? = nil) -> Int {
         inboxItems(issues, myLogin: myLogin, muted: muted, showNew: showNew,
-                   newIssueAllowed: newIssueAllowed).items.count
+                   newIssueAllowed: newIssueAllowed, now: now).items.count
     }
 }
 
@@ -299,6 +304,12 @@ enum IssueChecks {
         assert(IssueClassifier.needsMyTimeCount(items, myLogin: me, muted: ["c"], showNew: false) == 1, "muted excluded from badge count")
         let gated = IssueClassifier.inboxItems(items, myLogin: me, muted: [], showNew: true, newIssueAllowed: { _ in false })
         assert(!gated.items.contains { $0.nodeId == "a" } && gated.hiddenNew == 0, "an Only-mine repo's unanswered issue is not 'new'")
+        let recent = IssueClassifier.inboxItems(items, myLogin: me, muted: [], showNew: true,
+                                                now: Date(timeIntervalSince1970: 100 + IssueDiffEngine.newIssueMaxAge))
+        assert(recent.items.contains { $0.nodeId == "a" }, "an issue within newIssueMaxAge is still new")
+        let stale = IssueClassifier.inboxItems(items, myLogin: me, muted: [], showNew: false,
+                                               now: Date(timeIntervalSince1970: 101 + IssueDiffEngine.newIssueMaxAge))
+        assert(!stale.items.contains { $0.nodeId == "a" } && stale.hiddenNew == 0, "backlog older than newIssueMaxAge is not 'new'")
 
         let mineQuiet = issue("q", author: "mads")
         let mineAnswered = issue("r", author: "mads", comments: [drive])
