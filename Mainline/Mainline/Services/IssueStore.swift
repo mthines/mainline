@@ -143,8 +143,9 @@ final class IssueStore: ObservableObject {
         let next = carriedIssues.filter { settings.issueWatchLevel(forRepo: $0.repoFullName) != .off }
 
         let seedRepos = offRepos.filter { settings.issueWatchLevel(forRepo: $0) != .off }
+        // A failed fetch may have missed a re-enabled repo's issues: keep it seeding until a poll succeeds.
         offRepos = offRepos.union((involved + broad).map { $0.repoFullName.lowercased() })
-            .filter { settings.issueWatchLevel(forRepo: $0) == .off }
+            .filter { settings.issueWatchLevel(forRepo: $0) == .off || (failed && seedRepos.contains($0)) }
 
         let transitions = IssueDiffEngine.diff(
             previous: baseline, next: next, myLogin: myLogin,
