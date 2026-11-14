@@ -172,7 +172,8 @@ notifications", check them in this order — the first two used to fail silently
    ad-hoc signed (`scripts/release-ci.sh`, see `docs/release.md`).
 2. **A `PRTransition` must exist.** `PRTransition` has only FOUR cases
    (`newPR`, `readyForReview`, `ciStatusChanged`, `newReviewOrComment`), so only the
-   `PREvent`s reachable from `NotificationService.resolveTransition` can ever fire.
+   `PREvent`s reachable from `NotificationService.resolveTransition` can ever fire — plus the
+   issue events, which come from `IssueTransition` via `NotificationService.fireIssueTransitions`.
    `PREvent.isDeliverable` / `PREvent.deliverable` is the single source of truth for
    that set and is what Settings iterates — `changesRequested` / `prMerged` / `prClosed`
    are non-deliverable (kept as cases because persisted policy dicts may carry their
@@ -189,7 +190,7 @@ notifications", check them in this order — the first two used to fail silently
    comment event was split by role — see below).
 
 The Settings pane groups the rows by `PREvent.group` (`PREventGroup`: **Your PRs** /
-**PRs You Review**, mirroring the deck's role split); `group` is exhaustive like
+**PRs You Review** / **Issues**, mirroring the deck's role split); `group` is exhaustive like
 `isDeliverable`. Comments are routed by role: `.newReviewOrComment` on your own work
 (`isViewersWork`), `.newCommentOnReviewPR` on anyone else's.
 
@@ -257,7 +258,7 @@ There is **no XCTest target**. The testing surface is `#if DEBUG` self-check
 functions on pure types, all invoked from `AppDelegate.applicationDidFinishLaunching`:
 `InboxMuteEngine.runSelfChecks()`, `PRSearchFilter.runSelfChecks()`, `PRClassificationChecks.run()`,
 `AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`, `StackEngineChecks.run()`,
-`PanelBackdropChecks.run()`, `PRListExportChecks.run()`, `PromptTemplateChecks.run()`, `CommentTemplateChecks.run()`. Add new pure logic's
+`PanelBackdropChecks.run()`, `PRListExportChecks.run()`, `PromptTemplateChecks.run()`, `CommentTemplateChecks.run()`, `IssueChecks.run()`, `KeyHintChecks.run()`. Add new pure logic's
 assertions to one of these (or a sibling enum in the same file) rather than introducing a
 test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:storedVersion:)`,
 `NotificationService.classify(...)` — is what makes it assertable at all.
@@ -555,9 +556,10 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `pinnedNodeIds` | [String] | `[]` — nodeIds the user has pinned. A pinned PR appears in a dedicated **Pinned** subsection at the top of its role/tab group (a `.pinned` display-only `ActionGroup`, collapsible, expanded by default) with a pin glyph, and overrides mute and the Drafts toggle (but not snooze, and not the org chip unless `pinsIgnoreOrgFilter` is on), and is fetched on demand (`node(id:)`) when it has dropped out of the live queries. Membership read via `settings.pinnedNodeIds`; toggled by the `togglePin` shortcut / context menu. |
 | `unpinOnMerge` | Bool | `true` — when on, a PR auto-unpins once it has MERGED (not merely closed). Enforced by `PRManager.applyUnpinOnMerge`, run from the Done-set sink, the live-`prs` sink, and the on-demand pin fetch. Toggle in Settings → Appearance → Pinning. |
 | `pinsIgnoreOrgFilter` | Bool | `false` — when OFF (default) pins are ORG-SCOPED: the Pinned subsection follows the org chip like every other section, so selecting `mthines` hides a pinned `dash0hq` PR. When ON, a pin overrides the chip and shows under every org (the pre-1.72 behaviour). Enforced by the single `PRManager.survivesScope(_:scope:)` predicate shared by `applyingSelectedScope` and `tabFiltered`. Scope only — mute, Drafts, snooze, search and the on-demand pin fetch are unaffected. Toggle in Settings → Appearance → Pinning. |
-| `issueRepoWatchLevels` | Data (JSON `[String: String]`) | `{}` — per-repo `IssueWatchLevel` override |
-| `issueOrgWatchLevels` | Data (JSON `[String: String]`) | `{}` — per-org default; repo override wins, fallback Only mine |
-| `showNewIssuesInInbox` | Bool | true — "Show new issues in Inbox": up to 3 new-issue rows in the Inbox, the rest as "new issues → Issues tab" |
+| `issueRepoWatchLevels` | [String: String] (repo → `IssueWatchLevel` rawValue) | `{}` — per-repo `IssueWatchLevel` override |
+| `issueOrgWatchLevels` | [String: String] (org → `IssueWatchLevel` rawValue) | `{}` — per-org default; repo override wins, fallback Only mine |
+| `showNewIssuesInInbox` | Bool | true — "Show new issues in Inbox": at most 3 issue rows of any kind in the Inbox group, then "+N more"; "new" issues (unanswered, unassigned) appear only for repos at All issues |
+| `archivedIssues` | [String: Double] (nodeId → issue `updatedAt` when archived) | `{}` — an archived issue stays hidden until its `updatedAt` moves past the stored value; Mute is the permanent hide |
 | `mutedIssueIds` | [String] | `[]` |
 | `unreadIssueIds` | [String] | `[]` — one unread set serves the Issues tab and the Inbox group |
 | `mutePatterns` | [String] | `["chore(deps)*", "build(deps)*"]` |
