@@ -84,6 +84,9 @@ final class TelemetryService {
     private var pollErrorsCounter: LongCounterSdk?
     private var pollCarriedForwardCounter: LongCounterSdk?
     private var pollCarriedForwardDroppedCounter: LongCounterSdk?
+    private var issuesObservedCounter: LongCounterSdk?
+    private var issuesCarriedForwardCounter: LongCounterSdk?
+    private var issuesIncompleteFetchesCounter: LongCounterSdk?
     private var appLaunchCounter: LongCounterSdk?
     private var writeActionsCounter: LongCounterSdk?
     private var triageInteractionsCounter: LongCounterSdk?
@@ -221,6 +224,24 @@ final class TelemetryService {
         pollCarriedForwardCounter = meter
             .counterBuilder(name: "mainline.poll.carried_forward")
             .setDescription("Number of PRs carried forward because a tab's fetch was incomplete")
+            .setUnit("1")
+            .build()
+
+        issuesObservedCounter = meter
+            .counterBuilder(name: "mainline.issues.observed")
+            .setDescription("Number of open issues seen by an issue poll (counts only)")
+            .setUnit("1")
+            .build()
+
+        issuesCarriedForwardCounter = meter
+            .counterBuilder(name: "mainline.issues.carried_forward")
+            .setDescription("Number of issues carried forward because an issue fetch was incomplete")
+            .setUnit("1")
+            .build()
+
+        issuesIncompleteFetchesCounter = meter
+            .counterBuilder(name: "mainline.issues.incomplete_fetches")
+            .setDescription("Issue searches that returned a partial result (GraphQL errors or a degraded page)")
             .setUnit("1")
             .build()
 
@@ -520,6 +541,26 @@ final class TelemetryService {
 
         pollCarriedForwardCounter?.add(value: count, attribute: [
             "poll.carry_forward_reason": .string(reason),
+        ])
+    }
+
+    /// Record one issue poll. Counts only: never a title, repo name or login.
+    func recordIssuePoll(observed: Int, carriedForward: Int) {
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+        if observed > 0 { issuesObservedCounter?.add(value: observed, attribute: [:]) }
+        if carriedForward > 0 { issuesCarriedForwardCounter?.add(value: carriedForward, attribute: [:]) }
+    }
+
+    /// Record an issue search that came back partial without throwing: a page with
+    /// GraphQL errors (`degraded == false`) or the half-size page after a 5xx
+    /// (`degraded == true`). Either one keeps first-run seeding open, so a run of
+    /// these is why a new install never starts notifying on issues.
+    func recordIssueFetchIncomplete(degraded: Bool) {
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+        issuesIncompleteFetchesCounter?.add(value: 1, attribute: [
+            "issues.incomplete_reason": .string(degraded ? "degraded_page" : "graphql_errors"),
         ])
     }
 

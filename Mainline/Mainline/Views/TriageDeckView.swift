@@ -252,6 +252,10 @@ struct TriageDeckView: View {
     @ObservedObject var settings: MainlineSettings
 
     @State private var selectedIndex: Int = 0
+    /// Index into the Inbox's issue rows when keyboard/hover focus is on one (nil = on a PR).
+    /// Kept apart from `selectedIndex` so `orderedPRs` — the PR index space every PR verb
+    /// reads — never changes; while this is set, `focusedPR` is nil and PR verbs no-op.
+    @State private var selectedIssueIndex: Int? = nil
     /// The stack or section whose header the pointer is over. The box is a reference type, so
     /// hovering never re-renders the deck; read only by the `runPrompt` key handler.
     @State private var hoveredGroup = HoveredGroupBox()
@@ -286,7 +290,7 @@ struct TriageDeckView: View {
             } else if inboxMode {
                 // Inbox view: role sections ("Needs your review" / "Your PRs") +
                 // a collapsed "Muted / low-priority" group at the bottom.
-                if inboxSections.isEmpty && mutedPRs.isEmpty {
+                if inboxSections.isEmpty && mutedPRs.isEmpty && !hasInboxIssues {
                     emptyState
                 } else {
                     inboxList
@@ -332,14 +336,24 @@ struct TriageDeckView: View {
                 searchActive: searchActive || manager.promptPickerTarget != nil || manager.commentPickerTarget != nil
             )
         )
-        .onAppear { installScrollMonitor() }
+        .onAppear { installScrollMonitor(); publishKeyFocus() }
         .onDisappear { removeScrollMonitor() }
+        // Keep the footer legend on the row the keyboard is actually on.
+        .onChange(of: selectedIndex) { _ in publishKeyFocus() }
+        .onChange(of: selectedIssueIndex) { _ in publishKeyFocus() }
         // Opening search, switching to/from the flat results, or changing the query
         // focuses the top row, so a stale index can't point off-screen or off the set
         // (Down from the field must land on row 0).
         .onChange(of: searchActive) { if $0 { selectedIndex = 0 } }
-        .onChange(of: searchMode) { _ in selectedIndex = 0 }
+        .onChange(of: searchMode) { _ in selectedIndex = 0; selectedIssueIndex = nil }
         .onChange(of: manager.searchQuery) { _ in if searchMode { selectedIndex = 0 } }
+        // An issue row that leaves the list (archived, muted, collapsed, scope change) must
+        // not leave focus pointing past the end or at nothing.
+        .onChange(of: inboxIssuesShown.map(\.nodeId)) { ids in
+            guard let i = selectedIssueIndex else { return }
+            if ids.isEmpty { selectedIssueIndex = nil }
+            else if i >= ids.count { selectedIssueIndex = ids.count - 1 }
+        }
     }
 
     // MARK: - Scroll monitor (hover-thrash guard)
@@ -663,10 +677,123 @@ struct TriageDeckView: View {
                     )
                 }
             }
+            // Issues rank after blocked PRs and reviews, before the Muted group.
+            inboxIssuesGroup
             if !mutedPRs.isEmpty {
                 mutedGroupView
             }
         }
+    }
+
+    // MARK: Inbox issue group
+
+    /// Most issue rows the Inbox group shows before collapsing the rest into "+N more".
+    private static let inboxIssueCap = 3
+
+    private var inboxIssueSelection: IssueClassifier.InboxSelection {
+        manager.inboxIssueSelection
+    }
+
+    /// The issue rows actually on screen — what J/K, hover and the issue keys address.
+    /// Empty outside the Inbox, in search, or while the group is collapsed.
+    private var inboxIssuesShown: [IssueSnapshot] {
+        guard inboxMode, !searchMode, inboxIssuesExpansion.wrappedValue else { return [] }
+        return Array(inboxIssueSelection.items.prefix(Self.inboxIssueCap))
+    }
+
+    private var hasInboxIssues: Bool {
+        let selection = inboxIssueSelection
+        return !selection.items.isEmpty || selection.hiddenNew > 0
+    }
+
+    private var inboxIssuesExpansion: Binding<Bool> {
+        let key = "inbox:issues"
+        return Binding(
+            get: { !settings.collapsedSectionsRaw.contains(key) },
+            set: { expanded in
+                var raw = settings.collapsedSectionsRaw
+                if expanded {
+                    raw.removeAll { $0 == key }
+                } else if !raw.contains(key) {
+                    raw.append(key)
+                }
+                settings.collapsedSectionsRaw = raw
+            }
+        )
+    }
+
+    /// Issues in the Inbox: assigned, mentions and replies always; new issues from
+    /// All-issues repos only with "Show new issues in Inbox" (otherwise one line that
+    /// points at the Issues tab). Reads the SAME unread set as the Issues tab.
+    @ViewBuilder
+    private var inboxIssuesGroup: some View {
+        let selection = inboxIssueSelection
+        if !selection.items.isEmpty || selection.hiddenNew > 0 {
+            let expansion = inboxIssuesExpansion
+            let shown = Array(selection.items.prefix(Self.inboxIssueCap))
+            let extra = selection.items.count - shown.count
+            Button {
+                expansion.wrappedValue.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Issues")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.primary)
+                    Text("\(selection.items.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
+                    Spacer()
+                    Image(systemName: expansion.wrappedValue ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, RowMetrics.horizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expansion.wrappedValue {
+                ForEach(Array(shown.enumerated()), id: \.element.nodeId) { index, issue in
+                    IssueRowView(issue: issue, isUnread: manager.issueStore.isUnread(issue.nodeId),
+                                 isMuted: false,
+                                 isFocused: selectedIssueIndex == index && showsKeyboardFocus,
+                                 onHoverSelect: {
+                                     guard !showPeek, !isScrolling else { return }
+                                     selectedIssueIndex = index
+                                 },
+                                 manager: manager, settings: settings)
+                }
+                if extra > 0 {
+                    inboxIssueLink("+\(extra) more")
+                }
+                if selection.hiddenNew > 0 {
+                    inboxIssueLink(selection.hiddenNew == 1
+                                   ? "1 new issue → Issues tab"
+                                   : "\(selection.hiddenNew) new issues → Issues tab")
+                }
+            }
+        }
+    }
+
+    private func inboxIssueLink(_ text: String) -> some View {
+        Button {
+            settings.selectedTab = .issues
+        } label: {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, RowMetrics.horizontalPadding)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func inboxRolePRs(for role: InboxRole) -> [PRSnapshot] {
@@ -1154,7 +1281,7 @@ struct TriageDeckView: View {
         EquatableRow(key: DeckRowKey(
             pr: pr,
             index: index,
-            isFocused: index == selectedIndex && showsKeyboardFocus,
+            isFocused: index == selectedIndex && showsKeyboardFocus && selectedIssueIndex == nil,
             isSelected: selectedPRs.contains(pr.nodeId),
             isPinned: settings.pinnedNodeIds.contains(pr.nodeId),
             isUnread: manager.unreadPRIds.contains(pr.nodeId),
@@ -1236,7 +1363,7 @@ struct TriageDeckView: View {
 
     private func deckRow(pr: PRSnapshot, index: Int, stackBadge: String = "", stackCount: Int = 0,
                          stackMembers: [PRSnapshot] = [], onRowTap: (() -> Void)? = nil) -> some View {
-        let isFocused = index == selectedIndex && showsKeyboardFocus
+        let isFocused = index == selectedIndex && showsKeyboardFocus && selectedIssueIndex == nil
         let isSelected = selectedPRs.contains(pr.nodeId)
         let isDraft = pr.isDraft
         // The trailing "Later"/"Merge" cluster reveals on the SELECTED row. Hover and
@@ -1397,6 +1524,7 @@ struct TriageDeckView: View {
             // instantly, which removes the cross-row hover "blink".
             .onHover { hovering in
                 guard hovering, !showPeek, !isScrolling else { return }
+                selectedIssueIndex = nil
                 selectedIndex = index
             }
             .padding(.horizontal, RowMetrics.horizontalPadding)
@@ -1448,6 +1576,7 @@ struct TriageDeckView: View {
             Button { handleTriageAction(.merge, on: pr) } label: {
                 Label("Merge PR", systemImage: "arrow.triangle.merge")
             }
+            .menuShortcut(.merge, settings)
             .disabled(writeOff || !pr.readyToMerge)
             Button { handleTriageAction(.requestChanges, on: pr) } label: {
                 Label("Request Changes", systemImage: "text.bubble")
@@ -1457,6 +1586,7 @@ struct TriageDeckView: View {
                 Button { handleTriageAction(.markReady, on: pr) } label: {
                     Label("Mark Ready for Review", systemImage: "paperplane")
                 }
+                .menuShortcut(.markReady, settings)
                 .disabled(writeOff)
             } else if isOpen {
                 Button { handleTriageAction(.convertToDraft, on: pr) } label: {
@@ -1475,6 +1605,7 @@ struct TriageDeckView: View {
                 Button { handleTriageAction(.resume, on: pr) } label: {
                     Label("Resume", systemImage: "play.circle")
                 }
+                .menuShortcut(.snooze, settings)
             } else {
                 Menu {
                     ForEach(SnoozeDuration.allCases) { duration in
@@ -1487,15 +1618,18 @@ struct TriageDeckView: View {
             Button { handleTriageAction(.markSeen, on: pr) } label: {
                 Label("Mark as Seen", systemImage: "eye")
             }
+            .menuShortcut(.markSeen, settings)
             Button { handleTriageAction(.dismiss, on: pr) } label: {
                 Label("Dismiss", systemImage: "xmark")
             }
+            .menuShortcut(.dismiss, settings)
             if inboxMode {
                 let muted = manager.isInboxMuted(pr)
                 Button { handleTriageAction(.toggleMute, on: pr) } label: {
                     Label(muted ? "Move Up (Un-mute)" : "Mute / Low-priority",
                           systemImage: muted ? "arrow.up.circle" : "arrow.down.circle")
                 }
+                .menuShortcut(.toggleMute, settings)
             }
         }
 
@@ -1506,9 +1640,11 @@ struct TriageDeckView: View {
             Button { handleTriageAction(.viewDiff, on: pr) } label: {
                 Label("View Details", systemImage: "rectangle.stack")
             }
+            .menuShortcut(.peek, settings)
             Button { handleTriageAction(.openInBrowser, on: pr) } label: {
                 Label(openActionLabel, systemImage: openActionSymbol)
             }
+            .keyboardShortcut(.return, modifiers: [])
             // Under the Linear open target the primary item reads "Open in Linear",
             // so GitHub would otherwise be unreachable from the menu.
             if settings.prOpenTarget == .linear {
@@ -1520,12 +1656,14 @@ struct TriageDeckView: View {
                 Button { handleTriageAction(.openPreview, on: pr) } label: {
                     Label("Open Preview", systemImage: "globe")
                 }
+                .menuShortcut(.openPreview, settings)
             }
             let pinned = isPinned(pr)
             Button { handleTriageAction(.togglePin, on: pr) } label: {
                 Label(pinned ? "Unpin" : "Pin to Top",
                       systemImage: pinned ? "pin.slash" : "pin")
             }
+            .menuShortcut(.togglePin, settings)
         }
 
         Divider()
@@ -1539,6 +1677,7 @@ struct TriageDeckView: View {
                 Button { handleTriageAction(.copyBranch, on: pr) } label: {
                     Label("Copy Branch Name", systemImage: "doc.on.doc")
                 }
+                .menuShortcut(.copyBranch, settings)
             }
         }
 
@@ -1707,6 +1846,7 @@ struct TriageDeckView: View {
             // resumes the pointed row, matching the deck rows. Frozen while peeking.
             .onHover { hovering in
                 guard hovering, !showPeek, !isScrolling else { return }
+                selectedIssueIndex = nil
                 selectedIndex = index
             }
             .padding(.horizontal, RowMetrics.horizontalPadding)
@@ -1878,7 +2018,23 @@ struct TriageDeckView: View {
 
     // MARK: - Focused PR
 
+    /// Tells the footer legend what kind of row is focused. Called from selection changes
+    /// only (never from `body`), so it costs one `focusedPR` lookup per keypress.
+    private func publishKeyFocus() {
+        var state = KeyFocusState()
+        if selectedIssueIndex != nil {
+            state.kind = .issue
+        } else if let pr = focusedPR {
+            state.kind = .pr
+            state.prReadyToMerge = pr.readyToMerge
+            state.prHasPreview = !(pr.vercelPreviewUrl ?? "").isEmpty
+        }
+        if manager.keyFocus.deck != state { manager.keyFocus.deck = state }
+    }
+
     private var focusedPR: PRSnapshot? {
+        // Focus is on an Inbox issue row: no PR is focused, so every PR verb no-ops.
+        guard selectedIssueIndex == nil else { return nil }
         let ordered = orderedPRs
         guard selectedIndex < ordered.count else { return nil }
         return ordered[selectedIndex]
@@ -1892,13 +2048,7 @@ struct TriageDeckView: View {
     /// only when no relevant modifiers are held; a modified binding matches
     /// only with exactly those modifiers held.
     private func shortcutMatches(_ shortcut: InAppShortcut, event: NSEvent) -> Bool {
-        let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        let binding = settings.shortcutBindings.binding(for: shortcut)
-        guard !binding.key.isEmpty, chars == binding.key else { return false }
-        let mods = event.modifierFlags
-            .intersection(.deviceIndependentFlagsMask)
-            .intersection(ShortcutBinding.relevantModifierMask)
-        return mods == binding.modifierFlags
+        inAppShortcutMatches(shortcut, event: event, settings: settings)
     }
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
@@ -1910,6 +2060,22 @@ struct TriageDeckView: View {
         if event.keyCode == 53, manager.searchActive {   // Esc
             manager.closeSearch()
             return nil
+        }
+
+        // Focus is on an Inbox issue row: its own verbs first. Navigation (J/K/arrows)
+        // and everything else fall through to the shared handling below; PR verbs then
+        // no-op because `focusedPR` is nil.
+        if let index = selectedIssueIndex {
+            let issues = inboxIssuesShown
+            if index < issues.count {
+                let issue = issues[index]
+                let store = manager.issueStore
+                if event.keyCode == 36 { manager.openIssue(issue); return nil }   // Return
+                if shortcutMatches(.markSeen, event: event) { manager.markIssueSeen(issue); return nil }
+                if shortcutMatches(.dismiss, event: event) { store.archive(issue); return nil }
+                if shortcutMatches(.toggleMute, event: event) { store.toggleMute(issue.nodeId); return nil }
+                if shortcutMatches(.copyBranch, event: event) { IssueRowView.copyLink(issue); return nil }
+            }
         }
 
         // Return opens the selected PR in the browser — regardless of whether the
@@ -2119,14 +2285,55 @@ struct TriageDeckView: View {
         return event
     }
 
+    /// Display order is: role-section PRs, the Inbox issue rows, then (expanded) Muted PRs.
+    /// `orderedPRs` holds the first and last in that order, so the issue rows sit at
+    /// `issueBoundary` — the index where the Muted PRs (if any) begin.
+    private var issueBoundary: Int {
+        guard inboxMode else { return orderedPRs.count }
+        let mutedShown = settings.collapsedSections.contains(.muted) ? sortedForDisplay(mutedPRs).count : 0
+        return orderedPRs.count - mutedShown
+    }
+
     private func moveDown() {
+        let issues = inboxIssuesShown
+        if let i = selectedIssueIndex {
+            if i + 1 < issues.count {
+                selectedIssueIndex = i + 1
+            } else if issueBoundary < orderedPRs.count {
+                // Past the last issue: continue into the Muted PRs below.
+                selectedIssueIndex = nil
+                selectedIndex = issueBoundary
+            }
+            return
+        }
         let count = orderedPRs.count
+        if !issues.isEmpty, selectedIndex >= issueBoundary - 1, selectedIndex < issueBoundary || count == 0 {
+            // Past the last role PR: step onto the first issue row.
+            selectedIssueIndex = 0
+            return
+        }
         guard count > 0 else { return }
         selectedIndex = min(selectedIndex + 1, count - 1)
     }
 
     private func moveUp() {
+        let issues = inboxIssuesShown
+        if let i = selectedIssueIndex {
+            if i > 0 {
+                selectedIssueIndex = i - 1
+            } else if issueBoundary > 0 {
+                // Above the first issue: back onto the last role PR.
+                selectedIssueIndex = nil
+                selectedIndex = issueBoundary - 1
+            }
+            return
+        }
         guard !orderedPRs.isEmpty else { return }
+        if !issues.isEmpty, selectedIndex == issueBoundary, issueBoundary < orderedPRs.count {
+            // First Muted PR: back up onto the last issue row.
+            selectedIssueIndex = issues.count - 1
+            return
+        }
         selectedIndex = max(selectedIndex - 1, 0)
     }
 
@@ -2991,7 +3198,7 @@ struct ReviewSourceBadge: View {
 /// `handler` returns nil when it consumed the key (so it is not passed to `super`).
 /// It is refreshed every SwiftUI update via `updateNSView`, so it never captures
 /// stale `@State`.
-private struct KeyCaptureView: NSViewRepresentable {
+struct KeyCaptureView: NSViewRepresentable {
     let handler: (NSEvent) -> NSEvent?
     /// Called when the popover window resigns key — i.e. the menu bar popover was
     /// closed. Used to dismiss transient overlays (the peek card) so they aren't
