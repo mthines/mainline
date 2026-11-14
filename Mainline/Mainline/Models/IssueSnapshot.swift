@@ -109,7 +109,10 @@ struct IssueSnapshot: Codable, Equatable, Identifiable {
 
     // MARK: Derived
 
-    var org: String { repoFullName.split(separator: "/").first.map(String.init)?.lowercased() ?? "" }
+    var org: String { displayOrg.lowercased() }
+
+    /// The repo owner as GitHub spells it (scope chips show this, like `PRSnapshot.org`).
+    var displayOrg: String { repoFullName.split(separator: "/").first.map(String.init) ?? "" }
 
     func isAuthored(by login: String) -> Bool { PRSnapshot.loginsMatch(author, login) }
 
@@ -269,6 +272,7 @@ enum IssueChecks {
         assert(IssueSnapshot.mentions("(@mads) thoughts?", login: me), "mention after punctuation")
 
         let fresh = issue("a")
+        assert(fresh.displayOrg == "Acme" && fresh.org == "acme", "chips show the org as spelled; matching is lowercase")
         assert(IssueClassifier.section(for: fresh, myLogin: me, muted: false) == .needsYou, "unanswered unassigned → Needs you")
         assert(IssueClassifier.section(for: issue("b", comments: [maint]), myLogin: me, muted: false) == .waitingOnReporter,
                "maintainer replied → Waiting on reporter")

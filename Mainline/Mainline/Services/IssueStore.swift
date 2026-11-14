@@ -184,7 +184,42 @@ final class IssueStore: ObservableObject {
     var unreadIds: Set<String> {
         let muted = Set(settings.mutedIssueIds)
         let live = Set(issues.map(\.nodeId))
-        return Set(settings.unreadIssueIds).intersection(live).subtracting(muted)
+        let archived = Set(issues.filter { isArchived($0) }.map(\.nodeId))
+        return Set(settings.unreadIssueIds).intersection(live).subtracting(muted).subtracting(archived)
+    }
+
+    // MARK: - Archive
+
+    /// An issue is archived while it has had no activity since it was archived.
+    func isArchived(_ issue: IssueSnapshot) -> Bool {
+        guard let at = settings.archivedIssues[issue.nodeId] else { return false }
+        return issue.updatedAt.timeIntervalSince1970 <= at
+    }
+
+    /// Followed issues that are not archived.
+    var active: [IssueSnapshot] { issues.filter { !isArchived($0) } }
+
+    /// Archived issues, most recently updated first.
+    var archived: [IssueSnapshot] { issues.filter { isArchived($0) } }
+
+    /// Hides the issue until it has new activity, and counts it as seen.
+    func archive(_ issue: IssueSnapshot) {
+        settings.archivedIssues[issue.nodeId] = issue.updatedAt.timeIntervalSince1970
+        settings.unreadIssueIds.removeAll { $0 == issue.nodeId }
+        objectWillChange.send()
+    }
+
+    func unarchive(_ nodeId: String) {
+        guard settings.archivedIssues[nodeId] != nil else { return }
+        settings.archivedIssues[nodeId] = nil
+        objectWillChange.send()
+    }
+
+    /// Forgets archive entries for issues that are no longer followed (closed, or repo Off).
+    private func pruneArchived() {
+        let live = Set(issues.map(\.nodeId))
+        let kept = settings.archivedIssues.filter { live.contains($0.key) }
+        if kept.count != settings.archivedIssues.count { settings.archivedIssues = kept }
     }
 
     private func markUnread(_ ids: [String]) {
@@ -198,6 +233,7 @@ final class IssueStore: ObservableObject {
         let live = Set(issues.map(\.nodeId))
         let kept = settings.unreadIssueIds.filter { live.contains($0) }
         if kept.count != settings.unreadIssueIds.count { settings.unreadIssueIds = kept }
+        pruneArchived()
     }
 
     /// An issue is seen when it is opened.

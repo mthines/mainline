@@ -873,6 +873,14 @@ final class PRManager: ObservableObject {
     /// counts follow the selected tab, drafts, For-me, and snooze filters.
     var scopeCounts: [PRScope: Int] {
         var counts: [PRScope: Int] = [:]
+        // The Issues tab chips count its own population: followed, un-archived, un-muted issues.
+        if settings.selectedTab == .issues {
+            let muted = Set(settings.mutedIssueIds)
+            for issue in issueStore.active where !issue.displayOrg.isEmpty && !muted.contains(issue.nodeId) {
+                counts[.org(issue.displayOrg), default: 0] += 1
+            }
+            return counts
+        }
         for pr in scopeSelectorBasePRs where !pr.org.isEmpty {
             counts[.org(pr.org), default: 0] += 1
         }
@@ -968,7 +976,35 @@ final class PRManager: ObservableObject {
     var issueNeedsMyTimeCount: Int {
         guard issueViewsIncluded else { return 0 }
         return IssueClassifier.needsMyTimeCount(
-            issueStore.issues, myLogin: settings.githubUsername,
+            issueStore.active, myLogin: settings.githubUsername,
+            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox)
+    }
+
+    // MARK: - Issues in view (archive + scope chip)
+
+    /// Whether an issue falls under a scope chip. Case-insensitive, like GitHub logins.
+    private static func issue(_ issue: IssueSnapshot, matches scope: PRScope) -> Bool {
+        switch scope {
+        case .org(let o):  return issue.org == o.lowercased()
+        case .repo(let r): return issue.repoFullName.lowercased() == r.lowercased()
+        }
+    }
+
+    private func inSelectedScope(_ list: [IssueSnapshot]) -> [IssueSnapshot] {
+        guard let scope = scopeStore.selectedScope else { return list }
+        return list.filter { Self.issue($0, matches: scope) }
+    }
+
+    /// Issues the Issues tab and the Inbox group draw: not archived, inside the scope chip.
+    var visibleIssues: [IssueSnapshot] { inSelectedScope(issueStore.active) }
+
+    /// Archived issues inside the scope chip (the restorable "Archived" group).
+    var archivedIssues: [IssueSnapshot] { inSelectedScope(issueStore.archived) }
+
+    /// The Inbox's issue group: the one selection both the view and the empty check read.
+    var inboxIssueSelection: IssueClassifier.InboxSelection {
+        IssueClassifier.inboxItems(
+            visibleIssues, myLogin: settings.githubUsername,
             muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox)
     }
 
@@ -1132,7 +1168,8 @@ final class PRManager: ObservableObject {
         store.$snapshots
             .map { dict in Array(dict.values) }
             .sink { [weak self] prs in
-                self?.scopeStore.rebuild(from: prs)
+                self?.scopeStore.rebuild(from: prs,
+                                         extraOrgs: self?.issueStore.issues.map(\.displayOrg) ?? [])
                 // Catch a merged PR still lingering in the live set, then reconcile pins.
                 self?.applyUnpinOnMerge(prs)
                 Task { await self?.refreshPinnedFetches() }

@@ -689,6 +689,7 @@ final class MainlineSettings: ObservableObject {
         static let showNewIssuesInInbox  = "showNewIssuesInInbox"
         static let mutedIssueIds         = "mutedIssueIds"
         static let unreadIssueIds        = "unreadIssueIds"
+        static let archivedIssues        = "archivedIssues"
         // Preview-deployment detection
         static let vercelPreviewEnabled  = "vercelPreviewEnabled"
         static let vercelPreviewDomains  = "vercelPreviewDomains"
@@ -1073,6 +1074,13 @@ final class MainlineSettings: ObservableObject {
     /// An issue leaves it when opened (not when the popover opens).
     @Published var unreadIssueIds: [String] {
         didSet { defaults.set(unreadIssueIds, forKey: Keys.unreadIssueIds) }
+    }
+
+    /// Archived issues: node id → the issue's `updatedAt` (epoch seconds) when it was
+    /// archived. An archive lapses on its own once the issue has newer activity, so a
+    /// reply brings it back; Mute is the permanent counterpart.
+    @Published var archivedIssues: [String: Double] {
+        didSet { defaults.set(archivedIssues, forKey: Keys.archivedIssues) }
     }
 
     /// Effective watch level: repo override, else org default, else `.onlyMine`.
@@ -1604,6 +1612,7 @@ final class MainlineSettings: ObservableObject {
             ? true : defaults.bool(forKey: Keys.showNewIssuesInInbox)
         mutedIssueIds = defaults.stringArray(forKey: Keys.mutedIssueIds) ?? []
         unreadIssueIds = defaults.stringArray(forKey: Keys.unreadIssueIds) ?? []
+        archivedIssues = defaults.dictionary(forKey: Keys.archivedIssues) as? [String: Double] ?? [:]
         // Review readiness — default ON when unset (absent key → true).
         reviewNotReadyOnConflict = defaults.object(forKey: Keys.reviewNotReadyOnConflict) == nil
             ? true : defaults.bool(forKey: Keys.reviewNotReadyOnConflict)

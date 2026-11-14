@@ -654,9 +654,10 @@ struct MenuBarView: View {
                         let count = manager.scopeCounts[scope] ?? 0
                         scopeChip(label: "\(scope.displayName) \(count)", scope: scope)
                     }
-                    Divider().frame(height: 16)
+                    if settings.selectedTab != .issues { Divider().frame(height: 16) }
                 }
-                draftsChip
+                // Issues have no drafts, so the toggle would do nothing there.
+                if settings.selectedTab != .issues { draftsChip }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -824,9 +825,7 @@ struct MenuBarView: View {
     /// Whether the Inbox's issue group has anything to show — the same selection
     /// `TriageDeckView` renders, so an Inbox with issues but no PRs isn't "empty".
     private var hasInboxIssues: Bool {
-        let selection = IssueClassifier.inboxItems(
-            manager.issueStore.issues, myLogin: settings.githubUsername,
-            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox)
+        let selection = manager.inboxIssueSelection
         return !selection.items.isEmpty || selection.hiddenNew > 0
     }
 
