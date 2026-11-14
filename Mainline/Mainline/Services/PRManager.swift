@@ -979,8 +979,15 @@ final class PRManager: ObservableObject {
     var issueNeedsMyTimeCount: Int {
         guard issueViewsIncluded else { return 0 }
         return IssueClassifier.needsMyTimeCount(
-            issueStore.active, myLogin: settings.githubUsername,
-            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox)
+            badgeIssues, myLogin: settings.githubUsername,
+            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox,
+            newIssueAllowed: { [settings] in settings.issueWatchLevel(forRepo: $0) == .allIssues })
+    }
+
+    /// The issues the badge counts: the scope-chip selection when the badge follows the
+    /// current view (like the PR counts), otherwise every active issue.
+    private var badgeIssues: [IssueSnapshot] {
+        settings.menuBarScopeFollowsSelection ? visibleIssues : issueStore.active
     }
 
     // MARK: - Issues in view (archive + scope chip)
@@ -1008,7 +1015,8 @@ final class PRManager: ObservableObject {
     var inboxIssueSelection: IssueClassifier.InboxSelection {
         IssueClassifier.inboxItems(
             visibleIssues, myLogin: settings.githubUsername,
-            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox)
+            muted: Set(settings.mutedIssueIds), showNew: settings.showNewIssuesInInbox,
+            newIssueAllowed: { [settings] in settings.issueWatchLevel(forRepo: $0) == .allIssues })
     }
 
     /// Count of PRs the user personally needs to act on (Layer A badge logic).
@@ -1064,7 +1072,7 @@ final class PRManager: ObservableObject {
         case .unread:
             // Issues share the badge: the same unread set the Issues tab and Inbox use.
             let count = scoped.filter { unreadPRIds.contains($0.nodeId) }.count
-                + (issueViewsIncluded ? issueStore.unreadIds.count : 0)
+                + (issueViewsIncluded ? badgeIssues.filter { issueStore.unreadIds.contains($0.nodeId) }.count : 0)
             return .attention(count)
 
         case .totalOpen:

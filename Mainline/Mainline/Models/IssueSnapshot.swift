@@ -219,14 +219,19 @@ enum IssueClassifier {
     /// Issues that surface in the Inbox, ranked (reason, then most recently updated).
     /// Assigned, mention and reply issues are always shown; `.newIssue` ones only when `showNew`.
     /// Muted issues never show. Each issue appears once.
+    /// `newIssueAllowed` says whether a repo follows new issues at all (All issues). The
+    /// `involves:@me` search also returns issues the user only commented on, so without
+    /// this an Only-mine repo would surface them as "new".
     static func inboxItems(_ issues: [IssueSnapshot], myLogin: String, muted: Set<String>,
-                           showNew: Bool) -> InboxSelection {
+                           showNew: Bool,
+                           newIssueAllowed: (String) -> Bool = { _ in true }) -> InboxSelection {
         var seen = Set<String>()
         var kept: [(IssueInboxReason, IssueSnapshot)] = []
         var hidden = 0
         for issue in issues where !muted.contains(issue.nodeId) && seen.insert(issue.nodeId).inserted {
             let reason = inboxReason(for: issue, myLogin: myLogin)
             if reason == .newIssue {
+                guard newIssueAllowed(issue.repoFullName) else { continue }
                 // Only unanswered, unassigned issues count as "new" for the Inbox.
                 guard section(for: issue, myLogin: myLogin, muted: false) == .needsYou else { continue }
                 if !showNew { hidden += 1; continue }
@@ -241,8 +246,10 @@ enum IssueClassifier {
 
     /// Issues that need the viewer's time (feeds the menu-bar badge). Each issue counted once.
     static func needsMyTimeCount(_ issues: [IssueSnapshot], myLogin: String, muted: Set<String>,
-                                 showNew: Bool) -> Int {
-        inboxItems(issues, myLogin: myLogin, muted: muted, showNew: showNew).items.count
+                                 showNew: Bool,
+                                 newIssueAllowed: (String) -> Bool = { _ in true }) -> Int {
+        inboxItems(issues, myLogin: myLogin, muted: muted, showNew: showNew,
+                   newIssueAllowed: newIssueAllowed).items.count
     }
 }
 
@@ -290,6 +297,8 @@ enum IssueChecks {
         let off = IssueClassifier.inboxItems(items, myLogin: me, muted: [], showNew: false)
         assert(off.hiddenNew == 1 && !off.items.contains { $0.nodeId == "a" }, "new issues hidden when setting off")
         assert(IssueClassifier.needsMyTimeCount(items, myLogin: me, muted: ["c"], showNew: false) == 1, "muted excluded from badge count")
+        let gated = IssueClassifier.inboxItems(items, myLogin: me, muted: [], showNew: true, newIssueAllowed: { _ in false })
+        assert(!gated.items.contains { $0.nodeId == "a" } && gated.hiddenNew == 0, "an Only-mine repo's unanswered issue is not 'new'")
 
         let mineQuiet = issue("q", author: "mads")
         let mineAnswered = issue("r", author: "mads", comments: [drive])
