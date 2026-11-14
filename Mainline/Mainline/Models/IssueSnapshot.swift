@@ -151,10 +151,15 @@ struct IssueSnapshot: Codable, Equatable, Identifiable {
         let needle = "@" + login.lowercased()
         var search = haystack.startIndex..<haystack.endIndex
         while let r = haystack.range(of: needle, range: search) {
+            search = r.upperBound..<haystack.endIndex
+            // An "@" glued to a word is an email address, not a mention.
+            if r.lowerBound > haystack.startIndex {
+                let prev = haystack[haystack.index(before: r.lowerBound)]
+                if prev.isLetter || prev.isNumber || prev == "_" || prev == "-" { continue }
+            }
             if r.upperBound == haystack.endIndex { return true }
             let next = haystack[r.upperBound]
             if !(next.isLetter || next.isNumber || next == "-" || next == "_") { return true }
-            search = r.upperBound..<haystack.endIndex
         }
         return false
     }
@@ -260,6 +265,8 @@ enum IssueChecks {
         assert(IssueSnapshot.mentions("ping @mads please", login: me), "mention matches case-insensitively")
         assert(!IssueSnapshot.mentions("ping @madsen please", login: me), "mention is a whole word")
         assert(IssueSnapshot.mentions("cc @mads", login: me), "mention at end of text")
+        assert(!IssueSnapshot.mentions("write to ops@mads.example.com", login: me), "an email address is not a mention")
+        assert(IssueSnapshot.mentions("(@mads) thoughts?", login: me), "mention after punctuation")
 
         let fresh = issue("a")
         assert(IssueClassifier.section(for: fresh, myLogin: me, muted: false) == .needsYou, "unanswered unassigned → Needs you")
