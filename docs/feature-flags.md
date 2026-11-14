@@ -2,6 +2,15 @@
 
 Mainline ships its flag registry with the code, the same model as LoreKit's `@lorekit/feature-flags`. There is no remote service: **ramping a flag is a release**. Use flags to merge code to production that only the owner sees, then ramp it to a percentage of Macs or split it for an A/B test.
 
+## Quick start: a flag only you see
+
+1. Add a `FlagDefinition` to `FeatureFlagRegistry.flags` with variants `off` and `on` and `defaultVariant: "off"` (see [Adding a flag](#adding-a-flag)).
+2. Branch on it with `FeatureFlagClient.shared.isEnabled("my-flag")`, then merge and release. Everyone resolves `off`.
+3. In Mainline, open **Settings → Developer** and pick `on` for the flag. Only this Mac changes. The pane is listed in a release build only when the signed-in GitHub login is an owner (`mthines` by default), and always in a DEBUG build.
+4. To roll it out, add an `experiment` and raise the `on` weight release by release (see [Ramp or run an experiment](#ramp-or-run-an-experiment)).
+
+The owner check only hides the pane; the flagged code ships to every Mac. Don't gate anything sensitive behind a flag.
+
 ## Resolution order
 
 `FeatureFlagProvider.resolve` returns a value, a variant, and a reason:
