@@ -4,7 +4,7 @@ Mainline ships its flag registry with the code, the same model as LoreKit's `@lo
 
 ## Quick start: a flag only you see
 
-1. Add a `FlagDefinition` to `FeatureFlagRegistry.flags` with variants `off` and `on` and `defaultVariant: "off"` (see [Adding a flag](#adding-a-flag)).
+1. Add a `FlagDefinition` to `FeatureFlagRegistry.flags` with `type: .boolean`, variants `"off": .bool(false)` and `"on": .bool(true)`, and `defaultVariant: "off"` (see [Adding a flag](#adding-a-flag)). The variants must be boolean: `isEnabled` reads only `.bool` values, so a `.string` flag with `"off"`/`"on"` strings passes validation but always returns `false`, even with an override.
 2. Branch on it with `FeatureFlagClient.shared.isEnabled("my-flag")`, then merge and release. Everyone resolves `off`.
 3. In Mainline, open **Settings → Developer** and pick `on` for the flag. Only this Mac changes. The pane is listed in a release build only when the signed-in GitHub login is an owner (`mthines` by default), and always in a DEBUG build.
 4. To roll it out, add an `experiment` and raise the `on` weight release by release (see [Ramp or run an experiment](#ramp-or-run-an-experiment)).
