@@ -461,7 +461,9 @@ struct MenuBarView: View {
         let forMeFilter: CGFloat = settings.selectedTab == .forMe ? 36 : 0
         // The search field + its divider add fixed chrome while search is open.
         let searchBarReserve: CGFloat = manager.searchActive ? 40 : 0
-        return base + forMeFilter + searchBarReserve
+        // The rate-limit banner (3 lines + divider) is fixed chrome while a limit shows.
+        let rateLimitReserve: CGFloat = manager.rateLimit != nil ? 62 : 0
+        return base + forMeFilter + searchBarReserve + rateLimitReserve
     }
 
     /// The maximum height the single scroll region may occupy: the cap minus the

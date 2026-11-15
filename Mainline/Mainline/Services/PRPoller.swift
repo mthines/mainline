@@ -263,6 +263,7 @@ final class PRPoller {
     }
 
     private func pollPRs(token: String) async {
+        let pollStartedAt = Date()
         // Prune expired snoozes on every poll so postponed PRs silently return to
         // their normal group the moment their wake time passes — even while the
         // panel is closed. Render-time filtering already compares to `Date()`; this
@@ -548,7 +549,7 @@ final class PRPoller {
 
         statusMessage = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
         lastSyncAt = Date()
-        RateLimitMonitor.shared.clear()
+        RateLimitMonitor.shared.clear(ifNoHitSince: pollStartedAt)
 
         // DISPLAY-ONLY Done fetch — recently merged/closed PRs for both tabs.
         // Runs AFTER the open path so it never blocks notifications, and its errors

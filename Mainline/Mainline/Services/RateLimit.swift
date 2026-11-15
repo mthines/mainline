@@ -55,7 +55,10 @@ enum RateLimitClassifier {
             return nil
         case 200:
             guard let body, graphQLRateLimited(body: body) else { return nil }
-            return hit(untilReset() ?? defaultSecondaryWait, remaining == "0" ? .primary : .secondary)
+            // Budget left means this is abuse protection, not the hourly reset — a
+            // short wait, not the up-to-an-hour `X-RateLimit-Reset`.
+            if remaining == "0", let wait = untilReset() { return hit(wait, .primary) }
+            return hit(retryAfter ?? defaultSecondaryWait, .secondary)
         default:
             return nil
         }
@@ -96,6 +99,7 @@ final class RateLimitMonitor: ObservableObject, @unchecked Sendable {
 
     private let lock = NSLock()
     private var blocked: RateLimitHit?
+    private var lastReportAt: Date?
 
     /// The active hit while still in the future; nil once it has lifted. Thread-safe.
     var blockedHit: RateLimitHit? {
@@ -107,17 +111,39 @@ final class RateLimitMonitor: ObservableObject, @unchecked Sendable {
     /// Records a hit from any thread. A later reset wins over an earlier one.
     func report(_ hit: RateLimitHit) {
         lock.lock()
-        let merged = (blocked.map { $0.resetAt > hit.resetAt } ?? false) ? blocked! : hit
-        blocked = merged
+        if let current = blocked, current.resetAt > hit.resetAt {
+            // keep the later reset
+        } else {
+            blocked = hit
+        }
+        lastReportAt = Date()
         lock.unlock()
-        DispatchQueue.main.async { [weak self] in self?.active = merged }
+        publish()
     }
 
-    /// A poll fully succeeded — the limit is over.
-    func clear() {
-        lock.lock(); blocked = nil; lock.unlock()
+    /// A poll fully succeeded — the limit is over. `pollStartedAt` is when that poll
+    /// began: a hit reported DURING it (a swallowed `try?` request, or another client)
+    /// is newer than the poll's evidence of health and must survive.
+    func clear(ifNoHitSince pollStartedAt: Date) {
+        lock.lock()
+        if let last = lastReportAt, last >= pollStartedAt {
+            lock.unlock()
+            return
+        }
+        blocked = nil
+        lock.unlock()
+        publish()
+    }
+
+    /// Re-reads the state on the main thread, so racing report/clear calls can never
+    /// leave `active` disagreeing with `blocked`.
+    private func publish() {
         DispatchQueue.main.async { [weak self] in
-            if self?.active != nil { self?.active = nil }
+            guard let self else { return }
+            self.lock.lock()
+            let current = self.blocked
+            self.lock.unlock()
+            if self.active != current { self.active = current }
         }
     }
 }
@@ -144,6 +170,8 @@ enum RateLimitChecks {
         assert(RateLimitClassifier.classify(status: 403, header: h([:]), body: Data("You have exceeded a secondary rate limit".utf8), now: now)?.kind == .secondary)
         // A successful 200 with Remaining 0 is NOT thrown away
         assert(RateLimitClassifier.classify(status: 200, header: h(["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000120"]), body: Data(#"{"data":{}}"#.utf8), now: now) == nil)
+        // GraphQL limit at HTTP 200 with budget left: short secondary wait, not the hourly reset
+        assert(secs(RateLimitClassifier.classify(status: 200, header: h(["X-RateLimit-Remaining": "4000", "X-RateLimit-Reset": "1003000"]), body: Data(#"{"errors":[{"type":"RATE_LIMITED"}]}"#.utf8), now: now)) == 60)
         // GraphQL limit at HTTP 200
         let gql = Data(#"{"data":null,"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded"}]}"#.utf8)
         assert(RateLimitClassifier.classify(status: 200, header: h(["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000090"]), body: gql, now: now)?.kind == .primary)
