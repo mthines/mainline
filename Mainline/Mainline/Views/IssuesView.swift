@@ -265,6 +265,7 @@ struct IssueRowView: View {
         let me = settings.githubUsername
         if issue.isAssigned(to: me) { return "assigned to you" }
         if issue.isAuthored(by: me) { return issue.awaitingMyReply(login: me) ? "new reply" : "yours" }
+        if issue.reporterRepliedToMe(login: me) { return "new reply" }
         if issue.mentionsMe { return "mentioned you" }
         if issue.commentCount > 0 {
             return issue.commentCount == 1 ? "1 comment" : "\(issue.commentCount) comments"

@@ -143,7 +143,7 @@ struct IssueSnapshot: Codable, Equatable, Identifiable {
     /// me. Requires my own comment (not just any maintainer's) so a backlog issue someone else
     /// answered never floods the Inbox, and requires no assignee so a colleague's issue stays theirs.
     func reporterRepliedToMe(login: String) -> Bool {
-        guard assignees.isEmpty, let last = comments.last,
+        guard assignees.isEmpty, !isAuthored(by: login), let last = comments.last,
               PRSnapshot.loginsMatch(last.author, author) else { return false }
         return comments.contains { PRSnapshot.loginsMatch($0.author, login) }
     }
@@ -347,6 +347,10 @@ enum IssueChecks {
         assert(IssueClassifier.section(for: colleague, myLogin: me, muted: false) == .assigned, "a colleague's assigned issue stays Assigned")
         assert(IssueClassifier.inboxItems([colleague], myLogin: me, muted: [], showNew: false).items.isEmpty,
                "a colleague's assigned issue does not enter my Inbox")
+        let mineLast = issue("o2", author: "mads", comments: [drive, mine1])
+        assert(IssueClassifier.inboxReason(for: mineLast, myLogin: me) == .newIssue
+               && IssueClassifier.inboxItems([mineLast], myLogin: me, muted: [], showNew: false).items.isEmpty,
+               "my own issue where my comment is newest stays out of the Inbox")
         let backlog = theirs([maint, back], [], [])
         assert(IssueClassifier.inboxItems([backlog], myLogin: me, muted: [], showNew: false).items.isEmpty,
                "a reply on an issue I never commented on is not an Inbox reply")
