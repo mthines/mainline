@@ -1045,6 +1045,7 @@ final class GitHubClient {
 
     private static let searchQueryDocument = """
     query($q: String!, $first: Int!) {
+      rateLimit { cost }
       search(query: $q, type: ISSUE, first: $first) {
         nodes {
           ... on PullRequest {
@@ -1106,6 +1107,7 @@ final class GitHubClient {
     /// PRs only.
     private static let prNodesQueryDocument = """
     query($ids: [ID!]!) {
+      rateLimit { cost }
       nodes(ids: $ids) {
         ... on PullRequest {
           \(prNodeFields)
@@ -1711,6 +1713,13 @@ final class GitHubClient {
     /// Throws `rateLimited` (and tells `RateLimitMonitor`) when the response is any of
     /// GitHub's rate-limit shapes — see `RateLimitClassifier` for the four of them.
     private func checkRateLimit(_ response: HTTPURLResponse, data: Data) throws {
+        if response.url?.path == "/graphql" {
+            APIBudget.shared.observeResponse(
+                status: response.statusCode,
+                header: { response.value(forHTTPHeaderField: $0) },
+                body: data
+            )
+        }
         guard let hit = RateLimitClassifier.classify(
             status: response.statusCode,
             header: { response.value(forHTTPHeaderField: $0) },
@@ -1881,6 +1890,7 @@ extension GitHubClient {
 
     private static let issueSearchDocument = """
     query($q: String!, $first: Int!, $after: String) {
+      rateLimit { cost }
       search(query: $q, type: ISSUE, first: $first, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {

@@ -178,6 +178,122 @@ final class RateLimitMonitor: ObservableObject, @unchecked Sendable {
     }
 }
 
+// MARK: - Poll pacing (pure)
+
+/// How often to poll, and which parts of a poll are due. Pure so `PollPacingChecks`
+/// can assert it. The two levers that cut GitHub points the most:
+///  * the display-only Done searches and the issue search run every
+///    `secondaryInterval`, not every poll;
+///  * with the panel closed nothing is being looked at, so polling slows to
+///    `idleFloor` (notifications still arrive, at most that late) — and doubles again
+///    when the hourly budget is nearly spent.
+enum PollPacing {
+    static let idleFloor: Double = 60
+    static let maxInterval: Double = 600
+    static let secondaryInterval: TimeInterval = 150
+    static let lowBudgetFraction = 0.15
+
+    static func interval(base: Double, panelVisible: Bool, budgetLow: Bool) -> Double {
+        var interval = base
+        if !panelVisible { interval = max(interval, idleFloor) }
+        if budgetLow { interval *= 2 }
+        return min(interval, max(maxInterval, base))
+    }
+
+    static func secondaryDue(lastRun: Date?, now: Date, forced: Bool) -> Bool {
+        guard !forced, let lastRun else { return true }
+        return now.timeIntervalSince(lastRun) >= secondaryInterval
+    }
+}
+
+// MARK: - GraphQL budget (points)
+
+/// What the GraphQL budget looks like: the `X-RateLimit-*` headers GitHub sends on every
+/// response give the limit, what is left and the reset; the `rateLimit { cost }` field our
+/// search documents carry gives each query's real point cost. Request counts mislead —
+/// a 100-PR search costs many points — so Settings shows points.
+final class APIBudget: ObservableObject, @unchecked Sendable {
+    static let shared = APIBudget()
+
+    struct Snapshot: Equatable {
+        var limit: Int
+        var remaining: Int
+        var resetAt: Date
+        /// Points the most recent poll spent (this app's own queries only).
+        var lastPollCost: Int?
+        /// Average points per hour since launch, once enough time has passed to mean something.
+        var pointsPerHour: Int?
+    }
+
+    @Published private(set) var snapshot: Snapshot?
+
+    private let lock = NSLock()
+    private var limit = 0, remaining = 0
+    private var resetAt = Date.distantPast
+    private var pollCost = 0
+    private var lastPollCost: Int?
+    private var spent = 0
+    private let since = Date()
+
+    /// True when the budget is nearly spent and the window has not yet reset.
+    var isLow: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return Self.isLow(limit: limit, remaining: remaining, resetAt: resetAt, now: Date())
+    }
+
+    static func isLow(limit: Int, remaining: Int, resetAt: Date, now: Date) -> Bool {
+        limit > 0 && resetAt > now && Double(remaining) < Double(limit) * PollPacing.lowBudgetFraction
+    }
+
+    /// Reads one GraphQL response's headers and (on a 200) its query cost.
+    func observeResponse(status: Int, header: (String) -> String?, body: Data) {
+        let l = header("X-RateLimit-Limit").flatMap { Int($0) }
+        let r = header("X-RateLimit-Remaining").flatMap { Int($0) }
+        let t = header("X-RateLimit-Reset").flatMap { TimeInterval($0) }
+        let cost = status == 200 ? Self.parseCost(body: body) : nil
+        lock.lock()
+        if let l, let r, let t { limit = l; remaining = r; resetAt = Date(timeIntervalSince1970: t) }
+        if let cost { pollCost += cost; spent += cost }
+        lock.unlock()
+        publish()
+    }
+
+    func beginPoll() { lock.lock(); pollCost = 0; lock.unlock() }
+
+    func endPoll() {
+        lock.lock(); lastPollCost = pollCost; lock.unlock()
+        publish()
+    }
+
+    /// `data.rateLimit.cost`, found cheaply: the body is only decoded when it carries the field.
+    static func parseCost(body: Data) -> Int? {
+        guard body.range(of: Data("\"rateLimit\"".utf8)) != nil else { return nil }
+        struct Envelope: Decodable {
+            struct D: Decodable { struct R: Decodable { let cost: Int? }; let rateLimit: R? }
+            let data: D?
+        }
+        return (try? JSONDecoder().decode(Envelope.self, from: body))?.data?.rateLimit?.cost
+    }
+
+    private func publish() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            var snap: Snapshot?
+            if self.limit > 0 {
+                let hours = Date().timeIntervalSince(self.since) / 3600
+                snap = Snapshot(
+                    limit: self.limit, remaining: self.remaining, resetAt: self.resetAt,
+                    lastPollCost: self.lastPollCost,
+                    pointsPerHour: hours >= 0.1 ? Int(Double(self.spent) / hours) : nil
+                )
+            }
+            self.lock.unlock()
+            if self.snapshot != snap { self.snapshot = snap }
+        }
+    }
+}
+
 #if DEBUG
 enum RateLimitChecks {
     static func run() {
@@ -214,6 +330,34 @@ enum RateLimitChecks {
         assert(sec?.resource == nil && sec?.key == RateLimitMonitor.appWide)
         // Waits are clamped to [1, maxWait]
         assert(secs(RateLimitClassifier.classify(status: 429, header: h(["Retry-After": "999999"]), body: nil, now: now)) == RateLimitClassifier.maxWait)
+    }
+}
+#endif
+
+#if DEBUG
+enum PollPacingChecks {
+    static func run() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        // Panel open at the default interval: unchanged
+        assert(PollPacing.interval(base: 30, panelVisible: true, budgetLow: false) == 30)
+        // Closed: floor of 60; a slower user setting is never sped up
+        assert(PollPacing.interval(base: 30, panelVisible: false, budgetLow: false) == 60)
+        assert(PollPacing.interval(base: 300, panelVisible: false, budgetLow: false) == 300)
+        // Low budget doubles, capped
+        assert(PollPacing.interval(base: 30, panelVisible: true, budgetLow: true) == 60)
+        assert(PollPacing.interval(base: 400, panelVisible: false, budgetLow: true) == 600)
+        // Secondary work: first run, forced, then spaced
+        assert(PollPacing.secondaryDue(lastRun: nil, now: now, forced: false))
+        assert(PollPacing.secondaryDue(lastRun: now, now: now.addingTimeInterval(10), forced: true))
+        assert(!PollPacing.secondaryDue(lastRun: now, now: now.addingTimeInterval(60), forced: false))
+        assert(PollPacing.secondaryDue(lastRun: now, now: now.addingTimeInterval(150), forced: false))
+        // Budget is "low" only inside an unreset window
+        assert(APIBudget.isLow(limit: 5000, remaining: 600, resetAt: now.addingTimeInterval(60), now: now))
+        assert(!APIBudget.isLow(limit: 5000, remaining: 3000, resetAt: now.addingTimeInterval(60), now: now))
+        assert(!APIBudget.isLow(limit: 5000, remaining: 600, resetAt: now.addingTimeInterval(-1), now: now))
+        // Cost parsing
+        assert(APIBudget.parseCost(body: Data(#"{"data":{"rateLimit":{"cost":23},"search":{}}}"#.utf8)) == 23)
+        assert(APIBudget.parseCost(body: Data(#"{"data":{"search":{}}}"#.utf8)) == nil)
     }
 }
 #endif

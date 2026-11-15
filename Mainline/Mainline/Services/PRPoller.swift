@@ -45,6 +45,16 @@ final class PRPoller {
     /// only: nil until the first poll after launch.
     private var knownCommittedBots: Set<String>?
 
+    /// Whether the popover is open. Set by `PRManager`. Starts false: the app launches
+    /// with the panel closed, and a closed panel polls at the slower idle pace.
+    var isPanelVisible = false
+
+    /// When the display-only Done + issue fetches last ran (see `PollPacing.secondaryInterval`).
+    private var lastSecondaryAt: Date?
+
+    /// Set per poll: whether this cycle also runs the Done searches (read by `pollPRs`).
+    private var runDoneThisPoll = true
+
     /// Human-readable status for the menu bar.
     @Published private(set) var statusMessage: String = "Not started"
 
@@ -90,7 +100,11 @@ final class PRPoller {
             // right away and populates without the user pressing Refresh.
             while !Task.isCancelled {
                 await self.poll(token: token)
-                let interval = Double(self.settings.pollIntervalSeconds)
+                let interval = PollPacing.interval(
+                    base: Double(self.settings.pollIntervalSeconds),
+                    panelVisible: self.isPanelVisible,
+                    budgetLow: APIBudget.shared.isLow
+                )
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
             }
         }
@@ -105,7 +119,7 @@ final class PRPoller {
 
     /// Runs a single poll without interfering with the scheduled loop.
     func pollOnce(token: String) async {
-        await poll(token: token)
+        await poll(token: token, forced: true)
     }
 
     // MARK: - Carry-forward (pure)
@@ -252,7 +266,9 @@ final class PRPoller {
     /// One full cycle: the PR fetch, then (when wired) the issue fetch. Issues run after
     /// the PRs so an early return inside the PR poll never starves them, and a failure in
     /// one never blocks the other.
-    private func poll(token: String) async {
+    /// - Parameter forced: a manual refresh or panel open — run the Done/issue fetches
+    ///   too, whatever their last-run time.
+    private func poll(token: String, forced: Bool = false) async {
         // A rate limit is being waited out: skip the whole cycle (PRs, issues, Done,
         // previews) rather than send requests `GitHubClient` would refuse anyway. This
         // also keeps the Refresh button instant — the old handler slept the limit's
@@ -261,10 +277,17 @@ final class PRPoller {
             statusMessage = "Rate limited — resumes \(RateLimitClassifier.clockLabel(hit.resetAt))"
             return
         }
+        // The Done searches and the issue search are display-only and change slowly:
+        // run them every `PollPacing.secondaryInterval`, not every poll.
+        let secondaryDue = PollPacing.secondaryDue(lastRun: lastSecondaryAt, now: Date(), forced: forced)
+        runDoneThisPoll = secondaryDue
+        APIBudget.shared.beginPoll()
+        defer { APIBudget.shared.endPoll() }
         await pollPRs(token: token)
-        if let issueStore {
+        if secondaryDue, let issueStore {
             await issueStore.poll(client: client, token: token)
         }
+        if secondaryDue { lastSecondaryAt = Date() }
     }
 
     private func pollPRs(token: String) async {
@@ -562,7 +585,7 @@ final class PRPoller {
         // are all swallowed benignly (the Done section is non-critical). Results
         // are pushed to the caller's separate `donePRs` collection and NEVER go
         // through the diff engine / notifications.
-        await fetchDonePRs(token: token)
+        if runDoneThisPoll { await fetchDonePRs(token: token) }
 
         // Enrich the open set with Vercel preview URLs. Runs LAST so it never blocks
         // notifications or the Done section, and only fetches PRs whose preview

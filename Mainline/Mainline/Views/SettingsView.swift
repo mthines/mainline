@@ -192,6 +192,30 @@ struct SettingsView: View {
 
     // MARK: - GitHub
 
+    @ObservedObject private var apiBudget = APIBudget.shared
+
+    /// Real points, not request counts: a 100-PR search costs many points.
+    @ViewBuilder private var apiBudgetRow: some View {
+        if let b = apiBudget.snapshot {
+            let used = b.limit - b.remaining
+            VStack(alignment: .leading, spacing: 2) {
+                ProgressView(value: Double(used), total: Double(max(b.limit, 1)))
+                Text("GitHub API budget: \(b.remaining.formatted()) of \(b.limit.formatted()) points left · resets \(RateLimitClassifier.clockLabel(b.resetAt))")
+                    .font(.caption).foregroundStyle(.secondary)
+                if b.lastPollCost != nil || b.pointsPerHour != nil {
+                    Text([
+                        b.lastPollCost.map { "Last poll: \($0) points" },
+                        b.pointsPerHour.map { "Mainline averages ~\($0.formatted()) points/hour" },
+                    ].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            Text("GitHub API budget: appears after the first poll.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     @ViewBuilder
     private var githubSection: some View {
         Section("GitHub Token") {
@@ -275,6 +299,10 @@ struct SettingsView: View {
                 in: 30...3600,
                 step: 30
             )
+            Text("While the panel is closed, polling slows to at least 60s, and merged/closed PRs and issues refresh about every 2½ minutes. Opening the panel refreshes at once.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            apiBudgetRow
         }
 
         Section("Write Actions") {
