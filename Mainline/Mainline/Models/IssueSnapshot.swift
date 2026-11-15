@@ -139,6 +139,14 @@ struct IssueSnapshot: Codable, Equatable, Identifiable {
         return !PRSnapshot.loginsMatch(last.author, login)
     }
 
+    /// The reporter has the last word on a thread someone else already answered (a maintainer
+    /// reply, or a needs-info label), so the ball is back with the maintainers. Comments are
+    /// oldest first; an unanswered issue has nothing to be "back" from.
+    var reporterRepliedToAnswer: Bool {
+        guard let last = comments.last, PRSnapshot.loginsMatch(last.author, author) else { return false }
+        return hasMaintainerReply || needsInfo
+    }
+
     var needsInfo: Bool {
         labels.contains { label in
             let l = label.lowercased()
@@ -195,6 +203,8 @@ enum IssueClassifier {
             return issue.awaitingMyReply(login: myLogin) ? .needsYou : .assigned
         }
         if issue.isAssigned(to: myLogin) { return .assigned }
+        // A reporter who answered a maintainer / needs-info thread is no longer being waited on.
+        if issue.reporterRepliedToAnswer { return .needsYou }
         if issue.needsInfo { return .waitingOnReporter }
         if !issue.assignees.isEmpty { return .assigned }
         if !issue.hasMaintainerReply { return .needsYou }
@@ -206,6 +216,7 @@ enum IssueClassifier {
         if issue.isAssigned(to: myLogin) { return .assigned }
         // An issue I opened counts only once somebody else has the last word.
         if issue.isAuthored(by: myLogin), issue.awaitingMyReply(login: myLogin) { return .reply }
+        if issue.reporterRepliedToAnswer { return .reply }
         if issue.mentionsMe { return .mentioned }
         return .newIssue
     }
@@ -316,6 +327,20 @@ enum IssueChecks {
         let mine = IssueClassifier.inboxItems([mineQuiet, mineAnswered], myLogin: me, muted: [], showNew: true)
         assert(!mine.items.contains { $0.nodeId == "q" }, "my issue with no reply to answer stays out of the Inbox")
         assert(mine.items.map(\.nodeId) == ["r"], "my issue awaiting my reply is in the Inbox")
+
+        // The reporter answering a maintainer / needs-info thread moves it back to Needs you + Inbox.
+        let theirs = { (c: [IssueReply], l: [String]) in issue("t", author: "rep", labels: l, comments: c) }
+        let mine1 = IssueReply(author: "mads", createdAt: Date(timeIntervalSince1970: 150), association: "OWNER")
+        let back = IssueReply(author: "rep", createdAt: Date(timeIntervalSince1970: 250), association: "NONE")
+        let answered = theirs([mine1, back], [])
+        assert(IssueClassifier.section(for: answered, myLogin: me, muted: false) == .needsYou, "reporter replied after maintainer → Needs you")
+        assert(IssueClassifier.section(for: theirs([back, mine1], []), myLogin: me, muted: false) == .waitingOnReporter,
+               "maintainer has the last word → still Waiting on reporter")
+        assert(IssueClassifier.section(for: theirs([back], ["needs-info"]), myLogin: me, muted: false) == .needsYou,
+               "reporter replied on a needs-info issue → Needs you")
+        assert(IssueClassifier.inboxItems([answered], myLogin: me, muted: [], showNew: false).items.map(\.nodeId) == ["t"],
+               "a reporter reply surfaces in the Inbox even with new issues hidden")
+        assert(IssueClassifier.inboxReason(for: answered, myLogin: me) == .reply, "reporter reply is a .reply reason")
 
         IssueDiffChecks.run()
     }
