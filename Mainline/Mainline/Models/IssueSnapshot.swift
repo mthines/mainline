@@ -139,6 +139,15 @@ struct IssueSnapshot: Codable, Equatable, Identifiable {
         return !PRSnapshot.loginsMatch(last.author, login)
     }
 
+    /// I took part in this thread and the reporter has the last word, so the ball is back with
+    /// me. Requires my own comment (not just any maintainer's) so a backlog issue someone else
+    /// answered never floods the Inbox, and requires no assignee so a colleague's issue stays theirs.
+    func reporterRepliedToMe(login: String) -> Bool {
+        guard assignees.isEmpty, !isAuthored(by: login), let last = comments.last,
+              PRSnapshot.loginsMatch(last.author, author) else { return false }
+        return comments.contains { PRSnapshot.loginsMatch($0.author, login) }
+    }
+
     var needsInfo: Bool {
         labels.contains { label in
             let l = label.lowercased()
@@ -195,6 +204,8 @@ enum IssueClassifier {
             return issue.awaitingMyReply(login: myLogin) ? .needsYou : .assigned
         }
         if issue.isAssigned(to: myLogin) { return .assigned }
+        // A reporter who answered my comment is no longer being waited on.
+        if issue.reporterRepliedToMe(login: myLogin) { return .needsYou }
         if issue.needsInfo { return .waitingOnReporter }
         if !issue.assignees.isEmpty { return .assigned }
         if !issue.hasMaintainerReply { return .needsYou }
@@ -206,6 +217,7 @@ enum IssueClassifier {
         if issue.isAssigned(to: myLogin) { return .assigned }
         // An issue I opened counts only once somebody else has the last word.
         if issue.isAuthored(by: myLogin), issue.awaitingMyReply(login: myLogin) { return .reply }
+        if issue.reporterRepliedToMe(login: myLogin) { return .reply }
         if issue.mentionsMe { return .mentioned }
         return .newIssue
     }
@@ -316,6 +328,32 @@ enum IssueChecks {
         let mine = IssueClassifier.inboxItems([mineQuiet, mineAnswered], myLogin: me, muted: [], showNew: true)
         assert(!mine.items.contains { $0.nodeId == "q" }, "my issue with no reply to answer stays out of the Inbox")
         assert(mine.items.map(\.nodeId) == ["r"], "my issue awaiting my reply is in the Inbox")
+
+        // The reporter answering my comment moves it back to Needs you + Inbox.
+        let theirs = { (c: [IssueReply], l: [String], a: [String]) in
+            issue("t", author: "rep", assignees: a, labels: l, comments: c) }
+        let mine1 = IssueReply(author: "mads", createdAt: Date(timeIntervalSince1970: 150), association: "OWNER")
+        let back = IssueReply(author: "rep", createdAt: Date(timeIntervalSince1970: 250), association: "NONE")
+        let answered = theirs([mine1, back], [], [])
+        assert(IssueClassifier.section(for: answered, myLogin: me, muted: false) == .needsYou, "reporter replied after my comment → Needs you")
+        assert(IssueClassifier.section(for: theirs([back, mine1], [], []), myLogin: me, muted: false) == .waitingOnReporter,
+               "my comment is the last word → still Waiting on reporter")
+        assert(IssueClassifier.section(for: theirs([mine1, back], ["needs-info"], []), myLogin: me, muted: false) == .needsYou,
+               "reporter replied on a needs-info issue I commented on → Needs you")
+        assert(IssueClassifier.inboxItems([answered], myLogin: me, muted: [], showNew: false).items.map(\.nodeId) == ["t"],
+               "a reporter reply surfaces in the Inbox even with new issues hidden")
+        assert(IssueClassifier.inboxReason(for: answered, myLogin: me) == .reply, "reporter reply is a .reply reason")
+        let colleague = theirs([mine1, back], [], ["bob"])
+        assert(IssueClassifier.section(for: colleague, myLogin: me, muted: false) == .assigned, "a colleague's assigned issue stays Assigned")
+        assert(IssueClassifier.inboxItems([colleague], myLogin: me, muted: [], showNew: false).items.isEmpty,
+               "a colleague's assigned issue does not enter my Inbox")
+        let mineLast = issue("o2", author: "mads", comments: [drive, mine1])
+        assert(IssueClassifier.inboxReason(for: mineLast, myLogin: me) == .newIssue
+               && IssueClassifier.inboxItems([mineLast], myLogin: me, muted: [], showNew: false).items.isEmpty,
+               "my own issue where my comment is newest stays out of the Inbox")
+        let backlog = theirs([maint, back], [], [])
+        assert(IssueClassifier.inboxItems([backlog], myLogin: me, muted: [], showNew: false).items.isEmpty,
+               "a reply on an issue I never commented on is not an Inbox reply")
 
         IssueDiffChecks.run()
     }

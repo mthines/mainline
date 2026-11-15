@@ -154,7 +154,9 @@ struct IssueRowView: View {
                         // thousands separator ("#2.019").
                         Text(verbatim: "#\(issue.number)")
                         if let reason = reasonText { Text(verbatim: "· \(reason)") }
-                        Text(verbatim: "· \(Self.ago(issue.updatedAt))")
+                        // The newest comment (else the open date), not `updatedAt`: GitHub bumps that for
+                        // labels, edits and reactions too, so it read "20m ago" on a 12h-old reply.
+                        Text(verbatim: "· \(Self.ago(issue.comments.last?.createdAt ?? issue.createdAt))")
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -263,6 +265,7 @@ struct IssueRowView: View {
         let me = settings.githubUsername
         if issue.isAssigned(to: me) { return "assigned to you" }
         if issue.isAuthored(by: me) { return issue.awaitingMyReply(login: me) ? "new reply" : "yours" }
+        if issue.reporterRepliedToMe(login: me) { return "new reply" }
         if issue.mentionsMe { return "mentioned you" }
         if issue.commentCount > 0 {
             return issue.commentCount == 1 ? "1 comment" : "\(issue.commentCount) comments"
