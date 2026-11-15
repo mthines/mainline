@@ -95,6 +95,14 @@ enum RateLimitClassifier {
     static func clockLabel(_ date: Date) -> String {
         date.formatted(date: .omitted, time: .shortened)
     }
+
+    /// Like `clockLabel`, but adds the date for anything not from today — a persisted
+    /// last-sync time can be from yesterday, and a bare "19:33" would read as today.
+    static func syncLabel(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? clockLabel(date)
+            : date.formatted(date: .abbreviated, time: .shortened)
+    }
 }
 
 // MARK: - Shared monitor

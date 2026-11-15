@@ -528,7 +528,7 @@ struct MenuBarView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     if let last = manager.lastSyncAt {
-                        Text("Showing data from \(RateLimitClassifier.clockLabel(last)).")
+                        Text("Showing data from \(RateLimitClassifier.syncLabel(last)).")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
