@@ -45,6 +45,14 @@ final class PRPoller {
     /// only: nil until the first poll after launch.
     private var knownCommittedBots: Set<String>?
 
+    /// Whether the popover is open. Set by `PRManager`. Starts false: the app launches
+    /// with the panel closed, and a closed panel polls at the slower idle pace.
+    var isPanelVisible = false
+
+    /// When the display-only Done searches last ran (see `PollPacing.secondaryInterval`).
+    /// Stamped only when they actually ran, so an early-failed poll retries them.
+    private var lastDoneAt: Date?
+
     /// Human-readable status for the menu bar.
     @Published private(set) var statusMessage: String = "Not started"
 
@@ -90,7 +98,11 @@ final class PRPoller {
             // right away and populates without the user pressing Refresh.
             while !Task.isCancelled {
                 await self.poll(token: token)
-                let interval = Double(self.settings.pollIntervalSeconds)
+                let interval = PollPacing.interval(
+                    base: Double(self.settings.pollIntervalSeconds),
+                    panelVisible: self.isPanelVisible,
+                    budgetLow: APIBudget.shared.isLow
+                )
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
             }
         }
@@ -104,8 +116,10 @@ final class PRPoller {
     // MARK: - Public one-shot poll (used by Refresh button)
 
     /// Runs a single poll without interfering with the scheduled loop.
-    func pollOnce(token: String) async {
-        await poll(token: token)
+    /// - Parameter forceDone: also run the Done searches regardless of their cadence
+    ///   (Refresh button); a panel-open refresh leaves them on their own schedule.
+    func pollOnce(token: String, forceDone: Bool = true) async {
+        await poll(token: token, forced: forceDone)
     }
 
     // MARK: - Carry-forward (pure)
@@ -252,7 +266,9 @@ final class PRPoller {
     /// One full cycle: the PR fetch, then (when wired) the issue fetch. Issues run after
     /// the PRs so an early return inside the PR poll never starves them, and a failure in
     /// one never blocks the other.
-    private func poll(token: String) async {
+    /// - Parameter forced: a manual refresh or panel open — run the Done/issue fetches
+    ///   too, whatever their last-run time.
+    private func poll(token: String, forced: Bool = false) async {
         // A rate limit is being waited out: skip the whole cycle (PRs, issues, Done,
         // previews) rather than send requests `GitHubClient` would refuse anyway. This
         // also keeps the Refresh button instant — the old handler slept the limit's
@@ -261,13 +277,20 @@ final class PRPoller {
             statusMessage = "Rate limited — resumes \(RateLimitClassifier.clockLabel(hit.resetAt))"
             return
         }
-        await pollPRs(token: token)
+        // The Done searches are display-only and change slowly: run them every
+        // `PollPacing.secondaryInterval`, not every poll. Issues stay on every poll —
+        // they fire assigned/mentioned notifications. The decision is a PARAMETER, never
+        // instance state: a forced refresh can overlap the loop's poll across awaits.
+        let runDone = PollPacing.secondaryDue(lastRun: lastDoneAt, now: Date(), forced: forced)
+        APIBudget.shared.beginPoll()
+        defer { APIBudget.shared.endPoll() }
+        await pollPRs(token: token, runDone: runDone)
         if let issueStore {
             await issueStore.poll(client: client, token: token)
         }
     }
 
-    private func pollPRs(token: String) async {
+    private func pollPRs(token: String, runDone: Bool) async {
         let pollStartedAt = Date()
         // Prune expired snoozes on every poll so postponed PRs silently return to
         // their normal group the moment their wake time passes — even while the
@@ -562,7 +585,10 @@ final class PRPoller {
         // are all swallowed benignly (the Done section is non-critical). Results
         // are pushed to the caller's separate `donePRs` collection and NEVER go
         // through the diff engine / notifications.
-        await fetchDonePRs(token: token)
+        if runDone {
+            await fetchDonePRs(token: token)
+            lastDoneAt = Date()
+        }
 
         // Enrich the open set with Vercel preview URLs. Runs LAST so it never blocks
         // notifications or the Done section, and only fetches PRs whose preview

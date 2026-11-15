@@ -1279,9 +1279,19 @@ final class PRManager: ObservableObject {
         await start()
     }
 
+    /// The popover opened or closed. Closed polls slower (see `PollPacing`); opening with
+    /// data older than the poll interval refreshes at once, so the panel never opens on
+    /// stale rows just because it was polling at the idle pace.
+    func setPanelVisible(_ visible: Bool) {
+        poller.isPanelVisible = visible
+        guard visible, let last = poller.lastSyncAt,
+              Date().timeIntervalSince(last) > Double(settings.pollIntervalSeconds) else { return }
+        Task { await triggerSingleRefresh(forceDone: false) }
+    }
+
     /// Triggers a single poll without restarting the timer loop.
     /// Used by the Refresh button — does NOT restart the poller.
-    func triggerSingleRefresh() async {
+    func triggerSingleRefresh(forceDone: Bool = true) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
@@ -1291,7 +1301,7 @@ final class PRManager: ObservableObject {
             statusMessage = "Not configured — open Settings"
             return
         }
-        await poller.pollOnce(token: token)
+        await poller.pollOnce(token: token, forceDone: forceDone)
     }
 
     func stop() {

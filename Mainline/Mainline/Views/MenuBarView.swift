@@ -134,6 +134,7 @@ struct MenuBarView: View {
             DispatchQueue.main.async { measuredBodyHeight = v }
         }
         .onAppear {
+            manager.setPanelVisible(true)
             manager.snoozeStore.clearExpired()
             // Delay slightly so user can glance at unread indicators before they clear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -162,7 +163,10 @@ struct MenuBarView: View {
         .onChange(of: searchFieldFocused) { focused in
             if focused { installSearchDownMonitor() } else { removeSearchDownMonitor() }
         }
-        .onDisappear { removeSearchDownMonitor() }
+        .onDisappear {
+            removeSearchDownMonitor()
+            manager.setPanelVisible(false)
+        }
         // A pasted PR URL for a PR outside the current tab has no local match; fetch
         // it on demand so search can still resolve it. No-op for bare numbers / text.
         .onChange(of: manager.searchQuery) { query in
@@ -524,7 +528,7 @@ struct MenuBarView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     if let last = manager.lastSyncAt {
-                        Text("Showing data from \(RateLimitClassifier.clockLabel(last)).")
+                        Text("Showing data from \(RateLimitClassifier.syncLabel(last)).")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }

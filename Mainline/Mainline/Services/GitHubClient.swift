@@ -1045,6 +1045,7 @@ final class GitHubClient {
 
     private static let searchQueryDocument = """
     query($q: String!, $first: Int!) {
+      rateLimit { cost }
       search(query: $q, type: ISSUE, first: $first) {
         nodes {
           ... on PullRequest {
@@ -1075,6 +1076,7 @@ final class GitHubClient {
     /// `makeSnapshot` path as everything else.
     private static let prByNodeIdQueryDocument = """
     query($id: ID!) {
+      rateLimit { cost }
       node(id: $id) {
         ... on PullRequest {
           \(prNodeFields)
@@ -1090,6 +1092,7 @@ final class GitHubClient {
     /// best it ever did.
     private static let committedCandidatesQueryDocument = """
     query($q: String!, $first: Int!, $after: String) {
+      rateLimit { cost }
       search(query: $q, type: ISSUE, first: $first, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {
@@ -1106,6 +1109,7 @@ final class GitHubClient {
     /// PRs only.
     private static let prNodesQueryDocument = """
     query($ids: [ID!]!) {
+      rateLimit { cost }
       nodes(ids: $ids) {
         ... on PullRequest {
           \(prNodeFields)
@@ -1117,6 +1121,7 @@ final class GitHubClient {
     /// Just the lifecycle state of a set of PRs — see `fetchPRStates`.
     private static let prStatesQueryDocument = """
     query($ids: [ID!]!) {
+      rateLimit { cost }
       nodes(ids: $ids) {
         ... on PullRequest { id state }
       }
@@ -1126,6 +1131,7 @@ final class GitHubClient {
     /// Just the state of a set of issues — see `fetchIssueStates`.
     private static let issueStatesQueryDocument = """
     query($ids: [ID!]!) {
+      rateLimit { cost }
       nodes(ids: $ids) {
         ... on Issue { id state }
       }
@@ -1711,6 +1717,13 @@ final class GitHubClient {
     /// Throws `rateLimited` (and tells `RateLimitMonitor`) when the response is any of
     /// GitHub's rate-limit shapes — see `RateLimitClassifier` for the four of them.
     private func checkRateLimit(_ response: HTTPURLResponse, data: Data) throws {
+        if response.url?.path == "/graphql" {
+            APIBudget.shared.observeResponse(
+                status: response.statusCode,
+                header: { response.value(forHTTPHeaderField: $0) },
+                body: data
+            )
+        }
         guard let hit = RateLimitClassifier.classify(
             status: response.statusCode,
             header: { response.value(forHTTPHeaderField: $0) },
@@ -1881,6 +1894,7 @@ extension GitHubClient {
 
     private static let issueSearchDocument = """
     query($q: String!, $first: Int!, $after: String) {
+      rateLimit { cost }
       search(query: $q, type: ISSUE, first: $first, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {
