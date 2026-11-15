@@ -49,11 +49,9 @@ final class PRPoller {
     /// with the panel closed, and a closed panel polls at the slower idle pace.
     var isPanelVisible = false
 
-    /// When the display-only Done + issue fetches last ran (see `PollPacing.secondaryInterval`).
-    private var lastSecondaryAt: Date?
-
-    /// Set per poll: whether this cycle also runs the Done searches (read by `pollPRs`).
-    private var runDoneThisPoll = true
+    /// When the display-only Done searches last ran (see `PollPacing.secondaryInterval`).
+    /// Stamped only when they actually ran, so an early-failed poll retries them.
+    private var lastDoneAt: Date?
 
     /// Human-readable status for the menu bar.
     @Published private(set) var statusMessage: String = "Not started"
@@ -118,8 +116,10 @@ final class PRPoller {
     // MARK: - Public one-shot poll (used by Refresh button)
 
     /// Runs a single poll without interfering with the scheduled loop.
-    func pollOnce(token: String) async {
-        await poll(token: token, forced: true)
+    /// - Parameter forceDone: also run the Done searches regardless of their cadence
+    ///   (Refresh button); a panel-open refresh leaves them on their own schedule.
+    func pollOnce(token: String, forceDone: Bool = true) async {
+        await poll(token: token, forced: forceDone)
     }
 
     // MARK: - Carry-forward (pure)
@@ -277,20 +277,20 @@ final class PRPoller {
             statusMessage = "Rate limited — resumes \(RateLimitClassifier.clockLabel(hit.resetAt))"
             return
         }
-        // The Done searches and the issue search are display-only and change slowly:
-        // run them every `PollPacing.secondaryInterval`, not every poll.
-        let secondaryDue = PollPacing.secondaryDue(lastRun: lastSecondaryAt, now: Date(), forced: forced)
-        runDoneThisPoll = secondaryDue
+        // The Done searches are display-only and change slowly: run them every
+        // `PollPacing.secondaryInterval`, not every poll. Issues stay on every poll —
+        // they fire assigned/mentioned notifications. The decision is a PARAMETER, never
+        // instance state: a forced refresh can overlap the loop's poll across awaits.
+        let runDone = PollPacing.secondaryDue(lastRun: lastDoneAt, now: Date(), forced: forced)
         APIBudget.shared.beginPoll()
         defer { APIBudget.shared.endPoll() }
-        await pollPRs(token: token)
-        if secondaryDue, let issueStore {
+        await pollPRs(token: token, runDone: runDone)
+        if let issueStore {
             await issueStore.poll(client: client, token: token)
         }
-        if secondaryDue { lastSecondaryAt = Date() }
     }
 
-    private func pollPRs(token: String) async {
+    private func pollPRs(token: String, runDone: Bool) async {
         let pollStartedAt = Date()
         // Prune expired snoozes on every poll so postponed PRs silently return to
         // their normal group the moment their wake time passes — even while the
@@ -585,7 +585,10 @@ final class PRPoller {
         // are all swallowed benignly (the Done section is non-critical). Results
         // are pushed to the caller's separate `donePRs` collection and NEVER go
         // through the diff engine / notifications.
-        if runDoneThisPoll { await fetchDonePRs(token: token) }
+        if runDone {
+            await fetchDonePRs(token: token)
+            lastDoneAt = Date()
+        }
 
         // Enrich the open set with Vercel preview URLs. Runs LAST so it never blocks
         // notifications or the Done section, and only fetches PRs whose preview

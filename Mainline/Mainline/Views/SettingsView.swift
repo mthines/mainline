@@ -299,7 +299,7 @@ struct SettingsView: View {
                 in: 30...3600,
                 step: 30
             )
-            Text("While the panel is closed, polling slows to at least 60s, and merged/closed PRs and issues refresh about every 2½ minutes. Opening the panel refreshes at once.")
+            Text("While the panel is closed, polling slows to at least 60s, and merged/closed PRs refresh about every 2½ minutes. Opening the panel refreshes at once.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             apiBudgetRow

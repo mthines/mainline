@@ -14,7 +14,7 @@ Token, queries, polling, and write actions.
 | GitHub token          | —                                  | Stored in the Keychain. Paste it or import from `gh`.   |
 | Author query          | `is:open is:pr author:@me`         | PRs you opened.                                          |
 | Reviewer query        | `is:open is:pr review-requested:@me` | PRs that request your review.                          |
-| Poll interval         | 30 s                               | Range 30–3600 s.                                         |
+| Poll interval         | 30 s                               | Range 30–3600 s. Applies while the panel is open; closed, polling slows to at least 60 s and merged/closed PRs refresh about every 2½ min. |
 | Enable write actions  | Off                                | Gates approve, merge, request changes, mark ready / convert to draft, and close / reopen. |
 | Merge method          | Auto                               | Auto, squash, merge commit, or rebase. See [Write actions](./actions.md). |
 | Open target           | GitHub                             | GitHub or Linear. See [Integrations](./integrations.md). |

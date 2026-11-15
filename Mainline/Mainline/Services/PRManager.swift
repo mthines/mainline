@@ -1286,12 +1286,12 @@ final class PRManager: ObservableObject {
         poller.isPanelVisible = visible
         guard visible, let last = poller.lastSyncAt,
               Date().timeIntervalSince(last) > Double(settings.pollIntervalSeconds) else { return }
-        Task { await triggerSingleRefresh() }
+        Task { await triggerSingleRefresh(forceDone: false) }
     }
 
     /// Triggers a single poll without restarting the timer loop.
     /// Used by the Refresh button — does NOT restart the poller.
-    func triggerSingleRefresh() async {
+    func triggerSingleRefresh(forceDone: Bool = true) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
@@ -1301,7 +1301,7 @@ final class PRManager: ObservableObject {
             statusMessage = "Not configured — open Settings"
             return
         }
-        await poller.pollOnce(token: token)
+        await poller.pollOnce(token: token, forceDone: forceDone)
     }
 
     func stop() {

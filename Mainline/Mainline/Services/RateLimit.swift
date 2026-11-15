@@ -190,8 +190,8 @@ final class RateLimitMonitor: ObservableObject, @unchecked Sendable {
 
 /// How often to poll, and which parts of a poll are due. Pure so `PollPacingChecks`
 /// can assert it. The two levers that cut GitHub points the most:
-///  * the display-only Done searches and the issue search run every
-///    `secondaryInterval`, not every poll;
+///  * the display-only Done searches run every `secondaryInterval`, not every poll
+///    (issues stay on every poll — they fire notifications);
 ///  * with the panel closed nothing is being looked at, so polling slows to
 ///    `idleFloor` (notifications still arrive, at most that late) — and doubles again
 ///    when the hourly budget is nearly spent.
