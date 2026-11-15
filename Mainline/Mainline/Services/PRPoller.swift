@@ -50,7 +50,12 @@ final class PRPoller {
 
     /// When the last poll fully succeeded. The popover shows it beside a rate-limit
     /// banner ("showing data from 19:33") so frozen data is never mistaken for fresh.
-    @Published private(set) var lastSyncAt: Date?
+    /// Persisted so a relaunch during a rate limit still says how old the rows loaded from
+    /// disk are — otherwise they would look fresh, which is what the banner exists to prevent.
+    @Published private(set) var lastSyncAt: Date? = {
+        let t = UserDefaults.standard.double(forKey: "lastFullSyncAt")
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }()
 
     /// Sink for the DISPLAY-ONLY "Done" set (recently merged/closed PRs), fetched
     /// alongside the open sets each poll but stored SEPARATELY by the caller
@@ -549,6 +554,7 @@ final class PRPoller {
 
         statusMessage = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
         lastSyncAt = Date()
+        UserDefaults.standard.set(lastSyncAt?.timeIntervalSince1970, forKey: "lastFullSyncAt")
         RateLimitMonitor.shared.clear(ifNoHitSince: pollStartedAt)
 
         // DISPLAY-ONLY Done fetch — recently merged/closed PRs for both tabs.

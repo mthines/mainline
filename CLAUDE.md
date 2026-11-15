@@ -265,7 +265,7 @@ There is **no XCTest target**. The testing surface is `#if DEBUG` self-check
 functions on pure types, all invoked from `AppDelegate.applicationDidFinishLaunching`:
 `InboxMuteEngine.runSelfChecks()`, `PRSearchFilter.runSelfChecks()`, `PRClassificationChecks.run()`,
 `AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`, `StackEngineChecks.run()`,
-`PanelBackdropChecks.run()`, `PRListExportChecks.run()`, `PromptTemplateChecks.run()`, `CommentTemplateChecks.run()`, `IssueChecks.run()`, `KeyHintChecks.run()`, `FeatureFlagChecks.run()`. Add new pure logic's
+`PanelBackdropChecks.run()`, `PRListExportChecks.run()`, `PromptTemplateChecks.run()`, `CommentTemplateChecks.run()`, `IssueChecks.run()`, `KeyHintChecks.run()`, `FeatureFlagChecks.run()`, `RateLimitChecks.run()`. Add new pure logic's
 assertions to one of these (or a sibling enum in the same file) rather than introducing a
 test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:storedVersion:)`,
 `NotificationService.classify(...)` — is what makes it assertable at all.
