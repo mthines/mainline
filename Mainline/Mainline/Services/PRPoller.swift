@@ -266,8 +266,8 @@ final class PRPoller {
     /// One full cycle: the PR fetch, then (when wired) the issue fetch. Issues run after
     /// the PRs so an early return inside the PR poll never starves them, and a failure in
     /// one never blocks the other.
-    /// - Parameter forced: a manual refresh or panel open — run the Done/issue fetches
-    ///   too, whatever their last-run time.
+    /// - Parameter forced: a manual Refresh — run the Done searches whatever their
+    ///   last-run time.
     private func poll(token: String, forced: Bool = false) async {
         // A rate limit is being waited out: skip the whole cycle (PRs, issues, Done,
         // previews) rather than send requests `GitHubClient` would refuse anyway. This
