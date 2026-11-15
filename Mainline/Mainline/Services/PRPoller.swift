@@ -48,6 +48,15 @@ final class PRPoller {
     /// Human-readable status for the menu bar.
     @Published private(set) var statusMessage: String = "Not started"
 
+    /// When the last poll fully succeeded. The popover shows it beside a rate-limit
+    /// banner ("showing data from 19:33") so frozen data is never mistaken for fresh.
+    /// Persisted so a relaunch during a rate limit still says how old the rows loaded from
+    /// disk are — otherwise they would look fresh, which is what the banner exists to prevent.
+    @Published private(set) var lastSyncAt: Date? = {
+        let t = UserDefaults.standard.double(forKey: "lastFullSyncAt")
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }()
+
     /// Sink for the DISPLAY-ONLY "Done" set (recently merged/closed PRs), fetched
     /// alongside the open sets each poll but stored SEPARATELY by the caller
     /// (`PRManager.donePRs`). These NEVER pass through `PRStateStore` /
@@ -244,6 +253,14 @@ final class PRPoller {
     /// the PRs so an early return inside the PR poll never starves them, and a failure in
     /// one never blocks the other.
     private func poll(token: String) async {
+        // A rate limit is being waited out: skip the whole cycle (PRs, issues, Done,
+        // previews) rather than send requests `GitHubClient` would refuse anyway. This
+        // also keeps the Refresh button instant — the old handler slept the limit's
+        // full duration inside the poll, so a manual refresh hung for minutes.
+        if let hit = RateLimitMonitor.shared.blockedHit(for: RateLimitMonitor.pollResource) {
+            statusMessage = "Rate limited — resumes \(RateLimitClassifier.clockLabel(hit.resetAt))"
+            return
+        }
         await pollPRs(token: token)
         if let issueStore {
             await issueStore.poll(client: client, token: token)
@@ -251,6 +268,7 @@ final class PRPoller {
     }
 
     private func pollPRs(token: String) async {
+        let pollStartedAt = Date()
         // Prune expired snoozes on every poll so postponed PRs silently return to
         // their normal group the moment their wake time passes — even while the
         // panel is closed. Render-time filtering already compares to `Date()`; this
@@ -391,8 +409,10 @@ final class PRPoller {
             } catch GitHubAPIError.rateLimited(let seconds) {
                 let duration = Date().timeIntervalSince(pollStart)
                 TelemetryService.shared.recordPollFailed(queryType: queryType, error: .rateLimited(retryAfter: seconds), duration: duration)
-                await MainActor.run { self.statusMessage = "Rate limited — wait \(seconds)s" }
-                try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+                // `GitHubClient` already told `RateLimitMonitor`; the next cycles skip
+                // until it lifts (see `poll`). No sleep here — it blocked Refresh.
+                let resumes = RateLimitClassifier.clockLabel(Date().addingTimeInterval(TimeInterval(seconds)))
+                await MainActor.run { self.statusMessage = "Rate limited — resumes \(resumes)" }
                 return
             } catch GitHubAPIError.unauthorized {
                 let duration = Date().timeIntervalSince(pollStart)
@@ -533,6 +553,9 @@ final class PRPoller {
         }
 
         statusMessage = "Updated \(Date().formatted(date: .omitted, time: .shortened))"
+        lastSyncAt = Date()
+        UserDefaults.standard.set(lastSyncAt?.timeIntervalSince1970, forKey: "lastFullSyncAt")
+        RateLimitMonitor.shared.clear(ifNoHitSince: pollStartedAt)
 
         // DISPLAY-ONLY Done fetch — recently merged/closed PRs for both tabs.
         // Runs AFTER the open path so it never blocks notifications, and its errors

@@ -50,6 +50,7 @@ Mainline/Mainline/                     ← Source root
 ├── Services/
 │   ├── KeychainHelper.swift     ← PAT storage (async, never blocks @MainActor); account-parameterized
 │   ├── GitHubClient.swift       ← GraphQL search + mutations (approve / request changes / merge / mark ready / convert to draft / close / reopen) + REST diff/files; two-step `searchCommittedPRs` (light candidate search → `nodes(ids:)`) + `fetchPRStates` (carry-forward vetting); author now decoded with __typename for bot detection; labels(first:10) added Also `addComment(nodeId:body:token:)` (GraphQL `addComment`) for canned PR comments.
+│   ├── RateLimit.swift          ← Pure `RateLimitClassifier` (429 / 403+Retry-After / 403 body / GraphQL 200 `RATE_LIMITED` / primary `Remaining: 0` → `RateLimitHit`) + shared `RateLimitMonitor` (blocks requests while limited, drives the header banner); `RateLimitChecks.run()` #if DEBUG
 │   ├── PRStateStore.swift       ← @MainActor [nodeId: PRSnapshot] dict
 │   ├── PRDiffEngine.swift       ← Pure diff(previous:next:myLogin:)
 │   ├── IssueDiffEngine.swift    ← Pure issue diff (newIssue/assigned/mentioned/reply, 3-day new-issue max age) + `carryingForward` for incomplete fetches; `IssueDiffChecks.run()` #if DEBUG
@@ -137,6 +138,10 @@ otherwise have re-fired as a `.newPR` notification. A PR in two incomplete tabs 
 ONCE, under `degraded_page` over `no_data`, so the total stays a true PR count.
 Watch for the counter falling to zero while `poll.degraded="true"` keeps arriving —
 that means degraded pages still happen and nothing is protecting the baseline.
+
+### Rate limits
+
+Every GitHub response goes through `GitHubClient.checkRateLimit` → pure `RateLimitClassifier`, and every `GitHubClient` request through `performRequest` (the one-off `/user` login fetch in `PRManager` uses its own session and is exempt), which REFUSES to send while a limit on its own budget is active (`RateLimitMonitor.blockedHit(for:)`; REST `core` and `graphql` are separate hourly budgets per `X-RateLimit-Resource`, secondary limits are app-wide) (retrying a limited API extends a secondary limit). Shapes handled: 429; 403 + `Retry-After` (secondary — the usual "stopped updating" cause); 403 + `Remaining: 0` (primary); a 403 body naming a rate limit; and GraphQL's HTTP 200 + `errors[].type == RATE_LIMITED`. A *successful* 200 with `Remaining: 0` is NOT a limit. `PRPoller.poll` skips whole cycles (PRs, issues, Done, previews) while blocked — it must never sleep inside a poll, which used to hang Refresh. The monitor's `active` hit stays until a poll fully succeeds (`PRPoller` calls `clear()` next to `lastSyncAt`), and `MenuBarView.rateLimitBanner` shows it (amber, reset time, "showing data from HH:mm"). `PRManager` mirrors both as `rateLimit` / `lastSyncAt`.
 
 ### Keychain
 `KeychainHelper` is async-only. Never call `loadToken()` synchronously on `@MainActor` — it calls `Task.detached` internally.
@@ -260,7 +265,7 @@ There is **no XCTest target**. The testing surface is `#if DEBUG` self-check
 functions on pure types, all invoked from `AppDelegate.applicationDidFinishLaunching`:
 `InboxMuteEngine.runSelfChecks()`, `PRSearchFilter.runSelfChecks()`, `PRClassificationChecks.run()`,
 `AttentionPolicyChecks.run()`, `NotificationRoutingChecks.run()`, `StackEngineChecks.run()`,
-`PanelBackdropChecks.run()`, `PRListExportChecks.run()`, `PromptTemplateChecks.run()`, `CommentTemplateChecks.run()`, `IssueChecks.run()`, `KeyHintChecks.run()`, `FeatureFlagChecks.run()`. Add new pure logic's
+`PanelBackdropChecks.run()`, `PRListExportChecks.run()`, `PromptTemplateChecks.run()`, `CommentTemplateChecks.run()`, `IssueChecks.run()`, `KeyHintChecks.run()`, `FeatureFlagChecks.run()`, `RateLimitChecks.run()`. Add new pure logic's
 assertions to one of these (or a sibling enum in the same file) rather than introducing a
 test framework. Keeping the decision table pure — `PREvent.migratedPolicy(from:storedVersion:)`,
 `NotificationService.classify(...)` — is what makes it assertable at all.

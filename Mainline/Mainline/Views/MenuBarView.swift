@@ -40,6 +40,11 @@ struct MenuBarView: View {
 
             Divider()
 
+            if let hit = manager.rateLimit {
+                rateLimitBanner(hit)
+                Divider()
+            }
+
             // Badge explainer: mirrors the menu-bar icon (same glyph + tint) and
             // spells out what the number means, so the panel ties the icon count
             // to the selected scope/metric. Counted in `chromeReserve`.
@@ -456,7 +461,9 @@ struct MenuBarView: View {
         let forMeFilter: CGFloat = settings.selectedTab == .forMe ? 36 : 0
         // The search field + its divider add fixed chrome while search is open.
         let searchBarReserve: CGFloat = manager.searchActive ? 40 : 0
-        return base + forMeFilter + searchBarReserve
+        // The rate-limit banner (3 lines + divider) is fixed chrome while a limit shows.
+        let rateLimitReserve: CGFloat = manager.rateLimit != nil ? 62 : 0
+        return base + forMeFilter + searchBarReserve + rateLimitReserve
     }
 
     /// The maximum height the single scroll region may occupy: the cap minus the
@@ -490,6 +497,46 @@ struct MenuBarView: View {
     private var peekHeight: CGFloat {
         let panel = chromeReserve + scrollRegionHeight
         return max(safe(panel - 48, fallback: 320), 320)
+    }
+
+    // MARK: - Rate-limit banner
+
+    /// Amber, persistent, and honest about staleness: it stays until a poll fully
+    /// succeeds, counts down to the reset, and says how old the rows on screen are.
+    /// (The old signal was a grey "Rate limited — wait Ns" caption that the next
+    /// partial poll overwrote.)
+    private func rateLimitBanner(_ hit: RateLimitHit) -> some View {
+        TimelineView(.periodic(from: .now, by: 15)) { context in
+            let waiting = hit.resetAt > context.date
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "hourglass")
+                    .foregroundStyle(Color(nsColor: .systemOrange))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hit.kind == .primary ? "GitHub rate limit reached" : "GitHub is throttling requests")
+                        .font(.caption.weight(.semibold))
+                    Group {
+                        if waiting {
+                            Text("Resumes at \(RateLimitClassifier.clockLabel(hit.resetAt)) (\(Text(hit.resetAt, style: .relative))). Updates are paused.")
+                        } else {
+                            Text("Retrying now…")
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    if let last = manager.lastSyncAt {
+                        Text("Showing data from \(RateLimitClassifier.clockLabel(last)).")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .systemOrange).opacity(0.12))
+            .accessibilityElement(children: .combine)
+        }
     }
 
     // MARK: - Header
