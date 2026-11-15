@@ -252,7 +252,7 @@ final class PRPoller {
         // previews) rather than send requests `GitHubClient` would refuse anyway. This
         // also keeps the Refresh button instant — the old handler slept the limit's
         // full duration inside the poll, so a manual refresh hung for minutes.
-        if let hit = RateLimitMonitor.shared.blockedHit {
+        if let hit = RateLimitMonitor.shared.blockedHit(for: RateLimitMonitor.pollResource) {
             statusMessage = "Rate limited — resumes \(RateLimitClassifier.clockLabel(hit.resetAt))"
             return
         }

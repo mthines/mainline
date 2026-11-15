@@ -1688,7 +1688,10 @@ final class GitHubClient {
     private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
         // While a limit is active nothing goes out: retrying a limited API only
         // extends a secondary limit. Every request funnels through here.
-        if let hit = RateLimitMonitor.shared.blockedHit {
+        // REST and GraphQL have separate budgets: only a limit on this request's own
+        // budget (or an app-wide secondary limit) refuses it.
+        let resource = request.url?.path == "/graphql" ? RateLimitMonitor.pollResource : "core"
+        if let hit = RateLimitMonitor.shared.blockedHit(for: resource) {
             throw GitHubAPIError.rateLimited(retryAfter: max(Int(hit.resetAt.timeIntervalSinceNow.rounded(.up)), 1))
         }
         do {
@@ -1711,7 +1714,8 @@ final class GitHubClient {
         guard let hit = RateLimitClassifier.classify(
             status: response.statusCode,
             header: { response.value(forHTTPHeaderField: $0) },
-            body: data
+            body: data,
+            resourceFallback: response.url?.path == "/graphql" ? RateLimitMonitor.pollResource : "core"
         ) else { return }
         RateLimitMonitor.shared.report(hit)
         throw GitHubAPIError.rateLimited(retryAfter: max(Int(hit.resetAt.timeIntervalSinceNow.rounded(.up)), 1))

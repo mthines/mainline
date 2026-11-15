@@ -123,7 +123,7 @@ final class IssueStore: ObservableObject {
         for query in Self.allIssuesQueries(orgs: targets.orgs, repos: targets.repos) {
             // A limit hit by an earlier query: stop here instead of firing the rest
             // into a refused client — the poll stays incomplete, so nothing is dropped.
-            if RateLimitMonitor.shared.blockedHit != nil {
+            if RateLimitMonitor.shared.blockedHit(for: RateLimitMonitor.pollResource) != nil {
                 broadIncomplete = true
                 failed = true
                 break

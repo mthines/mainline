@@ -12,6 +12,13 @@ struct RateLimitHit: Equatable {
     }
     let resetAt: Date
     let kind: Kind
+    /// The exhausted budget (`core`, `graphql`, `search`…) for a primary limit; nil for a
+    /// secondary limit, which throttles the whole app. REST and GraphQL have separate
+    /// hourly budgets, so an empty REST budget must not pause GraphQL polling.
+    var resource: String? = nil
+
+    /// The key `RateLimitMonitor` stores this hit under.
+    var key: String { resource ?? RateLimitMonitor.appWide }
 }
 
 /// Decides whether a response IS a rate limit. Pure, so `RateLimitChecks` can assert
@@ -31,14 +38,20 @@ enum RateLimitClassifier {
         status: Int,
         header: (String) -> String?,
         body: Data?,
+        resourceFallback: String = "core",
         now: Date = Date()
     ) -> RateLimitHit? {
         let remaining = header("X-RateLimit-Remaining")
         let retryAfter = header("Retry-After").flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
         let reset = header("X-RateLimit-Reset").flatMap { TimeInterval($0) }
 
+        let resource = header("X-RateLimit-Resource") ?? resourceFallback
         func hit(_ seconds: Int, _ kind: RateLimitHit.Kind) -> RateLimitHit {
-            RateLimitHit(resetAt: now.addingTimeInterval(TimeInterval(min(max(seconds, 1), maxWait))), kind: kind)
+            RateLimitHit(
+                resetAt: now.addingTimeInterval(TimeInterval(min(max(seconds, 1), maxWait))),
+                kind: kind,
+                resource: kind == .primary ? resource : nil
+            )
         }
         func untilReset() -> Int? { reset.map { Int(max($0 - now.timeIntervalSince1970, 1).rounded(.up)) } }
 
@@ -57,7 +70,9 @@ enum RateLimitClassifier {
             guard let body, graphQLRateLimited(body: body) else { return nil }
             // Budget left means this is abuse protection, not the hourly reset — a
             // short wait, not the up-to-an-hour `X-RateLimit-Reset`.
-            if remaining == "0", let wait = untilReset() { return hit(wait, .primary) }
+            if remaining == "0", let wait = untilReset() {
+                return RateLimitHit(resetAt: hit(wait, .primary).resetAt, kind: .primary, resource: "graphql")
+            }
             return hit(retryAfter ?? defaultSecondaryWait, .secondary)
         default:
             return nil
@@ -97,51 +112,66 @@ final class RateLimitMonitor: ObservableObject, @unchecked Sendable {
     /// say "retrying…" once `resetAt` passes). Published on the main thread.
     @Published private(set) var active: RateLimitHit?
 
-    private let lock = NSLock()
-    private var blocked: RateLimitHit?
-    private var lastReportAt: Date?
+    /// Key for hits that throttle every request (secondary limits).
+    static let appWide = "*"
+    /// The budget the PR/issue polls draw on.
+    static let pollResource = "graphql"
 
-    /// The active hit while still in the future; nil once it has lifted. Thread-safe.
-    var blockedHit: RateLimitHit? {
+    private let lock = NSLock()
+    private var blocked: [String: RateLimitHit] = [:]
+    /// Last hit that affects polling (app-wide or `graphql`) — a `core`-only hit must
+    /// not stop a healthy poll from clearing the banner.
+    private var lastPollingReportAt: Date?
+
+    /// The hit still in the future that stops a request on `resource`: an app-wide
+    /// hit or one on that very budget. nil once lifted. Thread-safe.
+    func blockedHit(for resource: String) -> RateLimitHit? {
         lock.lock(); defer { lock.unlock() }
-        guard let blocked, blocked.resetAt > Date() else { return nil }
-        return blocked
+        let now = Date()
+        return [blocked[Self.appWide], blocked[resource]]
+            .compactMap { $0 }
+            .filter { $0.resetAt > now }
+            .max { $0.resetAt < $1.resetAt }
     }
 
     /// Records a hit from any thread. A later reset wins over an earlier one.
     func report(_ hit: RateLimitHit) {
         lock.lock()
-        if let current = blocked, current.resetAt > hit.resetAt {
+        if let current = blocked[hit.key], current.resetAt > hit.resetAt {
             // keep the later reset
         } else {
-            blocked = hit
+            blocked[hit.key] = hit
         }
-        lastReportAt = Date()
+        if hit.key == Self.appWide || hit.key == Self.pollResource { lastPollingReportAt = Date() }
         lock.unlock()
         publish()
     }
 
-    /// A poll fully succeeded — the limit is over. `pollStartedAt` is when that poll
-    /// began: a hit reported DURING it (a swallowed `try?` request, or another client)
-    /// is newer than the poll's evidence of health and must survive.
+    /// A poll fully succeeded — polling's limit is over. `pollStartedAt` is when that
+    /// poll began: a hit reported DURING it (a swallowed `try?` request, or another
+    /// client) is newer than the poll's evidence of health and must survive.
     func clear(ifNoHitSince pollStartedAt: Date) {
         lock.lock()
-        if let last = lastReportAt, last >= pollStartedAt {
+        if let last = lastPollingReportAt, last >= pollStartedAt {
             lock.unlock()
             return
         }
-        blocked = nil
+        blocked[Self.appWide] = nil
+        blocked[Self.pollResource] = nil
         lock.unlock()
         publish()
     }
 
     /// Re-reads the state on the main thread, so racing report/clear calls can never
-    /// leave `active` disagreeing with `blocked`.
+    /// leave `active` disagreeing with `blocked`. Only limits that affect polling are
+    /// shown: an empty REST budget alone does not pause anything the banner describes.
     private func publish() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.lock.lock()
-            let current = self.blocked
+            let current = [self.blocked[Self.appWide], self.blocked[Self.pollResource]]
+                .compactMap { $0 }
+                .max { $0.resetAt < $1.resetAt }
             self.lock.unlock()
             if self.active != current { self.active = current }
         }
@@ -177,6 +207,11 @@ enum RateLimitChecks {
         assert(RateLimitClassifier.classify(status: 200, header: h(["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000090"]), body: gql, now: now)?.kind == .primary)
         // The marker inside ordinary content (a PR title) is not a limit
         assert(!RateLimitClassifier.graphQLRateLimited(body: Data(#"{"data":{"title":"RATE_LIMITED handling"}}"#.utf8)))
+        // REST budget exhausted names `core`; it must not be app-wide
+        let core = RateLimitClassifier.classify(status: 403, header: h(["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000120", "X-RateLimit-Resource": "core"]), body: nil, now: now)
+        assert(core?.resource == "core" && core?.key == "core")
+        // Secondary limits are app-wide
+        assert(sec?.resource == nil && sec?.key == RateLimitMonitor.appWide)
         // Waits are clamped to [1, maxWait]
         assert(secs(RateLimitClassifier.classify(status: 429, header: h(["Retry-After": "999999"]), body: nil, now: now)) == RateLimitClassifier.maxWait)
     }
