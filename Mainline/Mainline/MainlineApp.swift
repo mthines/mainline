@@ -88,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         PollCarryForwardChecks.run()
         StackEngineChecks.run()
         PanelBackdropChecks.run()
+        RateLimitChecks.run()
         PRListExportChecks.run()
         PromptTemplateChecks.run()
         CommentTemplateChecks.run()

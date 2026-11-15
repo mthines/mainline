@@ -20,7 +20,8 @@ enum GitHubAPIError: Error, LocalizedError {
         case .unauthorized:
             return "GitHub token is invalid or expired."
         case .rateLimited(let seconds):
-            return "GitHub rate limit hit. Retry after \(seconds)s."
+            let at = RateLimitClassifier.clockLabel(Date().addingTimeInterval(TimeInterval(seconds)))
+            return "GitHub rate limit reached — resumes at \(at)."
         case .notModified:
             return "No changes since last poll."
         case .cancelled:
@@ -566,7 +567,7 @@ final class GitHubClient {
         let (data, response) = try await performRequest(request)
         guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
 
-        try checkRateLimit(http)
+        try checkRateLimit(http, data: data)
 
         switch http.statusCode {
         case 200:       return data
@@ -625,7 +626,7 @@ final class GitHubClient {
             throw GitHubAPIError.unknown(0)
         }
 
-        try checkRateLimit(http)
+        try checkRateLimit(http, data: data)
 
         switch http.statusCode {
         case 304:
@@ -709,7 +710,7 @@ final class GitHubClient {
             throw GitHubAPIError.unknown(0)
         }
 
-        try checkRateLimit(http)
+        try checkRateLimit(http, data: data)
 
         switch http.statusCode {
         case 200:       break
@@ -767,7 +768,7 @@ final class GitHubClient {
             throw GitHubAPIError.unknown(0)
         }
 
-        try checkRateLimit(http)
+        try checkRateLimit(http, data: data)
 
         switch http.statusCode {
         case 200:       break
@@ -1154,6 +1155,8 @@ final class GitHubClient {
         let (data, response) = try await performRequest(request)
         guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
 
+        try checkRateLimit(http, data: data)
+
         switch http.statusCode {
         case 200: break
         case 401: throw GitHubAPIError.unauthorized
@@ -1200,6 +1203,8 @@ final class GitHubClient {
 
         let (data, response) = try await performRequest(request)
         guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
+
+        try checkRateLimit(http, data: data)
 
         switch http.statusCode {
         case 200: break
@@ -1397,7 +1402,7 @@ final class GitHubClient {
         let (data, response) = try await performRequest(request)
         guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
 
-        try checkRateLimit(http)
+        try checkRateLimit(http, data: data)
 
         switch http.statusCode {
         case 200: break
@@ -1681,6 +1686,11 @@ final class GitHubClient {
     // MARK: - Helpers
 
     private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        // While a limit is active nothing goes out: retrying a limited API only
+        // extends a secondary limit. Every request funnels through here.
+        if let hit = RateLimitMonitor.shared.blockedHit {
+            throw GitHubAPIError.rateLimited(retryAfter: max(Int(hit.resetAt.timeIntervalSinceNow.rounded(.up)), 1))
+        }
         do {
             return try await session.data(for: request)
         } catch is CancellationError {
@@ -1695,19 +1705,16 @@ final class GitHubClient {
         }
     }
 
-    private func checkRateLimit(_ response: HTTPURLResponse) throws {
-        if response.statusCode == 429 {
-            let retryAfter = Int(response.value(forHTTPHeaderField: "Retry-After") ?? "60") ?? 60
-            throw GitHubAPIError.rateLimited(retryAfter: retryAfter)
-        }
-        if let remaining = response.value(forHTTPHeaderField: "X-RateLimit-Remaining"),
-           let reset = response.value(forHTTPHeaderField: "X-RateLimit-Reset"),
-           remaining == "0",
-           let resetTimestamp = Int(reset) {
-            let now = Int(Date().timeIntervalSince1970)
-            let wait = max(resetTimestamp - now, 1)
-            throw GitHubAPIError.rateLimited(retryAfter: wait)
-        }
+    /// Throws `rateLimited` (and tells `RateLimitMonitor`) when the response is any of
+    /// GitHub's rate-limit shapes — see `RateLimitClassifier` for the four of them.
+    private func checkRateLimit(_ response: HTTPURLResponse, data: Data) throws {
+        guard let hit = RateLimitClassifier.classify(
+            status: response.statusCode,
+            header: { response.value(forHTTPHeaderField: $0) },
+            body: data
+        ) else { return }
+        RateLimitMonitor.shared.report(hit)
+        throw GitHubAPIError.rateLimited(retryAfter: max(Int(hit.resetAt.timeIntervalSinceNow.rounded(.up)), 1))
     }
 }
 

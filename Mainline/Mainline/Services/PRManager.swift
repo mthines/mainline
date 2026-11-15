@@ -71,6 +71,10 @@ final class PRManager: ObservableObject {
     @Published var donePRs: [PRSnapshot] = []
 
     @Published var statusMessage: String = "Starting…"
+    /// The GitHub rate limit being waited out (nil = none). Drives the header banner.
+    @Published var rateLimit: RateLimitHit?
+    /// When data last fully synced — shown beside the banner so stale rows are labelled.
+    @Published var lastSyncAt: Date?
     @Published var hasToken: Bool = false
     @Published var tokenInvalid: Bool = false
     @Published var isRefreshing: Bool = false
@@ -1160,6 +1164,11 @@ final class PRManager: ObservableObject {
         // in the header. Without this the header is stuck on the last start() value.
         poller.$statusMessage
             .assign(to: &$statusMessage)
+        poller.$lastSyncAt
+            .assign(to: &$lastSyncAt)
+        RateLimitMonitor.shared.$active
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$rateLimit)
 
         // Load persisted unread IDs
         unreadPRIds = Set(settings.unreadPRIdsList)
