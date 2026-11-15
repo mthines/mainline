@@ -154,7 +154,9 @@ struct IssueRowView: View {
                         // thousands separator ("#2.019").
                         Text(verbatim: "#\(issue.number)")
                         if let reason = reasonText { Text(verbatim: "· \(reason)") }
-                        Text(verbatim: "· \(Self.ago(issue.updatedAt))")
+                        // The newest comment (else the open date), not `updatedAt`: GitHub bumps that for
+                        // labels, edits and reactions too, so it read "20m ago" on a 12h-old reply.
+                        Text(verbatim: "· \(Self.ago(issue.comments.last?.createdAt ?? issue.createdAt))")
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
