@@ -1040,7 +1040,6 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(menuBarMetric.rawValue, forKey: Keys.menuBarMetric) }
     }
 
-    /// Whether the menu-bar badge follows the currently selected scope. Default true.
     /// When ON (default) and the badge follows the current view, PRs inside a
     /// COLLAPSED section (e.g. a collapsed Waiting group) are left out of the badge,
     /// so the number matches the PRs you can actually see. Muted PRs are already
@@ -1049,6 +1048,7 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(menuBarSkipsCollapsed, forKey: Keys.menuBarSkipsCollapsed) }
     }
 
+    /// Whether the menu-bar badge follows the currently selected scope. Default true.
     @Published var menuBarScopeFollowsSelection: Bool {
         didSet { defaults.set(menuBarScopeFollowsSelection, forKey: Keys.menuBarScopeFollows) }
     }

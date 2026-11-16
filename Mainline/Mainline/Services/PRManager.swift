@@ -1051,11 +1051,6 @@ final class PRManager: ObservableObject {
 
     // MARK: - Menu-bar badge (scope-aware + configurable — Bug 2 / 5)
 
-    /// The badge for the menu-bar icon, computed from the configured metric.
-    /// Reads from `badgeBasePRs` — i.e. the current view (tab + scope + drafts +
-    /// For-me sub-filter) when "Follow current view" is on, else all PRs — so the
-    /// badge matches the visible list. With the `.totalOpen` metric the badge
-    /// equals the visible open count. Colorblind-safe: encodes shape + tint.
     /// Whether the PR sits in a section the panel currently shows EXPANDED. Mirrors
     /// the deck's grouping: Inbox keys by role + group (`inbox:<role>:<group>`),
     /// the other tabs by group alone, and a pinned PR by the Pinned subsection.
@@ -1076,6 +1071,11 @@ final class PRManager: ObservableObject {
         return !settings.collapsedSectionsRaw.contains(group.rawValue)
     }
 
+    /// The badge for the menu-bar icon, computed from the configured metric.
+    /// Reads from `badgeBasePRs` — i.e. the current view (tab + scope + drafts +
+    /// For-me sub-filter) when "Follow current view" is on, else all PRs — so the
+    /// badge matches the visible list. With the `.totalOpen` metric the badge
+    /// equals the visible open count. Colorblind-safe: encodes shape + tint.
     var menuBarBadge: MenuBarBadge {
         let scoped = badgeBasePRs.filter(inExpandedSection)
         let myLogin = settings.githubUsername
@@ -1314,8 +1314,6 @@ final class PRManager: ObservableObject {
         Task { await triggerSingleRefresh(forceDone: false) }
     }
 
-    /// Triggers a single poll without restarting the timer loop.
-    /// Used by the Refresh button — does NOT restart the poller.
     /// Settings → Inbox "Refresh team members": re-fetch every Review Focus team's
     /// roster now, then poll so the new authors' PRs show up.
     func refreshTeamRosters(org: String? = nil) async {
@@ -1324,6 +1322,8 @@ final class PRManager: ObservableObject {
         await triggerSingleRefresh()
     }
 
+    /// Triggers a single poll without restarting the timer loop.
+    /// Used by the Refresh button — does NOT restart the poller.
     func triggerSingleRefresh(forceDone: Bool = true) async {
         guard !isRefreshing else { return }
         isRefreshing = true

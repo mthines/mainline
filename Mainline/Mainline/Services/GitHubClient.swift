@@ -1179,19 +1179,6 @@ final class GitHubClient {
 
     // MARK: - Preview URL (REST)
 
-    /// Fetches the PR's issue comments and extracts the preview URL from the ones
-    /// posted by a configured author, then hands the joined bodies to
-    /// `extractPreviewURL` for the tiered match. Returns nil when no preview is
-    /// present.
-    ///
-    /// `authors` used to be hard-coded to `vercel[bot]`, which meant a repo that
-    /// rolls its own preview deploy in GitHub Actions — posting as
-    /// `github-actions[bot]` — had its comment skipped before the URL match ever
-    /// ran. It is now the user's list; an EMPTY list means "scan every author".
-    ///
-    /// Uses the issue-comments endpoint (`/issues/{n}/comments`) because a PR's
-    /// conversation comments are issue comments in the REST API — that's where
-    /// deployment bots post their sticky comment.
     /// Logins of a team's members (`GET /orgs/{org}/teams/{slug}/members`). Needs a
     /// token that can read org membership (`read:org`); a 403/404 means it can't, or
     /// the slug is wrong, and surfaces as `unknown(status)`.
@@ -1220,6 +1207,19 @@ final class GitHubClient {
         return members
     }
 
+    /// Fetches the PR's issue comments and extracts the preview URL from the ones
+    /// posted by a configured author, then hands the joined bodies to
+    /// `extractPreviewURL` for the tiered match. Returns nil when no preview is
+    /// present.
+    ///
+    /// `authors` used to be hard-coded to `vercel[bot]`, which meant a repo that
+    /// rolls its own preview deploy in GitHub Actions — posting as
+    /// `github-actions[bot]` — had its comment skipped before the URL match ever
+    /// ran. It is now the user's list; an EMPTY list means "scan every author".
+    ///
+    /// Uses the issue-comments endpoint (`/issues/{n}/comments`) because a PR's
+    /// conversation comments are issue comments in the REST API — that's where
+    /// deployment bots post their sticky comment.
     func fetchPreviewURL(
         repoFullName: String,
         number: Int,

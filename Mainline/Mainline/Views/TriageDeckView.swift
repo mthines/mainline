@@ -1372,6 +1372,7 @@ struct TriageDeckView: View {
             ciTally(green, color: .green, label: "passing")
             ciTally(red, color: .red, label: "failing")
             ciTally(pending, color: .orange, label: "pending")
+            ciTally(members.count - green - red - pending, color: .secondary, label: "without CI status")
         }
     }
 

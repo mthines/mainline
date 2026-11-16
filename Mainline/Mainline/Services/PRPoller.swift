@@ -372,6 +372,30 @@ final class PRPoller {
         if rosters != settings.teamRosters { settings.teamRosters = rosters }
     }
 
+    /// A discovered PR that should stay silent: no review request on you, or only a
+    /// team request for a team that is not one of your configured focus teams (a
+    /// CODEOWNERS team on someone else's PR must not make discovery noisy).
+    nonisolated static func isQuietDiscovered(
+        _ snapshot: PRSnapshot,
+        effective: [String: OrgFocusConfig],
+        configured: [String: OrgFocusConfig],
+        myLogin: String,
+        committedPlacement: CommittedPRPlacement
+    ) -> Bool {
+        guard isFocusDiscoveredPR(snapshot, focusByOrg: effective, myLogin: myLogin,
+                                  committedPlacement: committedPlacement) else { return false }
+        switch snapshot.reviewRequestSource(myLogin: myLogin) {
+        case .direct: return false
+        case .none:   return true
+        case .team:
+            let org = snapshot.org.lowercased()
+            let teams = configured.first { $0.key.lowercased() == org }?.value.teams ?? []
+            return !snapshot.requestedTeams.contains { requested in
+                teams.contains { $0.lowercased() == requested.lowercased() }
+            }
+        }
+    }
+
     /// The bounded `poll.query_type` telemetry label for the focus-author search.
     nonisolated static let discoveryQueryTelemetryType = "focus_authors"
 
@@ -381,10 +405,12 @@ final class PRPoller {
     nonisolated static func isFocusDiscoveredPR(
         _ snapshot: PRSnapshot,
         focusByOrg: [String: OrgFocusConfig],
-        myLogin: String = ""
+        myLogin: String = "",
+        committedPlacement: CommittedPRPlacement = .yourPRs
     ) -> Bool {
-        // Your own PRs are never "discovered" (a team roster includes you).
-        if PRSnapshot.loginsMatch(snapshot.author, myLogin) { return false }
+        // Your own work is never "discovered": you authored it (a team roster
+        // includes you) or committed to it (a focus author can be a bot).
+        if snapshot.isViewersWork(myLogin: myLogin, committedPlacement: committedPlacement) { return false }
         guard let focus = InboxMuteEngine.focusConfig(
             for: snapshot.org, in: InboxMuteConfig(
                 mutePatterns: [], muteBotAuthors: false, botAllowList: [],
@@ -626,7 +652,7 @@ final class PRPoller {
                 .sorted { $0.nodeId < $1.nodeId }
                 .filter {
                     !have.contains($0.nodeId)
-                        && Self.isFocusDiscoveredPR($0, focusByOrg: focusByOrg, myLogin: myLoginForDiscovery)
+                        && Self.isFocusDiscoveredPR($0, focusByOrg: focusByOrg, myLogin: myLoginForDiscovery, committedPlacement: settings.committedPRPlacement)
                 }
         }
 
@@ -641,7 +667,7 @@ final class PRPoller {
             committedBotAuthors: committedBotAuthors,
             committedQueryTab: committedQueryTab,
             incompleteDiscovery: incompleteDiscovery,
-            isDiscoveredPR: { Self.isFocusDiscoveredPR($0, focusByOrg: focusByOrg, myLogin: myLoginForDiscovery) }
+            isDiscoveredPR: { Self.isFocusDiscoveredPR($0, focusByOrg: focusByOrg, myLogin: myLoginForDiscovery, committedPlacement: settings.committedPRPlacement) }
         )
         // Vet what was just carried: a PR that has since merged or closed can't come
         // back through an open-PR search, so without this it stays carried — frozen
@@ -732,17 +758,28 @@ final class PRPoller {
 
         // Focus-author discovery is passive: a focus author's PR you were NOT asked
         // to review lists quietly — no banner, no unread dot — so turning the
-        // setting on can't announce every open PR on the team. Once you ARE
-        // requested (direct or team) the normal rules apply again.
+        // setting on can't announce every open PR on the team. A direct request (or
+        // one for a configured focus team) ends the quiet.
         if settings.discoverFocusAuthorPRs {
-            let quiet = Set(unique
-                .filter {
-                    Self.isFocusDiscoveredPR($0, focusByOrg: focusByOrg, myLogin: myLogin)
-                        && $0.reviewRequestSource(myLogin: myLogin) == .none
+            let configured = settings.reviewFocusByOrg
+            let placement = settings.committedPRPlacement
+            func quiet(_ pr: PRSnapshot) -> Bool {
+                Self.isQuietDiscovered(pr, effective: focusByOrg, configured: configured,
+                                       myLogin: myLogin, committedPlacement: placement)
+            }
+            // Discovery already tagged these `.forMe`, so `PRDiffEngine` can't see a
+            // review request arrive later as "entering For me". Emit it here.
+            for pr in unique where !quiet(pr) {
+                guard !muted.contains(pr.nodeId), let old = previousSnapshots[pr.nodeId], quiet(old) else { continue }
+                let announced = transitions.contains {
+                    if case .readyForReview = $0 { return $0.prNodeId == pr.nodeId }
+                    return false
                 }
-                .map(\.nodeId))
-            if !quiet.isEmpty {
-                transitions.removeAll { quiet.contains($0.prNodeId) }
+                if !announced { transitions.append(.readyForReview(pr)) }
+            }
+            let quietIds = Set(unique.filter(quiet).map(\.nodeId))
+            if !quietIds.isEmpty {
+                transitions.removeAll { quietIds.contains($0.prNodeId) }
             }
         }
 
