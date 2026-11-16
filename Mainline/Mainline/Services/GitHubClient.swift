@@ -1192,6 +1192,34 @@ final class GitHubClient {
     /// Uses the issue-comments endpoint (`/issues/{n}/comments`) because a PR's
     /// conversation comments are issue comments in the REST API — that's where
     /// deployment bots post their sticky comment.
+    /// Logins of a team's members (`GET /orgs/{org}/teams/{slug}/members`). Needs a
+    /// token that can read org membership (`read:org`); a 403/404 means it can't, or
+    /// the slug is wrong, and surfaces as `unknown(status)`.
+    func fetchTeamMembers(org: String, slug: String, token: String) async throws -> [String] {
+        var members: [String] = []
+        for page in 1...5 {
+            guard let url = URL(string: "https://api.github.com/orgs/\(org)/teams/\(slug)/members?per_page=100&page=\(page)")
+            else { throw GitHubAPIError.unknown(0) }
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            let (data, response) = try await performRequest(request)
+            guard let http = response as? HTTPURLResponse else { throw GitHubAPIError.unknown(0) }
+            try checkRateLimit(http, data: data)
+            switch http.statusCode {
+            case 200: break
+            case 401: throw GitHubAPIError.unauthorized
+            case 500...599: throw GitHubAPIError.serverError(http.statusCode)
+            default: throw GitHubAPIError.unknown(http.statusCode)
+            }
+            struct Member: Decodable { let login: String }
+            let batch = try JSONDecoder().decode([Member].self, from: data).map(\.login)
+            members += batch
+            if batch.count < 100 { break }
+        }
+        return members
+    }
+
     func fetchPreviewURL(
         repoFullName: String,
         number: Int,

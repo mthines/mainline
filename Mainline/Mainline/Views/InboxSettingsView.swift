@@ -19,6 +19,12 @@ struct InboxSettingsView: View {
     /// orgs in `focusOrgs`.
     var knownOrgs: [String] = []
 
+    /// Re-fetches every focus team's members (wired to `PRManager.refreshTeamRosters`).
+    /// `nil` = every team; an org = just that org's teams.
+    var onRefreshTeams: (String?) async -> Void = { _ in }
+    @State private var refreshingTeams = false
+    @State private var refreshingOrgs: Set<String> = []
+
     /// Text for the "add an org" field (orgs you don't currently have PRs from).
     @State private var newOrg = ""
     /// Orgs added this session via the add field but not yet in `knownOrgs` or the
@@ -150,6 +156,26 @@ struct InboxSettingsView: View {
                     .disabled(trimmedNewOrg.isEmpty)
             }
 
+            Toggle("Also show open PRs from focus authors", isOn: $settings.discoverFocusAuthorPRs)
+            Label("Focus only filters PRs you were already asked to review. Turn this on and Mainline also searches the open PRs of each org's focus authors AND the members of its focus teams (fetched from GitHub, cached for a day) and lists them under Needs your review, even with no review request. Their new PRs don't send banners. Reading team members needs a token with read:org.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if settings.discoverFocusAuthorPRs {
+                Button {
+                    refreshingTeams = true
+                    Task {
+                        await onRefreshTeams(nil)
+                        refreshingTeams = false
+                    }
+                } label: {
+                    Label(refreshingTeams ? "Refreshing…" : "Refresh all team members", systemImage: "arrow.clockwise")
+                }
+                .disabled(refreshingTeams)
+            }
+
             // Per-org sub-blocks live INSIDE this section so they read as children
             // of "Review Focus" rather than as siblings of the other mute cards.
             ForEach(focusOrgs, id: \.self) { org in
@@ -226,12 +252,54 @@ struct InboxSettingsView: View {
                     .frame(maxWidth: 320)
             }
 
+            teamRosterRows(org)
+
             Text("Comma-separated logins / team slugs. A PR is kept if its author OR a requested team matches. Empty = all \(org) PRs stay active.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 6)
+    }
+
+    /// Per-team member counts for one org, with a refresh for just that org.
+    @ViewBuilder
+    private func teamRosterRows(_ org: String) -> some View {
+        let teams = settings.reviewFocusByOrg[focusKey(org)]?.teams ?? []
+        if settings.discoverFocusAuthorPRs, !teams.isEmpty {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(teams, id: \.self) { slug in
+                        let roster = settings.teamRosters[PRPoller.rosterKey(org: org, slug: slug)]
+                        Text(roster.map { rosterSummary(slug, $0) } ?? "\(slug): not fetched yet")
+                            .font(.caption)
+                            .foregroundStyle(roster?.error == nil ? Color.secondary : Color.orange)
+                    }
+                }
+                Spacer()
+                Button {
+                    refreshingOrgs.insert(org)
+                    Task {
+                        await onRefreshTeams(org)
+                        refreshingOrgs.remove(org)
+                    }
+                } label: {
+                    Label(refreshingOrgs.contains(org) ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(refreshingOrgs.contains(org))
+            }
+        }
+    }
+
+    private func rosterSummary(_ key: String, _ roster: TeamRoster) -> String {
+        var text = "\(key): \(roster.members.count) members"
+        if let at = roster.fetchedAt {
+            text += " · fetched " + at.formatted(.relative(presentation: .named))
+        }
+        if let error = roster.error { text += " · \(error)" }
+        return text
     }
 
     // MARK: - Comma-separated bindings

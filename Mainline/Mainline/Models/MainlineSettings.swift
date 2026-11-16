@@ -749,6 +749,7 @@ final class MainlineSettings: ObservableObject {
         static let panelBackgroundOpacity = "panelBackgroundOpacity"
         static let menuBarMetric        = "menuBarMetric"
         static let menuBarScopeFollows  = "menuBarScopeFollowsSelection"
+        static let menuBarSkipsCollapsed = "menuBarSkipsCollapsed"
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
         static let showDrafts           = "showDrafts"
         static let splitDrafts          = "splitDrafts"
@@ -779,6 +780,8 @@ final class MainlineSettings: ObservableObject {
         // PRs you committed to but did not open (e.g. a bot opened them for you)
         static let committedPRPlacement  = "committedPRPlacement"
         static let committedPRBotAuthors = "committedPRBotAuthors"
+        static let discoverFocusAuthorPRs = "discoverFocusAuthorPRs"
+        static let teamRosters = "teamRosters"
         // GitHub issues
         static let issueRepoWatchLevels  = "issueRepoWatchLevels"
         static let issueOrgWatchLevels   = "issueOrgWatchLevels"
@@ -913,7 +916,13 @@ final class MainlineSettings: ObservableObject {
     /// expanded, which is the intended migration fallback (no crash on old data).
     var collapsedSections: Set<ActionGroup> {
         get { Set(collapsedSectionsRaw.compactMap { ActionGroup(rawValue: $0) }) }
-        set { collapsedSectionsRaw = newValue.map { $0.rawValue } }
+        // Keep the entries that aren't an `ActionGroup` (`inbox:<role>:<group>`,
+        // `stack:<id>`, `inbox:issues`): overwriting the whole list here used to
+        // wipe them, so toggling Muted/Postponed/Done re-expanded every Inbox group.
+        set {
+            let others = collapsedSectionsRaw.filter { ActionGroup(rawValue: $0) == nil }
+            collapsedSectionsRaw = newValue.map { $0.rawValue }.sorted() + others
+        }
     }
 
     /// Per-event attention policy: [PREvent.rawValue: AttentionLevel.rawValue].
@@ -1032,6 +1041,14 @@ final class MainlineSettings: ObservableObject {
     }
 
     /// Whether the menu-bar badge follows the currently selected scope. Default true.
+    /// When ON (default) and the badge follows the current view, PRs inside a
+    /// COLLAPSED section (e.g. a collapsed Waiting group) are left out of the badge,
+    /// so the number matches the PRs you can actually see. Muted PRs are already
+    /// excluded from the Inbox view.
+    @Published var menuBarSkipsCollapsed: Bool {
+        didSet { defaults.set(menuBarSkipsCollapsed, forKey: Keys.menuBarSkipsCollapsed) }
+    }
+
     @Published var menuBarScopeFollowsSelection: Bool {
         didSet { defaults.set(menuBarScopeFollowsSelection, forKey: Keys.menuBarScopeFollows) }
     }
@@ -1242,6 +1259,27 @@ final class MainlineSettings: ObservableObject {
     /// Default empty (no extra query).
     @Published var committedPRBotAuthors: [String] {
         didSet { defaults.set(committedPRBotAuthors, forKey: Keys.committedPRBotAuthors) }
+    }
+
+    /// When ON, each org's Review Focus AUTHORS also become a discovery source:
+    /// `PRPoller` runs one extra search per org for those authors' open PRs, so
+    /// they land under "Needs your review" even with no review request on you
+    /// (the focus allow-list alone only demotes PRs the Reviewer query already
+    /// returned). Default OFF (no extra query).
+    @Published var discoverFocusAuthorPRs: Bool {
+        didSet { defaults.set(discoverFocusAuthorPRs, forKey: Keys.discoverFocusAuthorPRs) }
+    }
+
+    /// Cached members of the teams listed in Review Focus, keyed `org/slug`
+    /// (lowercased). Refreshed daily by `PRPoller.refreshTeamRosters` and from
+    /// Settings; read by the focus-author discovery so a team slug expands to its
+    /// members' PRs.
+    @Published var teamRosters: [String: TeamRoster] {
+        didSet {
+            if let data = try? JSONEncoder().encode(teamRosters) {
+                defaults.set(data, forKey: Keys.teamRosters)
+            }
+        }
     }
 
     /// Bot logins that bypass the `muteBotAuthors` rule. Even when `muteBotAuthors`
@@ -1675,6 +1713,9 @@ final class MainlineSettings: ObservableObject {
         // Menu-bar badge — default: count "Total Open", follow selected scope
         menuBarMetric = defaults.string(forKey: Keys.menuBarMetric)
             .flatMap { MenuBarMetric(rawValue: $0) } ?? .totalOpen
+        menuBarSkipsCollapsed = defaults.object(forKey: Keys.menuBarSkipsCollapsed) == nil
+            ? true
+            : defaults.bool(forKey: Keys.menuBarSkipsCollapsed)
         menuBarScopeFollowsSelection = defaults.object(forKey: Keys.menuBarScopeFollows) == nil
             ? true
             : defaults.bool(forKey: Keys.menuBarScopeFollows)
@@ -1716,6 +1757,13 @@ final class MainlineSettings: ObservableObject {
         committedPRPlacement = defaults.string(forKey: Keys.committedPRPlacement)
             .flatMap { CommittedPRPlacement(rawValue: $0) } ?? .yourPRs
         committedPRBotAuthors = defaults.stringArray(forKey: Keys.committedPRBotAuthors) ?? []
+        discoverFocusAuthorPRs = defaults.bool(forKey: Keys.discoverFocusAuthorPRs)
+        if let data = defaults.data(forKey: Keys.teamRosters),
+           let decoded = try? JSONDecoder().decode([String: TeamRoster].self, from: data) {
+            teamRosters = decoded
+        } else {
+            teamRosters = [:]
+        }
         issueRepoWatchLevels = defaults.dictionary(forKey: Keys.issueRepoWatchLevels) as? [String: String] ?? [:]
         issueOrgWatchLevels = defaults.dictionary(forKey: Keys.issueOrgWatchLevels) as? [String: String] ?? [:]
         showNewIssuesInInbox = defaults.object(forKey: Keys.showNewIssuesInInbox) == nil
@@ -1847,4 +1895,17 @@ final class MainlineSettings: ObservableObject {
                          forKey: Keys.attentionPolicyMigrationVersion)
         }
     }
+}
+
+
+// MARK: - TeamRoster
+
+/// A cached GitHub team membership list. `attemptedAt` (not `fetchedAt`) drives
+/// the refresh cadence so a failing team (token without `read:org`) is retried
+/// hourly rather than every poll; a failure keeps the last good `members`.
+struct TeamRoster: Codable, Equatable {
+    var members: [String]
+    var fetchedAt: Date?
+    var attemptedAt: Date
+    var error: String?
 }

@@ -152,9 +152,11 @@ final class PRPoller {
         incompleteTabs: [ReviewTab: CarryForwardReason],
         incompleteCommittedQuery: CarryForwardReason? = nil,
         committedBotAuthors: Set<String> = [],
-        committedQueryTab: ReviewTab? = nil
+        committedQueryTab: ReviewTab? = nil,
+        incompleteDiscovery: CarryForwardReason? = nil,
+        isDiscoveredPR: (PRSnapshot) -> Bool = { _ in false }
     ) -> CarryForwardResult {
-        guard !incompleteTabs.isEmpty || incompleteCommittedQuery != nil else {
+        guard !incompleteTabs.isEmpty || incompleteCommittedQuery != nil || incompleteDiscovery != nil else {
             return CarryForwardResult(snapshots: fetched, carriedReasons: [:])
         }
 
@@ -175,6 +177,9 @@ final class PRPoller {
                 .filter { !(isCommitted && $0 == committedQueryTab) }
                 .compactMap { incompleteTabs[$0] }
             if let reason = incompleteCommittedQuery, isCommitted {
+                reasons.append(reason)
+            }
+            if let reason = incompleteDiscovery, isDiscoveredPR(snapshot) {
                 reasons.append(reason)
             }
             guard !reasons.isEmpty else { continue }
@@ -261,6 +266,135 @@ final class PRPoller {
         snapshot.viewerIsCommitter && botAuthors.contains(normalizedBotAuthor(snapshot.author))
     }
 
+    // MARK: - Focus-author discovery (pure)
+
+    /// GitHub rejects search queries over 256 characters; stay under it.
+    nonisolated private static let discoveryQueryBudget = 220
+
+    /// `author:` qualifier for a focus entry: bots need the `app/` form.
+    nonisolated private static func discoveryQualifier(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let isBot = trimmed.lowercased().hasPrefix("app/") || trimmed.lowercased().hasSuffix("[bot]")
+        return isBot ? "author:app/\(normalizedBotAuthor(trimmed))" : "author:\(trimmed.lowercased())"
+    }
+
+    /// The searches that discover open PRs by each org's Review Focus authors
+    /// (excluding your own). One query per org, split into several when the author
+    /// list would overflow GitHub's query length. Empty when no org has authors.
+    nonisolated static func focusDiscoveryQueries(focusByOrg: [String: OrgFocusConfig]) -> [String] {
+        var queries: [String] = []
+        for org in focusByOrg.keys.sorted() {
+            var seen = Set<String>()
+            let qualifiers = (focusByOrg[org]?.authors ?? [])
+                .compactMap(discoveryQualifier)
+                .filter { seen.insert($0).inserted }
+            guard !qualifiers.isEmpty else { continue }
+            let head = "is:open is:pr sort:updated-desc -author:@me org:\(org.lowercased())"
+            var current = head
+            for q in qualifiers {
+                if current != head, current.count + 1 + q.count > discoveryQueryBudget {
+                    queries.append(current)
+                    current = head
+                }
+                current += " " + q
+            }
+            queries.append(current)
+        }
+        return queries
+    }
+
+    // MARK: Team rosters
+
+    nonisolated static let rosterTTL: TimeInterval = 24 * 3600
+    nonisolated static let rosterErrorRetry: TimeInterval = 3600
+
+    nonisolated static func rosterKey(org: String, slug: String) -> String {
+        "\(org.lowercased())/\(slug.lowercased())"
+    }
+
+    /// Whether a team's cached roster should be re-fetched: never fetched, a day
+    /// old, or failed more than an hour ago.
+    nonisolated static func rosterNeedsRefresh(_ roster: TeamRoster?, now: Date) -> Bool {
+        guard let roster else { return true }
+        let ttl = roster.error == nil ? rosterTTL : rosterErrorRetry
+        return now.timeIntervalSince(roster.attemptedAt) >= ttl
+    }
+
+    /// The focus config with every configured team's cached members folded into its
+    /// authors, so discovery and "is this a focus-author PR" see one author list.
+    nonisolated static func effectiveFocus(
+        _ focusByOrg: [String: OrgFocusConfig],
+        rosters: [String: TeamRoster]
+    ) -> [String: OrgFocusConfig] {
+        var result = focusByOrg
+        for (org, config) in focusByOrg {
+            var authors = config.authors
+            for slug in config.teams {
+                authors += rosters[rosterKey(org: org, slug: slug)]?.members ?? []
+            }
+            result[org] = OrgFocusConfig(authors: authors, teams: config.teams)
+        }
+        return result
+    }
+
+    /// Re-fetches the members of every team in Review Focus whose cache is stale
+    /// (or all of them when `force`), and drops cache entries for teams no longer
+    /// configured. A failed fetch keeps the last good members and records the error.
+    func refreshTeamRosters(token: String, force: Bool, org only: String? = nil) async {
+        let now = Date()
+        var rosters = settings.teamRosters
+        var wanted = Set<String>()
+        for (org, config) in settings.reviewFocusByOrg {
+            for slug in config.teams {
+                let key = Self.rosterKey(org: org, slug: slug)
+                wanted.insert(key)
+                if let only, only.lowercased() != org.lowercased() { continue }
+                guard force || Self.rosterNeedsRefresh(rosters[key], now: now) else { continue }
+                do {
+                    let members = try await client.fetchTeamMembers(org: org, slug: slug, token: token)
+                    rosters[key] = TeamRoster(members: members, fetchedAt: now, attemptedAt: now, error: nil)
+                } catch {
+                    var previous = rosters[key] ?? TeamRoster(members: [], fetchedAt: nil, attemptedAt: now, error: nil)
+                    previous.attemptedAt = now
+                    if case GitHubAPIError.unknown(let code) = error {
+                        previous.error = (code == 403 || code == 404)
+                            ? "HTTP \(code) — token needs read:org, or the team slug is wrong"
+                            : "HTTP \(code)"
+                    } else {
+                        previous.error = error.localizedDescription
+                    }
+                    rosters[key] = previous
+                }
+            }
+        }
+        rosters = rosters.filter { wanted.contains($0.key) }
+        if rosters != settings.teamRosters { settings.teamRosters = rosters }
+    }
+
+    /// The bounded `poll.query_type` telemetry label for the focus-author search.
+    nonisolated static let discoveryQueryTelemetryType = "focus_authors"
+
+    /// Whether a snapshot is one the focus-author search returns: its author is in
+    /// its own org's focus authors. Drives by-source carry-forward and banner
+    /// suppression, like `isCommittedBotPR`.
+    nonisolated static func isFocusDiscoveredPR(
+        _ snapshot: PRSnapshot,
+        focusByOrg: [String: OrgFocusConfig],
+        myLogin: String = ""
+    ) -> Bool {
+        // Your own PRs are never "discovered" (a team roster includes you).
+        if PRSnapshot.loginsMatch(snapshot.author, myLogin) { return false }
+        guard let focus = InboxMuteEngine.focusConfig(
+            for: snapshot.org, in: InboxMuteConfig(
+                mutePatterns: [], muteBotAuthors: false, botAllowList: [],
+                focusByOrg: focusByOrg, muteLabels: [], myLogin: ""
+            )
+        ) else { return false }
+        let author = InboxMuteEngine.normalizeBotLogin(snapshot.author)
+        return focus.authors.contains { InboxMuteEngine.normalizeBotLogin($0) == author }
+    }
+
     // MARK: - Single poll
 
     /// One full cycle: the PR fetch, then (when wired) the issue fetch. Issues run after
@@ -300,9 +434,9 @@ final class PRPoller {
 
         // Always poll both tabs so notifications fire regardless of which tab
         // is currently visible. Each query is tagged with the tab that sourced it.
-        var queries: [(tab: ReviewTab, query: String, isCommittedQuery: Bool)] = [
-            (.created, settings.searchQueryAuthor, false),
-            (.forMe,   settings.searchQueryReviewer, false)
+        var queries: [(tab: ReviewTab, query: String, isCommittedQuery: Bool, isDiscoveryQuery: Bool)] = [
+            (.created, settings.searchQueryAuthor, false, false),
+            (.forMe,   settings.searchQueryReviewer, false, false)
         ].filter { !$0.query.isEmpty }
 
         // PRs bots opened on your behalf: GitHub search can't select "has my
@@ -312,8 +446,25 @@ final class PRPoller {
         // `PRDiffEngine` fires `.readyForReview` for each ("entered For me").
         let committedBotAuthors = Set(settings.committedPRBotAuthors.map(Self.normalizedBotAuthor))
         if let committedQuery = Self.committedPRQuery(botAuthors: settings.committedPRBotAuthors) {
-            queries.append((.created, committedQuery, true))
+            queries.append((.created, committedQuery, true, false))
         }
+        // Review Focus authors as a discovery source (opt-in). Tagged For me so the
+        // PRs read as review work; carried forward by SOURCE like the bot query.
+        if settings.discoverFocusAuthorPRs {
+            await refreshTeamRosters(token: token, force: false)
+        }
+        let focusByOrg = Self.effectiveFocus(settings.reviewFocusByOrg, rosters: settings.teamRosters)
+        let myLoginForDiscovery = settings.githubUsername
+        // Heavy (up to 100 full PRs per org) and slow-moving, so it runs on the
+        // Done-search cadence (`PollPacing.secondaryInterval`), not every poll; the
+        // skipped cycles re-add its last results below.
+        let discoverySkipped = settings.discoverFocusAuthorPRs && !runDone
+        if settings.discoverFocusAuthorPRs && runDone {
+            for query in Self.focusDiscoveryQueries(focusByOrg: focusByOrg) {
+                queries.append((.forMe, query, false, true))
+            }
+        }
+        var incompleteDiscovery: CarryForwardReason?
         // Set when the committed query's result is incomplete — carried forward by
         // source, never by tab (see `carryingForward`).
         var incompleteCommittedQuery: CarryForwardReason?
@@ -332,16 +483,22 @@ final class PRPoller {
         // attribute each rescued PR to what actually caused it.
         var incompleteTabs: [ReviewTab: CarryForwardReason] = [:]
 
-        for (tab, query, isCommittedQuery) in queries {
+        for (tab, query, isCommittedQuery, isDiscoveryQuery) in queries {
             func markIncomplete(_ reason: CarryForwardReason) {
-                if isCommittedQuery {
+                if isDiscoveryQuery {
+                    // Several discovery queries (one per org) share one flag; the
+                    // worse reason wins so a degraded page is never downgraded.
+                    if incompleteDiscovery != .degradedPage { incompleteDiscovery = reason }
+                } else if isCommittedQuery {
                     incompleteCommittedQuery = reason
                 } else {
                     incompleteTabs[tab] = reason
                 }
             }
             // Its own label, so the bot search doesn't skew the author series.
-            let queryType = isCommittedQuery ? Self.committedQueryTelemetryType : tab.telemetryQueryType
+            let queryType = isDiscoveryQuery
+                ? Self.discoveryQueryTelemetryType
+                : (isCommittedQuery ? Self.committedQueryTelemetryType : tab.telemetryQueryType)
             let pollStart = Date()
             TelemetryService.shared.recordPollStarted(queryType: queryType)
 
@@ -451,13 +608,26 @@ final class PRPoller {
                 }
                 // The committed-PR bot query is optional: its failure must not throw
                 // away the regular queries' results already fetched this cycle.
-                if isCommittedQuery {
+                if isCommittedQuery || isDiscoveryQuery {
                     markIncomplete(.noData)
                     continue
                 }
                 await MainActor.run { self.statusMessage = "Error: \(error.localizedDescription)" }
                 return
             }
+        }
+
+        // Discovery didn't run this cycle: keep its last results verbatim. This is not
+        // a failed fetch, so it bypasses `carryingForward` — no carried-forward
+        // telemetry and no `fetchPRStates` vetting request on every skipped poll.
+        if discoverySkipped {
+            let have = Set(allSnapshots.map(\.nodeId))
+            allSnapshots += store.snapshots.values
+                .sorted { $0.nodeId < $1.nodeId }
+                .filter {
+                    !have.contains($0.nodeId)
+                        && Self.isFocusDiscoveredPR($0, focusByOrg: focusByOrg, myLogin: myLoginForDiscovery)
+                }
         }
 
         // Carry forward the last known snapshots for any tab whose result set was
@@ -469,7 +639,9 @@ final class PRPoller {
             incompleteTabs: incompleteTabs,
             incompleteCommittedQuery: incompleteCommittedQuery,
             committedBotAuthors: committedBotAuthors,
-            committedQueryTab: committedQueryTab
+            committedQueryTab: committedQueryTab,
+            incompleteDiscovery: incompleteDiscovery,
+            isDiscoveredPR: { Self.isFocusDiscoveredPR($0, focusByOrg: focusByOrg, myLogin: myLoginForDiscovery) }
         )
         // Vet what was just carried: a PR that has since merged or closed can't come
         // back through an open-PR search, so without this it stays carried — frozen
@@ -556,6 +728,22 @@ final class PRPoller {
         }
         if committedQueryTab == nil || incompleteCommittedQuery == nil {
             knownCommittedBots = committedBotAuthors
+        }
+
+        // Focus-author discovery is passive: a focus author's PR you were NOT asked
+        // to review lists quietly — no banner, no unread dot — so turning the
+        // setting on can't announce every open PR on the team. Once you ARE
+        // requested (direct or team) the normal rules apply again.
+        if settings.discoverFocusAuthorPRs {
+            let quiet = Set(unique
+                .filter {
+                    Self.isFocusDiscoveredPR($0, focusByOrg: focusByOrg, myLogin: myLogin)
+                        && $0.reviewRequestSource(myLogin: myLogin) == .none
+                }
+                .map(\.nodeId))
+            if !quiet.isEmpty {
+                transitions.removeAll { quiet.contains($0.prNodeId) }
+            }
         }
 
         notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
@@ -704,10 +892,11 @@ enum PollCarryForwardChecks {
         _ nodeId: String,
         tabs: Set<ReviewTab>,
         author: String = "someone",
-        viewerIsCommitter: Bool = false
+        viewerIsCommitter: Bool = false,
+        repo: String = "o/r"
     ) -> PRSnapshot {
         PRSnapshot(
-            nodeId: nodeId, number: 1, title: "t", htmlUrl: "u", repoFullName: "o/r",
+            nodeId: nodeId, number: 1, title: "t", htmlUrl: "u", repoFullName: repo,
             isDraft: false, state: "open", ciStatus: .success, reviewState: .none,
             commentCount: 0, updatedAt: "", author: author,
             requestedReviewers: [], requestedTeams: [], tabs: tabs,
@@ -818,6 +1007,52 @@ enum PollCarryForwardChecks {
         )
         assert(author304.snapshots.map(\.nodeId) == ["authored"],
                "a regular-query 304 never carries a committed bot PR on the shared tab")
+
+        // MARK: Focus-author discovery
+        assert(PRPoller.focusDiscoveryQueries(focusByOrg: [:]).isEmpty, "no focus → no discovery query")
+        assert(PRPoller.focusDiscoveryQueries(focusByOrg: ["dash0hq": OrgFocusConfig(authors: [], teams: ["ai"])]).isEmpty,
+               "teams alone never trigger a search")
+        assert(PRPoller.focusDiscoveryQueries(focusByOrg: [
+            "Dash0HQ": OrgFocusConfig(authors: ["Alice", "alice", "dash0-dev[bot]"], teams: [])
+        ]) == ["is:open is:pr sort:updated-desc -author:@me org:dash0hq author:alice author:app/dash0-dev"],
+               "authors dedupe + lowercase, bots use author:app/")
+        let many = (0..<40).map { "teammember\($0)" }
+        let chunked = PRPoller.focusDiscoveryQueries(focusByOrg: ["o": OrgFocusConfig(authors: many, teams: [])])
+        assert(chunked.count > 1 && chunked.allSatisfy { $0.count <= 256 }, "long author lists split under GitHub's 256-char cap")
+        let focus = ["dash0hq": OrgFocusConfig(authors: ["jlguerreiro"], teams: [])]
+        assert(PRPoller.isFocusDiscoveredPR(
+            pr("a", tabs: [.forMe], author: "JLGuerreiro", repo: "dash0hq/dash0"), focusByOrg: focus),
+               "focus author match is case-insensitive")
+        assert(!PRPoller.isFocusDiscoveredPR(
+            pr("b", tabs: [.forMe], author: "jlguerreiro", repo: "other/dash0"), focusByOrg: focus),
+               "focus is per org")
+        // Team rosters fold into authors; stale/failed cadence; own PRs excluded.
+        let rosters = ["dash0hq/ai-growth": TeamRoster(members: ["Bob", "me"], fetchedAt: nil, attemptedAt: Date(), error: nil)]
+        let eff = PRPoller.effectiveFocus(
+            ["dash0hq": OrgFocusConfig(authors: ["alice"], teams: ["AI-Growth"])], rosters: rosters)
+        assert(eff["dash0hq"]?.authors == ["alice", "Bob", "me"], "team members join the focus authors")
+        assert(PRPoller.focusDiscoveryQueries(focusByOrg: eff).first?.contains("author:bob") == true,
+               "a team-only org still produces a discovery query")
+        assert(!PRPoller.isFocusDiscoveredPR(
+            pr("m", tabs: [.created], author: "me", repo: "dash0hq/x"), focusByOrg: eff, myLogin: "ME"),
+               "your own PR is never discovered, even when you're on the team")
+        let t0 = Date()
+        assert(PRPoller.rosterNeedsRefresh(nil, now: t0), "never fetched → refresh")
+        assert(!PRPoller.rosterNeedsRefresh(
+            TeamRoster(members: [], fetchedAt: t0, attemptedAt: t0, error: nil), now: t0.addingTimeInterval(3600)),
+               "fresh roster is kept for a day")
+        assert(PRPoller.rosterNeedsRefresh(
+            TeamRoster(members: [], fetchedAt: t0, attemptedAt: t0, error: nil), now: t0.addingTimeInterval(86_401)),
+               "a day-old roster refreshes")
+        assert(PRPoller.rosterNeedsRefresh(
+            TeamRoster(members: [], fetchedAt: nil, attemptedAt: t0, error: "x"), now: t0.addingTimeInterval(3601)),
+               "a failed roster retries hourly")
+        let disc = pr("disc", tabs: [.forMe], author: "jlguerreiro")
+        let discCarried = PRPoller.carryingForward(
+            fetched: [], previous: store([disc]), incompleteTabs: [:],
+            incompleteDiscovery: .noData, isDiscoveredPR: { $0.author == "jlguerreiro" }
+        )
+        assert(discCarried.snapshots.map(\.nodeId) == ["disc"], "an incomplete discovery query keeps its own PRs")
 
         // MARK: Vetting carried PRs (`droppingFinished`)
         // The stale-merged-PR bug: the bot query only ever got its degraded page

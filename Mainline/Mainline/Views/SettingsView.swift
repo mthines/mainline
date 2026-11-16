@@ -422,7 +422,8 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var inboxSection: some View {
-        InboxSettingsView(settings: settings, knownOrgs: manager.knownOrgs)
+        InboxSettingsView(settings: settings, knownOrgs: manager.knownOrgs,
+                          onRefreshTeams: { await manager.refreshTeamRosters(org: $0) })
     }
 
     // MARK: - Help
@@ -544,6 +545,13 @@ struct SettingsView: View {
             .pickerStyle(.menu)
 
             Toggle("Follow current view (tab, scope & drafts)", isOn: tracked(\.menuBarScopeFollowsSelection, name: "menuBarScopeFollowsSelection"))
+            Toggle("Skip collapsed sections", isOn: tracked(\.menuBarSkipsCollapsed, name: "menuBarSkipsCollapsed"))
+                .disabled(!settings.menuBarScopeFollowsSelection)
+            Label("Leaves out PRs in a section you've collapsed (e.g. Waiting), so the badge counts only what you can see. Needs \"Follow current view\".",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Label("The badge counts the chosen metric" +
                   (settings.menuBarScopeFollowsSelection ? " over exactly what the panel shows — the selected tab, scope, and drafts filter." : " across all repositories, ignoring the selected tab, scope, and drafts."),

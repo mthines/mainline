@@ -589,6 +589,7 @@ Full list of keys is `MainlineSettings.Keys`; the notable ones:
 | `reviewNotReadyOnUnresolvedThreads` | Bool | true |
 | `reviewNotReadyOnMyApproval` | Bool | true |
 | `committedPRPlacement` | String (`CommittedPRPlacement` rawValue) | `yourPRs` |
+| `discoverFocusAuthorPRs` | Bool | `false` — Review Focus authors become a discovery source: `PRPoller.focusDiscoveryQueries` runs one extra search per org (`-author:@me org:<org> author:…`, split under GitHub's 256-char cap, tagged `.forMe`, telemetry `poll.query_type="focus_authors"`). Carried forward by SOURCE (`isFocusDiscoveredPR`), and a discovered PR with no review request on you is silent (no banner, no unread dot). Focus TEAMS expand too: `PRPoller.refreshTeamRosters` caches each team's members (`teamRosters`, REST `/orgs/{org}/teams/{slug}/members`, needs `read:org`; refreshed daily, failed teams retried hourly, manual button in Settings → Inbox) and `effectiveFocus` folds them into the authors; your own PRs are never discovered. Without it focus only DEMOTES PRs the Reviewer query already returned. |
 | `committedPRBotAuthors` | [String] | `[]` — bots that open PRs for you; non-empty adds one committed-PR fetch per poll (1–5 paged light searches + one `nodes(ids:)` request) |
 
 ## Bundle ID
