@@ -1255,7 +1255,8 @@ final class MainlineSettings: ObservableObject {
     /// Per-org review-focus allow-lists for the "Needs your review" section, keyed
     /// by repo owner (e.g. `dash0hq`). For a given org, when its config is non-empty
     /// only PRs authored by one of its `authors` OR requested via one of its `teams`
-    /// stay active; the rest are demoted. An org with no entry (or an empty one) has
+    /// stay active; the rest are demoted — except a PR that requests the viewer
+    /// directly, which focus never demotes. An org with no entry (or an empty one) has
     /// NO focus rule, so all of its PRs stay active — a focus rule scoped to one org
     /// never mutes PRs in another. Persisted as JSON. Edit via Settings → Inbox.
     @Published var reviewFocusByOrg: [String: OrgFocusConfig] {
