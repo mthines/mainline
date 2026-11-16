@@ -142,7 +142,7 @@ struct InboxSettingsView: View {
         }
 
         Section("Review Focus") {
-            Label("Focus is set per org. For each org below, list the authors and teams whose PRs should stay in \"Needs your review\" — everything else in that org is demoted to Muted. An org with no entries shows all of its PRs, and a rule in one org never affects another.",
+            Label("Focus is set per org. For each org below, list the authors and teams whose PRs should stay in \"Needs your review\" — everything else in that org is demoted to Muted, except PRs that request you personally. An org with no entries shows all of its PRs, and a rule in one org never affects another.",
                   systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)

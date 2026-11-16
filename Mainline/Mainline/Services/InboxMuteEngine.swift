@@ -59,13 +59,15 @@ enum InboxMuteEngine {
     ///   1. Title/branch pattern glob
     ///   2. Bot author (when muteBotAuthors is on)
     ///   3. Label match
-    ///   4. Outside this org's focus allow-list (Needs-your-review role only)
+    ///   4. Outside this org's focus allow-list (Needs-your-review role only;
+    ///      skipped when the viewer was asked to review personally)
     static func muteVerdict(
         title: String,
         headRef: String,
         authorLogin: String,
         authorIsBot: Bool,
         requestedTeams: [String],
+        requestedDirectly: Bool = false,
         labels: [String],
         org: String,
         role: InboxRole,
@@ -103,7 +105,12 @@ enum InboxMuteEngine {
         // entry (or an empty one) never focus-mutes — so a focus rule scoped to one
         // org can't demote PRs in another. This is what keeps a `dash0hq` team focus
         // from muting your personal `mthines/*` PRs.
-        if role == .needsYourReview, let focus = focusConfig(for: org, in: config), !focus.isEmpty {
+        //
+        // A PR that names YOU as a reviewer is never focus-muted: focus is a noise
+        // filter for team-wide / broad review traffic, and a personal request is the
+        // opposite of noise. Without this, a focus list of `ai-growth` hid the one PR
+        // someone had explicitly asked you to review.
+        if role == .needsYourReview, !requestedDirectly, let focus = focusConfig(for: org, in: config), !focus.isEmpty {
             // Normalize the `[bot]` suffix on both sides, mirroring Rule 2's bot
             // allow-list: a focus entry typed as `dash0-dev[bot]` must still match
             // the bare GraphQL login `dash0-dev` (and vice-versa). For a human login
@@ -458,6 +465,36 @@ enum InboxMuteEngine {
             config: cfg
         )
         assert(r4g == nil, "Focus author entered as `name[bot]` must match the bare bot login")
+
+        // --- A direct (personal) review request is never focus-muted ---
+        cfg = base
+        cfg.focusByOrg = ["acme": OrgFocusConfig(authors: ["carol"], teams: ["ai"])]
+        let r4h = muteVerdict(
+            title: "some PR",
+            headRef: "branch",
+            authorLogin: "dave",        // not in focus
+            authorIsBot: false,
+            requestedTeams: [],         // and no focus team…
+            requestedDirectly: true,    // …but the viewer was asked personally
+            labels: [],
+            org: "acme",
+            role: .needsYourReview,
+            config: cfg
+        )
+        assert(r4h == nil, "A PR that requests the viewer directly must bypass the focus rule")
+        let r4i = muteVerdict(
+            title: "some PR",
+            headRef: "branch",
+            authorLogin: "dave",
+            authorIsBot: false,
+            requestedTeams: [],
+            requestedDirectly: false,
+            labels: [],
+            org: "acme",
+            role: .needsYourReview,
+            config: cfg
+        )
+        if case .outsideFocus = r4i { } else { assertionFailure("Non-direct, non-focus PR must still be focus-muted") }
     }
     #endif
 }

@@ -134,7 +134,7 @@ struct HelpSettingsView: View {
                 icon: "person.2.slash.fill",
                 tint: .secondary,
                 title: "Outside your focus",
-                blurb: "Needs your review but the author/team isn't on your focus list. Your own PRs are never muted this way."
+                blurb: "Needs your review but the author/team isn't on your focus list. Your own PRs, and PRs that request you personally, are never muted this way."
             )
 
             Label(

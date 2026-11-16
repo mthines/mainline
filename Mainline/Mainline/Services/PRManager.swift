@@ -494,6 +494,7 @@ final class PRManager: ObservableObject {
             authorLogin:    pr.author,
             authorIsBot:    pr.authorIsBot,
             requestedTeams: pr.requestedTeams,
+            requestedDirectly: pr.reviewRequestSource(myLogin: config.myLogin) == .direct,
             labels:         pr.labels,
             org:            pr.org,
             role:           role,

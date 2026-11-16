@@ -18,7 +18,7 @@ The rules apply in this order.
 | 1 | **Pattern**     | Its title or head branch matches a mute glob.                              | `chore(deps)*`, `build(deps)*` |
 | 2 | **Bot author**  | It was opened by dependabot, renovate, github-actions, or any `[bot]` login. | On                 |
 | 3 | **Label**       | It carries a label you've muted.                                          | None                 |
-| 4 | **Outside focus** | It needs your review but its author or team isn't on your focus list.    | Off (empty list)     |
+| 4 | **Outside focus** | It needs your review but its author or team isn't on your focus list (unless it requests you personally).    | Off (empty list)     |
 
 Rule 4 never mutes your own PRs.
 Your created PRs are always active, whatever your focus list says.
@@ -44,7 +44,7 @@ An empty list disables label muting.
 ### Review focus
 
 The focus rule is an allow-list for the **Needs your review** section.
-When you fill it in, only PRs from an author or team on the list stay active; everyone else is demoted.
+When you fill it in, only PRs from an author or team on the list stay active; everyone else is demoted, except PRs that request you personally.
 
 - **Focus authors** — PR author logins to keep active.
 - **Focus teams** — team slugs to keep active. A PR is kept if its author or a requested team matches.
