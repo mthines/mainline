@@ -775,7 +775,13 @@ final class PRPoller {
                     if case .readyForReview = $0 { return $0.prNodeId == pr.nodeId }
                     return false
                 }
-                if !announced { transitions.append(.readyForReview(pr)) }
+                if !announced {
+                    // A team request routes like a first sighting (`.newPR` →
+                    // `reviewRequestedTeam`, quiet by default); a direct one is
+                    // "review requested from me" (`.readyForReview`).
+                    transitions.append(pr.reviewRequestSource(myLogin: myLogin) == .team
+                        ? .newPR(pr) : .readyForReview(pr))
+                }
             }
             let quietIds = Set(unique.filter(quiet).map(\.nodeId))
             if !quietIds.isEmpty {
@@ -1084,6 +1090,25 @@ enum PollCarryForwardChecks {
         assert(PRPoller.rosterNeedsRefresh(
             TeamRoster(members: [], fetchedAt: nil, attemptedAt: t0, error: "x"), now: t0.addingTimeInterval(3601)),
                "a failed roster retries hourly")
+        // Quiet mode: only a direct request, or one for a configured focus team, ends it.
+        func prq(_ teams: [String], _ reviewers: [String]) -> PRSnapshot {
+            var p = pr("q", tabs: [.forMe], author: "jlguerreiro", repo: "dash0hq/dash0")
+            p.requestedTeams = teams
+            p.requestedReviewers = reviewers
+            return p
+        }
+        let cfg = ["dash0hq": OrgFocusConfig(authors: ["jlguerreiro"], teams: ["ai-platform"])]
+        func quiet(_ p: PRSnapshot) -> Bool {
+            PRPoller.isQuietDiscovered(p, effective: cfg, configured: cfg, myLogin: "me", committedPlacement: .yourPRs)
+        }
+        assert(quiet(prq([], [])), "no request → quiet")
+        assert(!quiet(prq([], ["me"])), "a direct request ends quiet")
+        assert(!quiet(prq(["AI-Platform"], [])), "a focus-team request ends quiet (case-insensitive)")
+        assert(quiet(prq(["codeowners-team"], [])), "an unrelated team request stays quiet")
+        assert(!PRPoller.isFocusDiscoveredPR(
+            pr("c", tabs: [.forMe], author: "jlguerreiro", viewerIsCommitter: true, repo: "dash0hq/dash0"),
+            focusByOrg: cfg, myLogin: "me", committedPlacement: .yourPRs),
+               "a PR you committed to is never discovered")
         let disc = pr("disc", tabs: [.forMe], author: "jlguerreiro")
         let discCarried = PRPoller.carryingForward(
             fetched: [], previous: store([disc]), incompleteTabs: [:],

@@ -1054,18 +1054,23 @@ final class PRManager: ObservableObject {
     /// Whether the PR sits in a section the panel currently shows EXPANDED. Mirrors
     /// the deck's grouping: Inbox keys by role + group (`inbox:<role>:<group>`),
     /// the other tabs by group alone, and a pinned PR by the Pinned subsection.
-    private func inExpandedSection(_ pr: PRSnapshot) -> Bool {
+    private func inExpandedSection(_ pr: PRSnapshot, _ stacks: StackEngine.Index) -> Bool {
         guard settings.menuBarSkipsCollapsed, settings.menuBarScopeFollowsSelection else { return true }
         let myLogin = settings.githubUsername
         let placement = settings.committedPRPlacement
-        let group: ActionGroup = isPinned(pr) ? .pinned : pr.actionGroup(
+        // The deck files a stack under its BOTTOM PR's group and pins it as a unit,
+        // so the badge must group by the stack, not by each member.
+        let stack = stacks.stack(containing: pr.nodeId)
+        let anchor = stack?.bottom ?? pr
+        let pinned = isPinned(pr) || (stack?.members.contains { isPinned($0) } ?? false)
+        let group: ActionGroup = pinned ? .pinned : anchor.actionGroup(
             splitDrafts: settings.splitDrafts,
             myLogin: myLogin,
             reviewReady: settings.reviewReadyConfig,
             committedPlacement: placement
         )
         if settings.selectedTab == .inbox {
-            let role = pr.inboxRole(myLogin: myLogin, committedPlacement: placement)
+            let role = anchor.inboxRole(myLogin: myLogin, committedPlacement: placement)
             return !settings.collapsedSectionsRaw.contains("inbox:\(role.rawValue):\(group.rawValue)")
         }
         return !settings.collapsedSectionsRaw.contains(group.rawValue)
@@ -1077,14 +1082,15 @@ final class PRManager: ObservableObject {
     /// badge matches the visible list. With the `.totalOpen` metric the badge
     /// equals the visible open count. Colorblind-safe: encodes shape + tint.
     var menuBarBadge: MenuBarBadge {
-        let scoped = badgeBasePRs.filter(inExpandedSection)
+        let stacks = StackEngine.index(badgeBasePRs)
+        let scoped = badgeBasePRs.filter { inExpandedSection($0, stacks) }
         let myLogin = settings.githubUsername
 
         switch settings.menuBarMetric {
         case .needsAHuman:
             // Reuses the exact same "needs attention" predicate the browse list's
             // "Needs attention" group uses (over the same base population).
-            return .attention(needsAttentionPRs.filter(inExpandedSection).count + issueNeedsMyTimeCount)
+            return .attention(needsAttentionPRs.filter { inExpandedSection($0, stacks) }.count + issueNeedsMyTimeCount)
 
         case .failingCI:
             let count = scoped.filter { pr in
