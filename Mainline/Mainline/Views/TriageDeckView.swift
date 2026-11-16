@@ -1361,6 +1361,36 @@ struct TriageDeckView: View {
         )
     }
 
+    /// Tiny per-status CI tally for a collapsed stack: "● 3 ● 1" (green / red, plus
+    /// orange for pending). Zero counts are omitted so it stays a few characters wide.
+    @ViewBuilder
+    private func stackCIChips(_ members: [PRSnapshot]) -> some View {
+        let green = members.filter { $0.ciStatus == .success }.count
+        let red = members.filter { $0.ciStatus == .failure || $0.ciStatus == .error }.count
+        let pending = members.filter { $0.ciStatus == .pending }.count
+        HStack(spacing: 5) {
+            ciTally(green, color: .green, label: "passing")
+            ciTally(red, color: .red, label: "failing")
+            ciTally(pending, color: .orange, label: "pending")
+            ciTally(members.count - green - red - pending, color: .secondary, label: "without CI status")
+        }
+    }
+
+    @ViewBuilder
+    private func ciTally(_ count: Int, color: Color, label: String) -> some View {
+        if count > 0 {
+            HStack(spacing: 2) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text("\(count)")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(count) \(label)")
+        }
+    }
+
     private func deckRow(pr: PRSnapshot, index: Int, stackBadge: String = "", stackCount: Int = 0,
                          stackMembers: [PRSnapshot] = [], onRowTap: (() -> Void)? = nil) -> some View {
         let isFocused = index == selectedIndex && showsKeyboardFocus && selectedIssueIndex == nil
@@ -1393,6 +1423,11 @@ struct TriageDeckView: View {
                         Image(systemName: "chevron.right")
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("Collapsed stack — expand")
+                    } else if pr.merged || pr.closed {
+                        // A finished PR outside the Done section (pinned, search
+                        // result) reads as merged (purple) / closed (grey), not as
+                        // a green "CI passed" tick.
+                        doneStatusIcon(for: pr)
                     } else if isDraft {
                         draftIcon
                     } else {
@@ -1416,10 +1451,8 @@ struct TriageDeckView: View {
                     }
                     HStack(spacing: 4) {
                         if stackCount > 0 {
-                            HStack(spacing: 2) {
-                                Image(systemName: "square.stack.3d.up.fill")
-                                Text("\(stackCount)")
-                            }
+                            // Icon only: the CI tally beside it already adds up to the count.
+                            Image(systemName: "square.stack.3d.up.fill")
                             .font(.caption2)
                             .fontWeight(.medium)
                             .foregroundStyle(.secondary)
@@ -1427,6 +1460,7 @@ struct TriageDeckView: View {
                             .padding(.vertical, 1)
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
                             .accessibilityLabel("Stack of \(stackCount) — expand to see all")
+                            stackCIChips(stackMembers)
                         }
                         if !stackBadge.isEmpty {
                             Text(stackBadge)
@@ -1950,7 +1984,7 @@ struct TriageDeckView: View {
     // MARK: - Done status icon (merged = purple, closed = grey)
 
     /// Leading status icon for a completed PR, OVERRIDING the CI icon:
-    ///   - merged (`pr.merged == true`)   → purple `arrow.triangle.merge` ("Merged")
+    ///   - merged (`pr.merged == true`)   → purple filled circle with the merge glyph ("Merged")
     ///   - closed-not-merged (`closed && !merged`) → muted grey `xmark.circle`
     ///     ("Closed").
     /// Falls back to the CI icon for anything unexpected (should not occur in the
@@ -1958,8 +1992,16 @@ struct TriageDeckView: View {
     @ViewBuilder
     private func doneStatusIcon(for pr: PRSnapshot) -> some View {
         if pr.merged {
-            Image(systemName: "arrow.triangle.merge")
-                .foregroundStyle(Color(nsColor: .systemPurple))
+            // Same filled-circle silhouette as the CI tick (`checkmark.circle.fill`):
+            // SF Symbols has no merge-in-a-circle, so a purple disc carries the glyph.
+            Image(systemName: "circle.fill")
+                .foregroundStyle(Color(red: 0.51, green: 0.28, blue: 0.80))
+                .overlay(
+                    Image(systemName: "arrow.triangle.merge")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white)
+                )
+                .scaleEffect(1.1)
                 .accessibilityLabel("Merged")
         } else if pr.closed {
             Image(systemName: "xmark.circle")
