@@ -3282,13 +3282,14 @@ struct KeyCaptureView: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            observeResignKey()
+            observeKeyState()
             guard window != nil else { return }
             takeFocus(attempt: 0)
         }
 
-        /// Fire `onDismiss` when this view's window resigns key (popover closed).
-        private func observeResignKey() {
+        /// Fire `onDismiss` when this view's window resigns key (popover closed), and
+        /// reclaim first responder when it becomes key again.
+        private func observeKeyState() {
             if let resignObserver {
                 NotificationCenter.default.removeObserver(resignObserver)
                 self.resignObserver = nil
@@ -3324,7 +3325,8 @@ struct KeyCaptureView: NSViewRepresentable {
         }
 
         /// Reclaim focus after the window becomes key. SwiftUI may still be tearing
-        /// down the picker's field editor on this tick, so retry briefly.
+        /// down the picker's field editor on this tick, so retry briefly. A live text
+        /// field (search) is left alone: the loop stops when an `NSText` holds focus.
         private func reclaimOnBecomeKey(attempt: Int) {
             guard let window else { return }
             reassertFocusIfIdle()
