@@ -3277,22 +3277,39 @@ struct KeyCaptureView: NSViewRepresentable {
         var onDismiss: (() -> Void)?
         var lastSearchActive = false
         private var resignObserver: NSObjectProtocol?
+        private var becomeKeyObserver: NSObjectProtocol?
         override var acceptsFirstResponder: Bool { true }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            observeResignKey()
+            observeKeyState()
             guard window != nil else { return }
             takeFocus(attempt: 0)
         }
 
-        /// Fire `onDismiss` when this view's window resigns key (popover closed).
-        private func observeResignKey() {
+        /// Fire `onDismiss` when this view's window resigns key (popover closed), and
+        /// reclaim first responder when it becomes key again.
+        private func observeKeyState() {
             if let resignObserver {
                 NotificationCenter.default.removeObserver(resignObserver)
                 self.resignObserver = nil
             }
+            if let becomeKeyObserver {
+                NotificationCenter.default.removeObserver(becomeKeyObserver)
+                self.becomeKeyObserver = nil
+            }
             guard let window else { return }
+            // Running a prompt / opening a PR hands focus to another app or window
+            // (terminal, browser). When the popover window becomes key again, nothing
+            // re-ran `viewDidMoveToWindow`, so the first responder stayed stale and
+            // J/K/A went nowhere. Reclaim it (only if no real control holds it).
+            becomeKeyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.reclaimOnBecomeKey(attempt: 0)
+            }
             resignObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.didResignKeyNotification,
                 object: window,
@@ -3304,6 +3321,21 @@ struct KeyCaptureView: NSViewRepresentable {
 
         deinit {
             if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+            if let becomeKeyObserver { NotificationCenter.default.removeObserver(becomeKeyObserver) }
+        }
+
+        /// Reclaim focus after the window becomes key. SwiftUI may still be tearing
+        /// down the picker's field editor on this tick, so retry briefly. A live text
+        /// field (search) is left alone: the loop stops when an `NSText` holds focus.
+        private func reclaimOnBecomeKey(attempt: Int) {
+            guard let window else { return }
+            reassertFocusIfIdle()
+            if window.firstResponder !== self, attempt < 6,
+               !(window.firstResponder is NSText) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    self?.reclaimOnBecomeKey(attempt: attempt + 1)
+                }
+            }
         }
 
         /// Reclaim first responder only when nothing meaningful holds it (the window
