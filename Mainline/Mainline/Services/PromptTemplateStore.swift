@@ -330,7 +330,11 @@ enum PromptLauncher {
             //   listen_on unix:/tmp/mainline-kitty
             // (kitty appends its pid, so the socket is /tmp/mainline-kitty-<pid>.)
             // Without one, `open -n` starts kitty running the script in a new window.
-            if openKittyTab(script, app: app) { return }
+            if openKittyTab(script, app: app) {
+                // The remote launch doesn't raise kitty the way `NSWorkspace.open` does for the others.
+                NSRunningApplication.runningApplications(withBundleIdentifier: terminal.bundleIdentifier ?? "").first?.activate()
+                return
+            }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             // `--hold` keeps the window after the script exits, like Terminal does, so a
