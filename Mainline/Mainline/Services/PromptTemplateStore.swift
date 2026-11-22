@@ -333,7 +333,9 @@ enum PromptLauncher {
             if openKittyTab(script, app: app) { return }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            process.arguments = ["-n", app.path, "--args", script.path]
+            // `--hold` keeps the window after the script exits, like Terminal does, so a
+            // failed checkout's message stays readable.
+            process.arguments = ["-n", app.path, "--args", "--hold", script.path]
             try process.run()
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
@@ -357,7 +359,7 @@ enum PromptLauncher {
         for name in names where name.hasPrefix("mainline-kitty") {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: kitten)
-            process.arguments = ["@", "--to", "unix:/tmp/\(name)", "launch", "--type=tab", script.path]
+            process.arguments = ["@", "--to", "unix:/tmp/\(name)", "launch", "--type=tab", "--hold", script.path]
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             guard (try? process.run()) != nil else { continue }
