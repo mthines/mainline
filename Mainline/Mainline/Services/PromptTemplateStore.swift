@@ -330,7 +330,7 @@ enum PromptLauncher {
             //   listen_on unix:/tmp/mainline-kitty
             // (kitty appends its pid, so the socket is /tmp/mainline-kitty-<pid>.)
             // Without one, `open -n` starts kitty running the script in a new window.
-            if let pid = openKittyTab(script, app: app) {
+            if case .opened(let pid) = openKittyTab(script, app: app) {
                 // The remote launch doesn't raise kitty the way `NSWorkspace.open` does for the
                 // others. Raise the kitty that took the tab; with several running, `.first` could
                 // be another one. No parsable pid falls back to any kitty.
@@ -358,12 +358,15 @@ enum PromptLauncher {
         }
     }
 
-    /// Asks a running kitty (via its `/tmp/mainline-kitty-<pid>` socket) to run `script` in a
-    /// new tab. Returns nil when no socket answers, so the caller can open a window instead;
-    /// otherwise the answering kitty's pid (itself nil when the socket name doesn't end in one).
-    private static func openKittyTab(_ script: URL, app: URL) -> pid_t?? {
+    private enum KittyTabResult {
+        case notOpened                 // no socket answered; the caller opens a window instead
+        case opened(pid: pid_t?)       // pid is nil when the socket name doesn't end in one
+    }
+
+    /// Asks a running kitty (via its `/tmp/mainline-kitty-<pid>` socket) to run `script` in a new tab.
+    private static func openKittyTab(_ script: URL, app: URL) -> KittyTabResult {
         let kitten = app.appendingPathComponent("Contents/MacOS/kitten").path
-        guard FileManager.default.isExecutableFile(atPath: kitten) else { return nil }
+        guard FileManager.default.isExecutableFile(atPath: kitten) else { return .notOpened }
         let names = (try? FileManager.default.contentsOfDirectory(atPath: "/tmp")) ?? []
         for name in names where name.hasPrefix("mainline-kitty") {
             let process = Process()
@@ -374,10 +377,10 @@ enum PromptLauncher {
             guard (try? process.run()) != nil else { continue }
             process.waitUntilExit()
             if process.terminationStatus == 0 {   // stale sockets just fail; try the next
-                return .some(name.split(separator: "-").last.flatMap { pid_t($0) })
+                return .opened(pid: name.split(separator: "-").last.flatMap { pid_t($0) })
             }
         }
-        return nil
+        return .notOpened
     }
 
     /// Scripts and prompt files are single-use; drop anything older than a day.
