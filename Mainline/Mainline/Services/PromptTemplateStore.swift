@@ -11,6 +11,7 @@ enum PromptTerminal: String, CaseIterable, Identifiable {
     case iterm
     case ghostty
     case warp
+    case kitty
 
     var id: String { rawValue }
 
@@ -21,6 +22,7 @@ enum PromptTerminal: String, CaseIterable, Identifiable {
         case .iterm:    return "iTerm"
         case .ghostty:  return "Ghostty"
         case .warp:     return "Warp"
+        case .kitty:    return "kitty (new tab)"
         }
     }
 
@@ -31,6 +33,7 @@ enum PromptTerminal: String, CaseIterable, Identifiable {
         case .iterm:    return "com.googlecode.iterm2"
         case .ghostty:  return "com.mitchellh.ghostty"
         case .warp:     return "dev.warp.Warp-Stable"
+        case .kitty:    return "net.kovidgoyal.kitty"
         }
     }
 
@@ -320,6 +323,30 @@ enum PromptLauncher {
             // means the app never started, which must not read as "Started …".
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
+        case .kitty:
+            guard let app = terminal.appURL else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
+            // A running kitty with remote control gets a new tab. Needs, in kitty.conf:
+            //   allow_remote_control socket-only
+            //   listen_on unix:/tmp/mainline-kitty
+            // (kitty appends its pid, so the socket is /tmp/mainline-kitty-<pid>.)
+            // Without one, `open -n` starts kitty running the script in a new window.
+            if case .opened(let pid) = openKittyTab(script, app: app) {
+                // The remote launch doesn't raise kitty the way `NSWorkspace.open` does for the
+                // others. Raise the kitty that took the tab; with several running, `.first` could
+                // be another one. No parsable pid falls back to any kitty.
+                let target = pid.flatMap { NSRunningApplication(processIdentifier: $0) }
+                    ?? NSRunningApplication.runningApplications(withBundleIdentifier: terminal.bundleIdentifier ?? "").first
+                target?.activate()
+                return
+            }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            // `--hold` keeps the window after the script exits, like Terminal does, so a
+            // failed checkout's message stays readable.
+            process.arguments = ["-n", app.path, "--args", "--hold", script.path]
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
         case .terminal, .iterm, .warp:
             guard let app = terminal.appURL else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
             // The result arrives asynchronously, after `run` has returned its summary, so a
@@ -329,6 +356,31 @@ enum PromptLauncher {
                 if error != nil { NSWorkspace.shared.open(script) }
             }
         }
+    }
+
+    private enum KittyTabResult {
+        case notOpened                 // no socket answered; the caller opens a window instead
+        case opened(pid: pid_t?)       // pid is nil when the socket name doesn't end in one
+    }
+
+    /// Asks a running kitty (via its `/tmp/mainline-kitty-<pid>` socket) to run `script` in a new tab.
+    private static func openKittyTab(_ script: URL, app: URL) -> KittyTabResult {
+        let kitten = app.appendingPathComponent("Contents/MacOS/kitten").path
+        guard FileManager.default.isExecutableFile(atPath: kitten) else { return .notOpened }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: "/tmp")) ?? []
+        for name in names where name.hasPrefix("mainline-kitty") {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: kitten)
+            process.arguments = ["@", "--to", "unix:/tmp/\(name)", "launch", "--type=tab", "--hold", script.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { continue }
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {   // stale sockets just fail; try the next
+                return .opened(pid: name.split(separator: "-").last.flatMap { pid_t($0) })
+            }
+        }
+        return .notOpened
     }
 
     /// Scripts and prompt files are single-use; drop anything older than a day.
