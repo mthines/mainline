@@ -11,6 +11,7 @@ enum PromptTerminal: String, CaseIterable, Identifiable {
     case iterm
     case ghostty
     case warp
+    case kitty
 
     var id: String { rawValue }
 
@@ -21,6 +22,7 @@ enum PromptTerminal: String, CaseIterable, Identifiable {
         case .iterm:    return "iTerm"
         case .ghostty:  return "Ghostty"
         case .warp:     return "Warp"
+        case .kitty:    return "kitty (new tab)"
         }
     }
 
@@ -31,6 +33,7 @@ enum PromptTerminal: String, CaseIterable, Identifiable {
         case .iterm:    return "com.googlecode.iterm2"
         case .ghostty:  return "com.mitchellh.ghostty"
         case .warp:     return "dev.warp.Warp-Stable"
+        case .kitty:    return "net.kovidgoyal.kitty"
         }
     }
 
@@ -320,6 +323,20 @@ enum PromptLauncher {
             // means the app never started, which must not read as "Started …".
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
+        case .kitty:
+            guard let app = terminal.appURL else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
+            // A running kitty with remote control gets a new tab. Needs, in kitty.conf:
+            //   allow_remote_control socket-only
+            //   listen_on unix:/tmp/mainline-kitty
+            // (kitty appends its pid, so the socket is /tmp/mainline-kitty-<pid>.)
+            // Without one, `open -n` starts kitty running the script in a new window.
+            if openKittyTab(script, app: app) { return }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = ["-n", app.path, "--args", script.path]
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
         case .terminal, .iterm, .warp:
             guard let app = terminal.appURL else { throw PromptLaunchError.couldNotOpen(terminal.displayName) }
             // The result arrives asynchronously, after `run` has returned its summary, so a
@@ -329,6 +346,25 @@ enum PromptLauncher {
                 if error != nil { NSWorkspace.shared.open(script) }
             }
         }
+    }
+
+    /// Asks a running kitty (via its `/tmp/mainline-kitty-<pid>` socket) to run `script` in a
+    /// new tab. Returns false when no socket answers, so the caller can open a window instead.
+    private static func openKittyTab(_ script: URL, app: URL) -> Bool {
+        let kitten = app.appendingPathComponent("Contents/MacOS/kitten").path
+        guard FileManager.default.isExecutableFile(atPath: kitten) else { return false }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: "/tmp")) ?? []
+        for name in names where name.hasPrefix("mainline-kitty") {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: kitten)
+            process.arguments = ["@", "--to", "unix:/tmp/\(name)", "launch", "--type=tab", script.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { continue }
+            process.waitUntilExit()
+            if process.terminationStatus == 0 { return true }   // stale sockets just fail; try the next
+        }
+        return false
     }
 
     /// Scripts and prompt files are single-use; drop anything older than a day.
