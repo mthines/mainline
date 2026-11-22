@@ -90,7 +90,7 @@ Templates are Markdown files in `~/.config/mainline/prompts/`; one template can 
 
 | Setting          | Default | Notes                                                                 |
 | ---------------- | ------- | --------------------------------------------------------------------- |
-| Terminal         | Auto    | Where CLI harnesses open: Terminal, iTerm, Ghostty or Warp.           |
+| Terminal         | Auto    | Where CLI harnesses open: Terminal, iTerm, Ghostty, Warp or kitty. kitty opens a tab only with `allow_remote_control socket-only` and `listen_on unix:/tmp/mainline-kitty` in `kitty.conf`; otherwise a new window. |
 | Templates        | Starters | Add, edit or delete; a template's `when:` / `priority:` float it to the top for matching PR states. |
 | Harnesses        | Claude Code, Agent0 | Enable or disable each and order them; the first enabled one is the default. Every command or URL must contain `{{prompt}}`. |
 
