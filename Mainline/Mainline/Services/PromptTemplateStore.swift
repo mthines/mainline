@@ -330,9 +330,13 @@ enum PromptLauncher {
             //   listen_on unix:/tmp/mainline-kitty
             // (kitty appends its pid, so the socket is /tmp/mainline-kitty-<pid>.)
             // Without one, `open -n` starts kitty running the script in a new window.
-            if openKittyTab(script, app: app) {
-                // The remote launch doesn't raise kitty the way `NSWorkspace.open` does for the others.
-                NSRunningApplication.runningApplications(withBundleIdentifier: terminal.bundleIdentifier ?? "").first?.activate()
+            if let pid = openKittyTab(script, app: app) {
+                // The remote launch doesn't raise kitty the way `NSWorkspace.open` does for the
+                // others. Raise the kitty that took the tab; with several running, `.first` could
+                // be another one. No parsable pid falls back to any kitty.
+                let target = pid.flatMap { NSRunningApplication(processIdentifier: $0) }
+                    ?? NSRunningApplication.runningApplications(withBundleIdentifier: terminal.bundleIdentifier ?? "").first
+                target?.activate()
                 return
             }
             let process = Process()
@@ -355,10 +359,11 @@ enum PromptLauncher {
     }
 
     /// Asks a running kitty (via its `/tmp/mainline-kitty-<pid>` socket) to run `script` in a
-    /// new tab. Returns false when no socket answers, so the caller can open a window instead.
-    private static func openKittyTab(_ script: URL, app: URL) -> Bool {
+    /// new tab. Returns nil when no socket answers, so the caller can open a window instead;
+    /// otherwise the answering kitty's pid (itself nil when the socket name doesn't end in one).
+    private static func openKittyTab(_ script: URL, app: URL) -> pid_t?? {
         let kitten = app.appendingPathComponent("Contents/MacOS/kitten").path
-        guard FileManager.default.isExecutableFile(atPath: kitten) else { return false }
+        guard FileManager.default.isExecutableFile(atPath: kitten) else { return nil }
         let names = (try? FileManager.default.contentsOfDirectory(atPath: "/tmp")) ?? []
         for name in names where name.hasPrefix("mainline-kitty") {
             let process = Process()
@@ -368,9 +373,11 @@ enum PromptLauncher {
             process.standardError = FileHandle.nullDevice
             guard (try? process.run()) != nil else { continue }
             process.waitUntilExit()
-            if process.terminationStatus == 0 { return true }   // stale sockets just fail; try the next
+            if process.terminationStatus == 0 {   // stale sockets just fail; try the next
+                return .some(name.split(separator: "-").last.flatMap { pid_t($0) })
+            }
         }
-        return false
+        return nil
     }
 
     /// Scripts and prompt files are single-use; drop anything older than a day.
