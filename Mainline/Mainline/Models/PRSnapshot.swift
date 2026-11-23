@@ -155,7 +155,7 @@ enum PRState: String, Codable, Equatable, CaseIterable {
 ///     unresolved threads OR merge conflict. Unlike the role-agnostic
 ///     `needsAttention`, this DOES include merge conflicts — resolving a conflict
 ///     on your own PR is a manual action you must take.
-///   - `.readyToMerge` — approved && mergeable && CI green (one-click merge).
+///   - `.readyToMerge` — approved && mergeable && CI green && not already queued / auto-merging (one-click merge).
 ///   - `.waiting` — blocked on others: awaiting review, CI pending, etc.
 ///
 /// Reviewer role (PRs assigned to you) — two buckets:
@@ -696,9 +696,9 @@ struct PRSnapshot: Codable, Equatable {
     var mergeBlockReason: String? {
         if merged { return "already merged" }
         if closed { return "closed" }
-        if isQueuedForMerge { return mergeQueueState != nil ? "already in the merge queue" : "auto-merge is enabled" }
         if isDraft { return "still a draft" }
         if mergeable == false { return "has merge conflicts" }
+        if isQueuedForMerge { return mergeQueueState != nil ? "already in the merge queue" : "auto-merge is enabled" }
         if mergeable == nil { return "GitHub is still checking mergeability" }
         if ciStatus != .success { return "CI hasn't passed" }
         if reviewDecision != .approved {

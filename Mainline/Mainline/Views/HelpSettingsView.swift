@@ -44,13 +44,14 @@ struct HelpSettingsView: View {
                 icon: "checkmark.circle.fill",
                 tint: .green,
                 title: "Ready to merge",
-                blurb: "Nothing left but the merge button. Needs all three:",
+                blurb: "Nothing left but the merge button. Needs all of:",
                 bullets: [
                     "Approved",
                     "No conflicts (mergeable)",
-                    "CI is green"
+                    "CI is green",
+                    "Not already in the merge queue (or auto-merge)"
                 ],
-                youSee: "Only appears once a PR is fully cleared. Hit M to merge."
+                youSee: "Only appears once a PR is fully cleared. Hit M to merge. A queued PR waits under Waiting with a Queued badge."
             )
 
             FAQItem(
