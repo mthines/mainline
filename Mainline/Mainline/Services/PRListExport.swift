@@ -96,6 +96,14 @@ enum PRListExportChecks {
                "green PR details")
         assert(lines[3] == "  - draft · CI: failing · review: changes requested · merge conflict · 1 unresolved thread · +0 −0",
                "blocked PR: draft/conflict/thread flags; empty author and branch omitted")
+
+        var queued = green
+        queued.mergeQueueState = "QUEUED"
+        assert(PRListExport.details(queued).contains("in merge queue"), "queued PR is labelled")
+        var auto = green
+        auto.autoMergeEnabled = true
+        assert(PRListExport.details(auto).contains("auto-merge enabled"), "auto-merge PR is labelled")
+        assert(!PRListExport.details(green).contains("in merge queue"), "plain PR has no queue label")
     }
 }
 #endif
