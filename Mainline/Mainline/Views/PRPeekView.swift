@@ -393,7 +393,6 @@ struct PRPeekView: View {
         if pr.readyToMerge { return ("Ready to merge", "arrow.triangle.merge", .green) }
         if pr.reviewDecision != .approved { return ("Needs review", "lock.fill", .orange) }
         if pr.ciStatus != .success { return ("Blocked · CI", "lock.fill", .orange) }
-        if pr.isQueuedForMerge { return ("Auto-merge on", "clock.fill", .orange) }
         return ("Blocked", "lock.fill", .orange)
     }
 

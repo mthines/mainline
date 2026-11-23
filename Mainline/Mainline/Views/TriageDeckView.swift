@@ -2977,19 +2977,16 @@ struct ConflictBadge: View {
     }
 }
 
-/// Text pill for a PR already handed to GitHub to merge — in the merge queue
-/// ("Queued", with the position when known) or auto-merge armed. Such a PR is not
+/// Text pill for a PR sitting in GitHub's merge queue ("Queued", with the position
+/// when known). Auto-merge alone does not count. Such a PR is not
 /// `readyToMerge`, so this is what explains why it sits in Waiting with no Merge button.
 struct QueuedBadge: View {
     let pr: PRSnapshot
 
     private var label: String? {
         guard pr.isQueuedForMerge else { return nil }
-        if pr.mergeQueueState != nil {
-            if let p = pr.mergeQueuePosition { return "Queued #\(p)" }
-            return "Queued"
-        }
-        return "Auto-merge"
+        if let p = pr.mergeQueuePosition { return "Queued #\(p)" }
+        return "Queued"
     }
 
     var body: some View {
@@ -3002,7 +2999,7 @@ struct QueuedBadge: View {
                 .padding(.vertical, 1)
                 .background(Color(nsColor: .systemOrange).opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
                 .foregroundStyle(Color(nsColor: .systemOrange))
-                .help(pr.mergeQueueState != nil ? "In the merge queue" : "Auto-merge is enabled")
+                .help("In the merge queue")
                 .accessibilityLabel(label)
         }
     }

@@ -33,11 +33,7 @@ enum PRListExport {
         parts.append("CI: \(ciLabel(pr.ciStatus))")
         parts.append("review: \(reviewLabel(pr.reviewDecision))")
         if pr.mergeable == false { parts.append("merge conflict") }
-        if pr.mergeQueueState != nil {
-            parts.append("in merge queue")
-        } else if pr.autoMergeEnabled {
-            parts.append("auto-merge enabled")
-        }
+        if pr.mergeQueueState != nil { parts.append("in merge queue") }
         if pr.unresolvedThreadCount > 0 {
             let noun = pr.unresolvedThreadCount == 1 ? "thread" : "threads"
             parts.append("\(pr.unresolvedThreadCount) unresolved \(noun)")
@@ -100,9 +96,6 @@ enum PRListExportChecks {
         var queued = green
         queued.mergeQueueState = "QUEUED"
         assert(PRListExport.details(queued).contains("in merge queue"), "queued PR is labelled")
-        var auto = green
-        auto.autoMergeEnabled = true
-        assert(PRListExport.details(auto).contains("auto-merge enabled"), "auto-merge PR is labelled")
         assert(!PRListExport.details(green).contains("in merge queue"), "plain PR has no queue label")
     }
 }
