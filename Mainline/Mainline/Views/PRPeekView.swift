@@ -387,14 +387,13 @@ struct PRPeekView: View {
     private var merge: (text: String, icon: String, tint: Color) {
         if pr.isDraft { return ("Draft", "pencil.circle", .secondary) }
         if pr.mergeable == false { return ("Conflicts", "exclamationmark.triangle.fill", .red) }
-        if pr.isQueuedForMerge {
-            return (pr.mergeQueueState != nil ? "In merge queue" : "Auto-merge on", "clock.fill", .orange)
-        }
+        if pr.mergeQueueState != nil { return ("In merge queue", "clock.fill", .orange) }
         if pr.mergeable == nil { return ("Checking…", "questionmark.circle", .secondary) }
         // No conflicts — but is it allowed to merge?
         if pr.readyToMerge { return ("Ready to merge", "arrow.triangle.merge", .green) }
         if pr.reviewDecision != .approved { return ("Needs review", "lock.fill", .orange) }
         if pr.ciStatus != .success { return ("Blocked · CI", "lock.fill", .orange) }
+        if pr.isQueuedForMerge { return ("Auto-merge on", "clock.fill", .orange) }
         return ("Blocked", "lock.fill", .orange)
     }
 

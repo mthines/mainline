@@ -36,7 +36,7 @@ The group tells you whether the ball is in your court.
 | Group             | A PR lands here when                                                       | What to do                          |
 | ----------------- | ------------------------------------------------------------------------- | ----------------------------------- |
 | **Needs attention** | CI is red, someone requested changes, or there are open review comments. | Fix it — the ball is in your court. |
-| **Ready to merge**  | It's approved, mergeable (no conflicts), and CI is green.                | Merge it. Press `M`.                |
+| **Ready to merge**  | It's approved, mergeable (no conflicts), CI is green, and not already in the merge queue. | Merge it. Press `M`.                |
 | **Waiting**         | CI is still running, or it's not approved, or it's approved but not yet mergeable. | Wait — the ball is elsewhere. |
 | **Draft**           | It's a draft, not ready for review.                                       | Nothing yet.                        |
 | **Snoozed**         | You postponed it and it hasn't woken.                                     | It steps aside until the timer ends. |
@@ -48,7 +48,7 @@ The same explanation lives in the app under **Settings** → **Help**.
 
 A green CI check alone is not "Ready to merge."
 A PR with passing CI stays in **Waiting** until it's also approved and conflict-free.
-All three conditions together promote it to **Ready to merge**.
+All three conditions together promote it to **Ready to merge** — unless it is already in the merge queue or has auto-merge on, in which case it stays in **Waiting** with a **Queued** badge.
 
 ### Merge conflicts
 

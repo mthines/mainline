@@ -33,6 +33,11 @@ enum PRListExport {
         parts.append("CI: \(ciLabel(pr.ciStatus))")
         parts.append("review: \(reviewLabel(pr.reviewDecision))")
         if pr.mergeable == false { parts.append("merge conflict") }
+        if pr.mergeQueueState != nil {
+            parts.append("in merge queue")
+        } else if pr.autoMergeEnabled {
+            parts.append("auto-merge enabled")
+        }
         if pr.unresolvedThreadCount > 0 {
             let noun = pr.unresolvedThreadCount == 1 ? "thread" : "threads"
             parts.append("\(pr.unresolvedThreadCount) unresolved \(noun)")

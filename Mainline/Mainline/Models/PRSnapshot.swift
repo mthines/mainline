@@ -698,7 +698,7 @@ struct PRSnapshot: Codable, Equatable {
         if closed { return "closed" }
         if isDraft { return "still a draft" }
         if mergeable == false { return "has merge conflicts" }
-        if isQueuedForMerge { return mergeQueueState != nil ? "already in the merge queue" : "auto-merge is enabled" }
+        if mergeQueueState != nil { return "already in the merge queue" }
         if mergeable == nil { return "GitHub is still checking mergeability" }
         if ciStatus != .success { return "CI hasn't passed" }
         if reviewDecision != .approved {
@@ -707,6 +707,9 @@ struct PRSnapshot: Codable, Equatable {
                 ? "GitHub reports no review decision for this repo"
                 : "not approved yet"
         }
+        // Auto-merge is checked last: with red CI or no approval it is stuck on that
+        // blocker, which is the more useful thing to say.
+        if autoMergeEnabled { return "auto-merge is enabled" }
         return nil
     }
 
