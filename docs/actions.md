@@ -30,7 +30,7 @@ They live in the row menu because they change state.
 Close has no key on purpose — it is too destructive for a single keystroke.
 Merge is on the `M` key and the menu.
 
-`M` acts only when the focused PR is ready to merge — approved, mergeable, and CI green.
+`M` acts only when the focused PR is ready to merge — approved, mergeable, CI green, and not already in the merge queue.
 On any other PR, `M` does nothing, so it never opens a confirmation for an action that can't run.
 
 GitHub decides who may close, reopen, or convert a PR — usually its author and anyone with write access to the repo.

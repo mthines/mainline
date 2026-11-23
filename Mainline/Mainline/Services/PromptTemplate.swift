@@ -305,7 +305,7 @@ enum PromptState {
         ("unresolved-threads", "has unresolved review threads"),
         ("draft", "is a draft"),
         ("ready", "open and not a draft"),
-        ("ready-to-merge", "approved, green and mergeable"),
+        ("ready-to-merge", "approved, green, mergeable and not already queued"),
         ("open", "not merged or closed"),
         ("merged", "merged"),
         ("closed", "closed without merging"),

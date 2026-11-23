@@ -33,6 +33,7 @@ enum PRListExport {
         parts.append("CI: \(ciLabel(pr.ciStatus))")
         parts.append("review: \(reviewLabel(pr.reviewDecision))")
         if pr.mergeable == false { parts.append("merge conflict") }
+        if pr.mergeQueueState != nil { parts.append("in merge queue") }
         if pr.unresolvedThreadCount > 0 {
             let noun = pr.unresolvedThreadCount == 1 ? "thread" : "threads"
             parts.append("\(pr.unresolvedThreadCount) unresolved \(noun)")
@@ -91,6 +92,11 @@ enum PRListExportChecks {
                "green PR details")
         assert(lines[3] == "  - draft · CI: failing · review: changes requested · merge conflict · 1 unresolved thread · +0 −0",
                "blocked PR: draft/conflict/thread flags; empty author and branch omitted")
+
+        var queued = green
+        queued.mergeQueueState = "QUEUED"
+        assert(PRListExport.details(queued).contains("in merge queue"), "queued PR is labelled")
+        assert(!PRListExport.details(green).contains("in merge queue"), "plain PR has no queue label")
     }
 }
 #endif

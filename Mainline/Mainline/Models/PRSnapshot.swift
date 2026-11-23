@@ -155,7 +155,7 @@ enum PRState: String, Codable, Equatable, CaseIterable {
 ///     unresolved threads OR merge conflict. Unlike the role-agnostic
 ///     `needsAttention`, this DOES include merge conflicts — resolving a conflict
 ///     on your own PR is a manual action you must take.
-///   - `.readyToMerge` — approved && mergeable && CI green (one-click merge).
+///   - `.readyToMerge` — approved && mergeable && CI green && not already in the merge queue (one-click merge).
 ///   - `.waiting` — blocked on others: awaiting review, CI pending, etc.
 ///
 /// Reviewer role (PRs assigned to you) — two buckets:
@@ -375,6 +375,18 @@ struct PRSnapshot: Codable, Equatable {
     /// `false` for backward compat. NOT compared in PRDiffEngine.
     var authorIsBot: Bool
 
+    /// GitHub merge-queue entry state (`QUEUED` / `AWAITING_CHECKS` / `MERGEABLE` /
+    /// `UNMERGEABLE` / `LOCKED`), nil when the PR is not in a queue. Decodes with
+    /// `decodeIfPresent`; NOT compared in PRDiffEngine (queueing is not notifiable).
+    var mergeQueueState: String?
+    /// 1-based position in the merge queue when queued and known.
+    var mergeQueuePosition: Int?
+
+    /// The PR is already in GitHub's merge queue. It is no longer waiting on you, so it is never `readyToMerge`.
+    var isQueuedForMerge: Bool {
+        !merged && !closed && mergeQueueState != nil
+    }
+
     /// Whether the authenticated viewer's own latest review on this PR is an
     /// approval. Sourced from GraphQL `latestReviews`, matched against the viewer's
     /// login at map time. Drives the reviewer-role "already approved by you → not
@@ -439,6 +451,8 @@ struct PRSnapshot: Codable, Equatable {
         vercelPreviewCheckedAt: String? = nil,
         labels: [String] = [],
         authorIsBot: Bool = false,
+        mergeQueueState: String? = nil,
+        mergeQueuePosition: Int? = nil,
         viewerHasApproved: Bool = false,
         hasApproval: Bool = false,
         viewerIsCommitter: Bool = false
@@ -478,6 +492,8 @@ struct PRSnapshot: Codable, Equatable {
         self.vercelPreviewCheckedAt = vercelPreviewCheckedAt
         self.labels = labels
         self.authorIsBot = authorIsBot
+        self.mergeQueueState = mergeQueueState
+        self.mergeQueuePosition = mergeQueuePosition
         self.viewerHasApproved = viewerHasApproved
         self.hasApproval = hasApproval
         self.viewerIsCommitter = viewerIsCommitter
@@ -494,7 +510,7 @@ struct PRSnapshot: Codable, Equatable {
         case sensitivePathFlags, unresolvedThreadCount
         case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
         case vercelPreviewUrl, vercelPreviewCheckedAt
-        case labels, authorIsBot, viewerHasApproved, hasApproval, viewerIsCommitter
+        case labels, authorIsBot, mergeQueueState, mergeQueuePosition, viewerHasApproved, hasApproval, viewerIsCommitter
     }
 
     init(from decoder: Decoder) throws {
@@ -535,6 +551,8 @@ struct PRSnapshot: Codable, Equatable {
         // New inbox mute fields — backward-compat: default when absent in old snapshots
         labels                = try c.decodeIfPresent([String].self,   forKey: .labels) ?? []
         authorIsBot           = try c.decodeIfPresent(Bool.self,       forKey: .authorIsBot) ?? false
+        mergeQueueState       = try c.decodeIfPresent(String.self,     forKey: .mergeQueueState)
+        mergeQueuePosition    = try c.decodeIfPresent(Int.self,        forKey: .mergeQueuePosition)
         viewerHasApproved     = try c.decodeIfPresent(Bool.self,       forKey: .viewerHasApproved) ?? false
         hasApproval           = try c.decodeIfPresent(Bool.self,       forKey: .hasApproval) ?? false
         viewerIsCommitter     = try c.decodeIfPresent(Bool.self,       forKey: .viewerIsCommitter) ?? false
@@ -660,6 +678,7 @@ struct PRSnapshot: Codable, Equatable {
             && !isDraft
             && !merged
             && !closed
+            && !isQueuedForMerge
     }
 
     /// Human-readable reason this PR is NOT ready to merge, or `nil` when
@@ -672,6 +691,7 @@ struct PRSnapshot: Codable, Equatable {
         if closed { return "closed" }
         if isDraft { return "still a draft" }
         if mergeable == false { return "has merge conflicts" }
+        if mergeQueueState != nil { return "already in the merge queue" }
         if mergeable == nil { return "GitHub is still checking mergeability" }
         if ciStatus != .success { return "CI hasn't passed" }
         if reviewDecision != .approved {
@@ -752,7 +772,7 @@ struct PRSnapshot: Codable, Equatable {
         switch inboxRole(myLogin: myLogin, committedPlacement: committedPlacement) {
         case .yourPRs:
             if authorNeedsAttention { return .needsAttention }
-            if reviewDecision == .approved && mergeable == true && ciStatus == .success {
+            if reviewDecision == .approved && mergeable == true && ciStatus == .success && !isQueuedForMerge {
                 return .readyToMerge
             }
             return .waiting
@@ -869,6 +889,7 @@ enum PRClassificationChecks {
         mergeable: Bool? = true,
         unresolvedThreadCount: Int = 0,
         isDraft: Bool = false,
+        mergeQueueState: String? = nil,
         viewerHasApproved: Bool = false,
         hasApproval: Bool = false,
         requestedReviewers: [String] = [],
@@ -882,6 +903,7 @@ enum PRClassificationChecks {
             updatedAt: "", author: author, requestedReviewers: requestedReviewers,
             requestedTeams: requestedTeams,
             mergeable: mergeable, unresolvedThreadCount: unresolvedThreadCount,
+            mergeQueueState: mergeQueueState,
             viewerHasApproved: viewerHasApproved,
             hasApproval: hasApproval,
             viewerIsCommitter: viewerIsCommitter
@@ -902,6 +924,17 @@ enum PRClassificationChecks {
         // Author role — clean, awaiting review → Waiting.
         assert(group(make(author: me, reviewDecision: .reviewRequired)) == .waiting,
                "author + awaiting review → waiting")
+        // Author role — approved + clean + green but already queued → Waiting.
+        assert(group(make(author: me, reviewDecision: .approved, mergeQueueState: "QUEUED")) == .waiting,
+               "author + approved + in merge queue → waiting")
+        assert(!make(author: me, reviewDecision: .approved, mergeQueueState: "QUEUED").readyToMerge,
+               "queued PR is never readyToMerge")
+        assert(make(author: me, reviewDecision: .approved, mergeQueueState: "QUEUED").mergeBlockReason
+               == "already in the merge queue",
+               "queued PR explains why Merge is off")
+        assert(make(author: me, reviewDecision: .approved, mergeable: false, mergeQueueState: "QUEUED").mergeBlockReason
+               == "has merge conflicts",
+               "a conflict is reported before the queue state")
         // Author role — approved + clean + green → Ready to merge.
         assert(group(make(author: me, reviewDecision: .approved)) == .readyToMerge,
                "author + approved + clean → readyToMerge")
