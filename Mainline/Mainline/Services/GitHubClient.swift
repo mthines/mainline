@@ -175,6 +175,9 @@ private struct GraphQLNode: Decodable {
     let reviewRequests: GraphQLReviewRequests?
     let reviewThreads: GraphQLReviewThreads?
     let labels: GraphQLLabels?
+    let isInMergeQueue: Bool?
+    let mergeQueueEntry: GraphQLMergeQueueEntry?
+    let autoMergeRequest: GraphQLAutoMergeRequest?
     let latestReviews: GraphQLLatestReviews?
     let latestOpinionatedReviews: GraphQLLatestReviews?   // excludes comment-only reviews
     let commitAuthors: GraphQLCommitAuthors?
@@ -260,6 +263,17 @@ private struct GraphQLActor: Decodable {
         case typename = "__typename"
         case login
     }
+}
+
+/// `mergeQueueEntry { state position }` — non-null only while the PR sits in a merge queue.
+private struct GraphQLMergeQueueEntry: Decodable {
+    let state: String?
+    let position: Int?
+}
+
+/// `autoMergeRequest { enabledAt }` — non-null when auto-merge is armed.
+private struct GraphQLAutoMergeRequest: Decodable {
+    let enabledAt: String?
 }
 
 /// Labels container decoded from `labels(first: 10) { nodes { name } }`.
@@ -962,6 +976,9 @@ final class GitHubClient {
             rebaseMergeAllowed: node.repository?.rebaseMergeAllowed ?? true,
             labels:             labels,
             authorIsBot:        authorIsBot,
+            mergeQueueState:    node.mergeQueueEntry?.state ?? (node.isInMergeQueue == true ? "QUEUED" : nil),
+            mergeQueuePosition: node.mergeQueueEntry?.position,
+            autoMergeEnabled:   node.autoMergeRequest != nil,
             viewerHasApproved:  viewerHasApproved,
             hasApproval:        hasApproval,
             viewerIsCommitter:  viewerIsCommitter
@@ -1005,6 +1022,9 @@ final class GitHubClient {
         author { __typename login }
         repository { nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }
         labels(first: 10) { nodes { name } }
+        isInMergeQueue
+        mergeQueueEntry { state position }
+        autoMergeRequest { enabledAt }
         comments(last: 1) { totalCount nodes { author { __typename login } } }
         reviews(last: 1) { totalCount nodes { author { __typename login } } }
         reviewRequests(first: 10) {

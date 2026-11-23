@@ -386,6 +386,9 @@ struct PRPeekView: View {
     /// A conflict-free PR can still be blocked by required reviews or failing CI.
     private var merge: (text: String, icon: String, tint: Color) {
         if pr.isDraft { return ("Draft", "pencil.circle", .secondary) }
+        if pr.isQueuedForMerge {
+            return (pr.mergeQueueState != nil ? "In merge queue" : "Auto-merge on", "clock.fill", .orange)
+        }
         if pr.mergeable == false { return ("Conflicts", "exclamationmark.triangle.fill", .red) }
         if pr.mergeable == nil { return ("Checking…", "questionmark.circle", .secondary) }
         // No conflicts — but is it allowed to merge?
