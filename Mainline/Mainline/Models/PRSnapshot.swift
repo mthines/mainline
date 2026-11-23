@@ -929,6 +929,12 @@ enum PRClassificationChecks {
                "author + approved + in merge queue → waiting")
         assert(!make(author: me, reviewDecision: .approved, mergeQueueState: "QUEUED").readyToMerge,
                "queued PR is never readyToMerge")
+        assert(make(author: me, reviewDecision: .approved, mergeQueueState: "QUEUED").mergeBlockReason
+               == "already in the merge queue",
+               "queued PR explains why Merge is off")
+        assert(make(author: me, reviewDecision: .approved, mergeable: false, mergeQueueState: "QUEUED").mergeBlockReason
+               == "has merge conflicts",
+               "a conflict is reported before the queue state")
         // Author role — approved + clean + green → Ready to merge.
         assert(group(make(author: me, reviewDecision: .approved)) == .readyToMerge,
                "author + approved + clean → readyToMerge")
