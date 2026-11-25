@@ -941,6 +941,7 @@ extension Notification.Name {
     static let mainlineQuietTransitions = Notification.Name("MainlineQuietTransitions")
     static let mainlineHookEvents = Notification.Name("MainlineHookEvents")
     static let mainlineHookCancel = Notification.Name("MainlineHookCancel")
+    static let mainlineIssueHookEvents = Notification.Name("MainlineIssueHookEvents")
 }
 
 // MARK: - Carry-forward self-checks (DEBUG)

@@ -38,6 +38,32 @@ struct HookEvent: Equatable {
     let pr: PRSnapshot
 }
 
+/// An issue change a hook can fire on: a template whose `for:` covers issues. Raw values are
+/// what its `on:` line says; `new-comment` and `closed` share their spelling with the PR triggers,
+/// so a `for: both` hook fires on either.
+enum IssueHookTrigger: String, CaseIterable {
+    case newIssue = "new-issue"
+    case assigned
+    case mentioned
+    case newComment = "new-comment"
+    case closed
+
+    var summary: String {
+        switch self {
+        case .newIssue: return "a new issue in a repo watched at All issues (needs role: any)"
+        case .assigned: return "an issue was assigned to you (needs role: any)"
+        case .mentioned: return "you were @-mentioned (needs role: any)"
+        case .newComment: return "a human other than you commented"
+        case .closed: return "a followed issue was closed"
+        }
+    }
+}
+
+struct IssueHookEvent: Equatable {
+    let trigger: IssueHookTrigger
+    let issue: IssueSnapshot
+}
+
 /// Whose PRs a hook may fire on. Default `.authored`: an agent must not start by itself on
 /// content a stranger wrote unless the hook says so.
 enum HookRole: String {
@@ -97,15 +123,91 @@ enum PRHookEngine {
     }
 
     /// `on: ci-failed, approved` → triggers + the words that are not triggers.
-    static func parseTriggers(_ text: String) -> (triggers: [HookTrigger], unknown: [String]) {
-        var triggers: [HookTrigger] = [], unknown: [String] = []
+    static func parseTriggers(_ text: String) -> (triggers: [HookTrigger], unknown: [String]) { parse(text) }
+
+    /// `on: assigned, closed` → issue triggers + the words that are not issue triggers.
+    static func parseIssueTriggers(_ text: String) -> (triggers: [IssueHookTrigger], unknown: [String]) { parse(text) }
+
+    private static func parse<T: RawRepresentable & Equatable>(_ text: String) -> (triggers: [T], unknown: [String])
+    where T.RawValue == String {
+        var triggers: [T] = [], unknown: [String] = []
         for word in text.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) where !word.isEmpty {
-            if let t = HookTrigger(rawValue: word) { if !triggers.contains(t) { triggers.append(t) } } else { unknown.append(word) }
+            if let t = T(rawValue: word) { if !triggers.contains(t) { triggers.append(t) } } else { unknown.append(word) }
         }
         return (triggers, unknown)
     }
 
     static func isHook(_ t: PromptTemplate) -> Bool { t.subject.covers(.prs) && !parseTriggers(t.on).triggers.isEmpty }
+
+    static func isIssueHook(_ t: PromptTemplate) -> Bool {
+        t.subject.covers(.issues) && !parseIssueTriggers(t.on).triggers.isEmpty
+    }
+
+    /// The `on:` words that are a trigger for none of the subjects the template's `for:` covers.
+    /// `issues` says whether issue triggers are live (flag `issue-hooks`): while off, they are unknown.
+    static func unknownTriggers(_ t: PromptTemplate, issues: Bool) -> [String] {
+        let words = t.on.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        return words.filter { word in
+            guard !word.isEmpty else { return false }
+            let pr = t.subject.covers(.prs) && HookTrigger(rawValue: word) != nil
+            let issue = issues && t.subject.covers(.issues) && IssueHookTrigger(rawValue: word) != nil
+            return !pr && !issue
+        }
+    }
+
+    /// Issue-hook events from one issue poll. `transitions` is that poll's `IssueDiffEngine.diff`
+    /// (so watch levels, seeding and the new-issue age limit already apply); `closed` are the
+    /// issues that left the followed set and GitHub reports CLOSED. An empty `previous` is a
+    /// baseline: no events.
+    static func issueEvents(previous: [String: IssueSnapshot], next: [IssueSnapshot],
+                            transitions: [IssueTransition], closed: [IssueSnapshot],
+                            myLogin: String) -> [IssueHookEvent] {
+        guard !previous.isEmpty, !myLogin.isEmpty else { return [] }
+        var out: [IssueHookEvent] = transitions.compactMap {
+            switch $0 {
+            case .newIssue(let i): return IssueHookEvent(trigger: .newIssue, issue: i)
+            case .assigned(let i): return IssueHookEvent(trigger: .assigned, issue: i)
+            case .mentioned(let i): return IssueHookEvent(trigger: .mentioned, issue: i)
+            case .reply: return nil   // covered by new-comment below, which also sees other people's issues
+            }
+        }
+        for issue in next {
+            guard let old = previous[issue.nodeId], issue.commentCount > old.commentCount,
+                  let last = issue.comments.last,
+                  !PRSnapshot.loginsMatch(last.author, myLogin), !isBotLogin(last.author) else { continue }
+            out.append(IssueHookEvent(trigger: .newComment, issue: issue))
+        }
+        out += closed.filter { previous[$0.nodeId] != nil }.map { IssueHookEvent(trigger: .closed, issue: $0) }
+        return out
+    }
+
+    /// Issues in `previous` that a complete poll no longer returns, outside Off repos: the
+    /// candidates for `closed` (they may instead have been unassigned; the caller asks GitHub).
+    static func leftIssues(previous: [String: IssueSnapshot], next: [IssueSnapshot],
+                           watchLevel: (String) -> IssueWatchLevel) -> [IssueSnapshot] {
+        let have = Set(next.map(\.nodeId))
+        return previous.values.filter { !have.contains($0.nodeId) && watchLevel($0.repoFullName) != .off }
+            .sorted { $0.nodeId < $1.nodeId }
+    }
+
+    private static func isBotLogin(_ login: String) -> Bool { login.lowercased().hasSuffix("[bot]") }
+
+    /// Whether `template` fires for an issue event: subject, trigger, repo scope, then role.
+    /// `role: authored` (default) = you opened the issue; `any` opts in to other people's
+    /// content; `reviewing` never matches an issue. `when:` guards are PR-only, so an issue
+    /// hook that has one never fires rather than firing more often than written.
+    static func matches(_ t: PromptTemplate, issueEvent event: IssueHookEvent, myLogin: String) -> Bool {
+        guard t.subject.covers(.issues), parseIssueTriggers(t.on).triggers.contains(event.trigger) else { return false }
+        let scopes = CommentEngine.parseScope(t.hookScope)
+        guard scopes.isEmpty || scopes.contains(where: { CommentEngine.patternMatches($0, repo: event.issue.repoFullName) })
+        else { return false }
+        switch HookRole.parse(t.hookRole) {
+        case .authored: guard event.issue.isAuthored(by: myLogin) else { return false }
+        case .reviewing: return false
+        case .any: break
+        }
+        return t.when.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
     /// Whether `template` fires for `event`: trigger, repo scope, role, then the `when:` guard.
     static func matches(_ t: PromptTemplate, event: HookEvent, myLogin: String) -> Bool {
@@ -136,6 +238,9 @@ enum PRHookEngine {
         private(set) var launches: [Date] = []
 
         static func key(_ hook: String, _ event: HookEvent) -> String { "\(hook)|\(event.trigger.rawValue)|\(event.pr.nodeId)" }
+        static func key(_ hook: String, _ event: IssueHookEvent) -> String {
+            "\(hook)|issue:\(event.trigger.rawValue)|\(event.issue.nodeId)"
+        }
 
         /// Records and returns true when the launch is allowed.
         mutating func admit(key: String, now: Date) -> Bool {
@@ -153,18 +258,30 @@ extension PRHookEngine {
     /// The commented-out frontmatter a New Hook starts with: the activation lines, then every
     /// option and trigger, so the file explains itself without the README. Lines start with `#`,
     /// which the frontmatter parser skips.
-    static var starterFrontmatter: String {
-        let width = HookTrigger.allCases.map(\.rawValue.count).max() ?? 0
-        let triggers = HookTrigger.allCases.map {
-            "#   \($0.rawValue.padding(toLength: width, withPad: " ", startingAt: 0))  \($0.summary)"
+    static var starterFrontmatter: String { starterFrontmatter(issues: false) }
+
+    /// `issues` (flag `issue-hooks`) adds the issue triggers and how `for:` / `role:` apply to them.
+    static func starterFrontmatter(issues: Bool) -> String {
+        let all = HookTrigger.allCases.map { ($0.rawValue, $0.summary) }
+        let issueTriggers = IssueHookTrigger.allCases.map { ($0.rawValue, $0.summary) }
+        let width = (all + (issues ? issueTriggers : [])).map(\.0.count).max() ?? 0
+        func lines(_ list: [(String, String)]) -> [String] {
+            list.map { "#   \($0.0.padding(toLength: width, withPad: " ", startingAt: 0))  \($0.1)" }
         }
+        let issueBlock = issues ? [
+            "#",
+            "# Issue triggers (set `for: issues`, or `for: both` for PRs and issues; use {{issue.*}}):",
+        ] + lines(issueTriggers) + [
+            "#   On issues, role: authored = you opened it, any = anyone; reviewing never matches,",
+            "#   and an issue hook with `when:` never fires.",
+        ] : []
         return ([
             "# Uncomment `on:` (and narrow `scope:`) to activate:",
             "# on: ci-failed",
             "# scope: owner/repo",
             "#",
             "# on:    one or more triggers, comma-separated",
-        ] + triggers + [
+        ] + lines(all) + issueBlock + [
             "# scope: owner/repo, owner/*, or * (default: every repo)",
             "# role:  authored (default) | reviewing | any",
             "# when:  optional state guard, e.g. !conflict (see README.txt)",
@@ -247,6 +364,86 @@ enum PRHookChecks {
         assert(th.admit(key: "b", now: t0.addingTimeInterval(10)), "other key")
         assert(!th.admit(key: "c", now: t0.addingTimeInterval(20)), "hourly cap")
         assert(th.admit(key: "c", now: t0.addingTimeInterval(3700)), "cap window expires")
+    }
+}
+enum IssueHookChecks {
+    static func run() {
+        let me = "mads"
+        func issue(_ id: String = "i1", author: String = "alice", comments: [IssueReply] = [],
+                   repo: String = "acme/app") -> IssueSnapshot {
+            IssueSnapshot(nodeId: id, number: 1, title: "t", url: "u", repoFullName: repo, author: author,
+                          createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0),
+                          commentCount: comments.count, comments: comments)
+        }
+        func reply(_ by: String) -> IssueReply { IssueReply(author: by, createdAt: Date(), association: "NONE") }
+        func triggers(_ prev: [IssueSnapshot], _ next: [IssueSnapshot], _ tr: [IssueTransition] = [],
+                      closed: [IssueSnapshot] = []) -> [IssueHookTrigger] {
+            PRHookEngine.issueEvents(previous: Dictionary(uniqueKeysWithValues: prev.map { ($0.nodeId, $0) }),
+                                     next: next, transitions: tr, closed: closed, myLogin: me).map(\.trigger)
+        }
+
+        let a = issue()
+        assert(triggers([], [a], [.newIssue(a)]).isEmpty, "an empty previous is a baseline: no events")
+        assert(triggers([a], [a, issue("i2")], [.newIssue(issue("i2"))]) == [.newIssue], "new-issue")
+        assert(triggers([a], [a], [.assigned(a)]) == [.assigned], "assigned")
+        assert(triggers([a], [a], [.mentioned(a)]) == [.mentioned], "mentioned")
+        assert(triggers([a], [a], [.reply(a)]).isEmpty, "reply maps to new-comment only through the comment diff")
+        assert(triggers([a], [a]).isEmpty, "an unchanged issue fires nothing")
+        assert(triggers([a], [issue(comments: [reply("bob")])]) == [.newComment], "someone else's comment")
+        assert(triggers([a], [issue(comments: [reply("Mads")])]).isEmpty, "your own comment fires nothing")
+        assert(triggers([a], [issue(comments: [reply("github-actions[bot]")])]).isEmpty, "a bot comment fires nothing")
+        assert(triggers([], [issue(comments: [reply("bob")])]).isEmpty, "a first-seen issue's comments are not new")
+        assert(triggers([a], [], closed: [a]) == [.closed], "closed")
+        assert(triggers([a], [], closed: [issue("x")]).isEmpty, "closed only for an issue this app followed")
+        assert(PRHookEngine.issueEvents(previous: ["i1": a], next: [a], transitions: [.assigned(a)], closed: [],
+                                        myLogin: "").isEmpty, "no identity, no events")
+
+        let left = PRHookEngine.leftIssues(previous: ["i1": a, "i2": issue("i2", repo: "acme/off")], next: [],
+                                           watchLevel: { $0 == "acme/off" ? .off : .onlyMine })
+        assert(left.map(\.nodeId) == ["i1"], "an issue in a repo turned Off is not a close candidate")
+        assert(PRHookEngine.leftIssues(previous: ["i1": a], next: [a], watchLevel: { _ in .allIssues }).isEmpty,
+               "an issue still followed did not leave")
+
+        var hook = PromptTemplate(fileName: "h.md", name: "h", harness: "claude", checkout: false, body: "x")
+        hook.on = "assigned, mentioned"
+        let mine = IssueHookEvent(trigger: .mentioned, issue: issue(author: "Mads"))
+        let theirs = IssueHookEvent(trigger: .assigned, issue: a)
+        assert(!PRHookEngine.isIssueHook(hook) && !PRHookEngine.matches(hook, issueEvent: mine, myLogin: me),
+               "a PR template (default for: prs) never fires on an issue")
+        assert(PRHookEngine.isHook(hook) == false, "issue-only words do not make a PR hook")
+        hook.subject = .issues
+        assert(PRHookEngine.isIssueHook(hook) && !PRHookEngine.isHook(hook), "for: issues is an issue hook only")
+        assert(PRHookEngine.matches(hook, issueEvent: mine, myLogin: me), "your own issue matches by default")
+        assert(!PRHookEngine.matches(hook, issueEvent: theirs, myLogin: me), "a stranger's issue needs role: any")
+        assert(!PRHookEngine.matches(hook, issueEvent: IssueHookEvent(trigger: .newIssue, issue: issue(author: "mads")),
+                                     myLogin: me), "wrong trigger")
+        hook.hookRole = "reviewing"
+        assert(!PRHookEngine.matches(hook, issueEvent: mine, myLogin: me), "reviewing never matches an issue")
+        hook.hookRole = "any"
+        assert(PRHookEngine.matches(hook, issueEvent: theirs, myLogin: me), "role: any")
+        hook.hookScope = "acme/other"
+        assert(!PRHookEngine.matches(hook, issueEvent: theirs, myLogin: me), "scope")
+        hook.hookScope = "acme/*"
+        assert(PRHookEngine.matches(hook, issueEvent: theirs, myLogin: me), "org scope")
+        hook.when = "conflict"
+        assert(!PRHookEngine.matches(hook, issueEvent: theirs, myLogin: me), "an issue hook with when: never fires")
+
+        var both = PromptTemplate(fileName: "b.md", name: "b", harness: "claude", checkout: false, body: "x")
+        both.subject = .both; both.on = "closed, approved, nope"
+        assert(PRHookEngine.isHook(both) && PRHookEngine.isIssueHook(both), "for: both is a hook on either")
+        assert(PRHookEngine.unknownTriggers(both, issues: true) == ["nope"], "unknown words for for: both")
+        var issuesOnly = both; issuesOnly.subject = .issues
+        assert(PRHookEngine.unknownTriggers(issuesOnly, issues: true) == ["approved", "nope"],
+               "a PR trigger is unknown on a for: issues hook")
+        assert(PRHookEngine.unknownTriggers(issuesOnly, issues: false) == ["closed", "approved", "nope"],
+               "with issue hooks off, issue triggers are unknown")
+
+        assert(PRHookEngine.Throttle.key("h", theirs) != PRHookEngine.Throttle.key("h", IssueHookEvent(trigger: .closed, issue: a)),
+               "throttle keys differ per trigger")
+        let starter = PRHookEngine.starterFrontmatter(issues: true)
+        for t in IssueHookTrigger.allCases { assert(starter.contains("#   \(t.rawValue) "), "starter lists \(t.rawValue)") }
+        assert(!PRHookEngine.starterFrontmatter.contains("new-issue"), "flag off: no issue triggers in the starter")
+        assert(starter.split(separator: "\n").allSatisfy { $0.hasPrefix("#") }, "issue starter is all comments")
     }
 }
 #endif

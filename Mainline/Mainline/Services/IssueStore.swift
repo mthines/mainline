@@ -19,6 +19,9 @@ final class IssueStore: ObservableObject {
     /// Lowercased repos that were Off at the last poll. Their issues never reach the baseline,
     /// so a repo switched back on is seeded for one poll instead of re-announcing everything.
     private var offRepos: Set<String> = []
+    /// False until a launch's first non-seeding poll: that poll diffs against a baseline from the
+    /// last run, so everything that changed while the app was closed would fire hooks at once.
+    private var issueHooksArmed = false
 
     private let settings: MainlineSettings
     private let notifications: NotificationService
@@ -184,6 +187,7 @@ final class IssueStore: ObservableObject {
             watchLevel: { [settings] in settings.issueWatchLevel(forRepo: $0) },
             seedRepos: seedRepos, now: Date())
 
+        let previousBaseline = baseline
         var updated: [String: IssueSnapshot] = [:]
         for issue in next { updated[issue.nodeId] = issue }
         baseline = updated
@@ -204,10 +208,33 @@ final class IssueStore: ObservableObject {
         if !seeding {
             notifications.fireIssueTransitions(transitions, settings: settings)
             markUnread(transitions.filter { settings.level(for: $0.event) != .off }.map { $0.issue.nodeId })
+            let armed = issueHooksArmed
+            issueHooksArmed = true
+            if armed, FeatureFlagRegistry.issueHooksEnabled {
+                await postHookEvents(previous: previousBaseline, next: next, transitions: transitions,
+                                     myLogin: myLogin, client: client, token: token)
+            }
         }
         pruneUnread()
 
         TelemetryService.shared.recordIssuePoll(observed: next.count, carriedForward: carriedCount)
+    }
+
+    /// Posts this poll's issue-hook events. `closed` needs one `nodes(ids:)` lookup, made only
+    /// when an issue left the followed set: an `is:open` search cannot say why it left.
+    private func postHookEvents(previous: [String: IssueSnapshot], next: [IssueSnapshot],
+                                transitions: [IssueTransition], myLogin: String,
+                                client: GitHubClient, token: String) async {
+        let left = PRHookEngine.leftIssues(previous: previous, next: next,
+                                           watchLevel: { [settings] in settings.issueWatchLevel(forRepo: $0) })
+        var closed: [IssueSnapshot] = []
+        if !left.isEmpty, let states = try? await client.fetchIssueStates(nodeIds: left.map(\.nodeId), token: token) {
+            closed = left.filter { states[$0.nodeId] == "CLOSED" }
+        }
+        let events = PRHookEngine.issueEvents(previous: previous, next: next, transitions: transitions,
+                                              closed: closed, myLogin: myLogin)
+        guard !events.isEmpty else { return }
+        NotificationCenter.default.post(name: .mainlineIssueHookEvents, object: nil, userInfo: ["events": events])
     }
 
     // MARK: - Unread / mute (one set serves the Issues tab and the Inbox)

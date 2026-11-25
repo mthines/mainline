@@ -158,7 +158,7 @@ struct PromptsSettingsView: View {
 
     @ViewBuilder private var hooksSection: some View {
         Section("Hooks") {
-            Text("A template with an `on:` line also runs by itself when a PR changes state. Each launch is announced by a notification you can cancel (with notifications off, hooks are held unless the countdown is 0). Edit the file to change triggers, repos, role or prompt. New Hook creates an inactive file: uncomment its `on:` line to turn it on.")
+            Text("A template with an `on:` line also runs by itself when a PR\(issueHooks ? " (or, with `for: issues`, an issue)" : "") changes state. Each launch is announced by a notification you can cancel (with notifications off, hooks are held unless the countdown is 0). Edit the file to change triggers, repos, role or prompt. New Hook creates an inactive file: uncomment its `on:` line to turn it on.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Pause all hooks", isOn: $settings.hooksPaused)
             Stepper(value: $settings.hookCountdownSeconds, in: 0...120, step: 5) {
@@ -170,13 +170,13 @@ struct PromptsSettingsView: View {
                 Text("No hooks yet.").foregroundStyle(.secondary)
             }
             ForEach(hooks) { hook in
-                let parsed = PRHookEngine.parseTriggers(hook.on)
+                let unknown = PRHookEngine.unknownTriggers(hook, issues: issueHooks)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(hook.name)
                         Text(hookSummary(hook)).font(.caption).foregroundStyle(.secondary)
-                        if !parsed.unknown.isEmpty {
-                            Label("Unknown trigger: \(parsed.unknown.joined(separator: ", "))",
+                        if !unknown.isEmpty {
+                            Label("Unknown trigger: \(unknown.joined(separator: ", "))",
                                   systemImage: "exclamationmark.triangle")
                                 .font(.caption).foregroundStyle(.orange)
                         }
@@ -194,15 +194,25 @@ struct PromptsSettingsView: View {
             }
             Text("Triggers: " + HookTrigger.allCases.map(\.rawValue).joined(separator: ", "))
                 .font(.caption).foregroundStyle(.secondary)
+            if issueHooks {
+                Text("Issue triggers (`for: issues` or `for: both`): "
+                     + IssueHookTrigger.allCases.map(\.rawValue).joined(separator: ", "))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .buttonStyle(.borderless)
     }
 
+    private var issueHooks: Bool { FeatureFlagRegistry.issueHooksEnabled }
+
     private func hookSummary(_ h: PromptTemplate) -> String {
-        let triggers = PRHookEngine.parseTriggers(h.on).triggers.map(\.rawValue).joined(separator: ", ")
+        let prWords = h.subject.covers(.prs) ? PRHookEngine.parseTriggers(h.on).triggers.map(\.rawValue) : []
+        let issueWords = issueHooks && h.subject.covers(.issues) ? PRHookEngine.parseIssueTriggers(h.on).triggers.map(\.rawValue) : []
+        let triggers = (prWords + issueWords.filter { !prWords.contains($0) }).joined(separator: ", ")
         let role = HookRole.parse(h.hookRole).rawValue
         let scope = h.hookScope.isEmpty ? "all repos" : h.hookScope
-        return "on \(triggers) · \(role) PRs · \(scope)"
+        let things = issueWords.isEmpty ? "PRs" : prWords.isEmpty ? "issues" : "PRs and issues"
+        return "on \(triggers) · \(role) \(things) · \(scope)"
     }
 
     // MARK: Editor
