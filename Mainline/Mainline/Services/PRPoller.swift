@@ -71,7 +71,8 @@ final class PRPoller {
     /// (`PRManager.donePRs`). These NEVER pass through `PRStateStore` /
     /// `PRDiffEngine` / notifications, so a merged PR can't fire a "new PR" banner.
     /// Set by `PRManager`; nil = no Done fetch performed.
-    var onDonePRs: (([PRSnapshot]) -> Void)?
+    /// Second argument: every Done tab answered (a skipped tab means the set is partial).
+    var onDonePRs: (([PRSnapshot], Bool) -> Void)?
 
     /// Issue state, polled alongside the PRs. Set by `PRManager`; nil = no issue fetch.
     var issueStore: IssueStore?
@@ -903,6 +904,7 @@ final class PRPoller {
 
         let tabs: [ReviewTab] = [.created, .forMe]
         var collected: [PRSnapshot] = []
+        var complete = true
 
         for tab in tabs {
             do {
@@ -912,6 +914,7 @@ final class PRPoller {
                 // 304 (notModified), cancellation, transient 5xx, auth, decoding —
                 // all non-critical for the display-only Done section. Skip this tab
                 // and keep whatever we already have; the next poll retries.
+                complete = false
                 continue
             }
         }
@@ -930,7 +933,7 @@ final class PRPoller {
         }
         let unique = order.compactMap { merged[$0] }
 
-        onDonePRs(unique)
+        onDonePRs(unique, complete)
     }
 }
 

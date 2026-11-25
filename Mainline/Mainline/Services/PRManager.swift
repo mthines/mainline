@@ -1192,7 +1192,7 @@ final class PRManager: ObservableObject {
         // Receive the display-only Done set from the poller. Assigned on the main
         // actor (poller is @MainActor); stored separately from `prs` so it never
         // reaches the diff engine, notifications, or any badge/attention count.
-        poller.onDonePRs = { [weak self] done in
+        poller.onDonePRs = { [weak self] done, complete in
             self?.donePRs = done
             // The Done set is where a just-merged PR surfaces — auto-unpin merged pins.
             self?.applyUnpinOnMerge(done)
@@ -1201,7 +1201,8 @@ final class PRManager: ObservableObject {
             self.firedDoneIds = result.fired
             // First Done set of the launch: PRs finished while the app was closed are not news.
             if self.doneHooksArmed { Task { await self.handleHookEvents(result.events) } }
-            self.doneHooksArmed = true
+            // Arm only from a COMPLETE first set: a skipped tab hides PRs that finished while closed.
+            if complete { self.doneHooksArmed = true }
         }
 
         // Mirror store updates to prs
