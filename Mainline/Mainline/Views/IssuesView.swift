@@ -348,7 +348,12 @@ struct IssuesView: View {
                     .padding(.vertical, 24)
             }
         }
-        .background(KeyCaptureView(handler: { handleKey($0, order: order) }, onDismiss: {}))
+        .background(KeyCaptureView(
+            handler: { handleKey($0, order: order) },
+            // Popover closed: drop an open picker so reopening starts clean (the deck does the same).
+            onDismiss: { manager.promptPickerTarget = nil },
+            // The picker's text field takes first responder; reclaim it when the picker closes.
+            searchActive: manager.promptPickerTarget != nil))
         .onChange(of: order.map(\.nodeId)) { ids in
             if selectedIndex >= ids.count { selectedIndex = max(ids.count - 1, 0) }
             publishKeyFocus(order: order)

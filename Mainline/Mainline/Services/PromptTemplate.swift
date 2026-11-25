@@ -243,6 +243,7 @@ struct PromptTarget: Equatable {
 
     /// A prompt on one issue, or on a section of issues (`isGroup`).
     init(issues: [IssueSnapshot], isGroup: Bool = false) {
+        precondition(!issues.isEmpty, "an issue prompt target needs at least one issue")
         self.anchor = nil
         self.members = []
         self.wholeStack = false
@@ -667,6 +668,19 @@ enum PromptEngine {
         for text in [template.body] + template.harnessKeys.compactMap({ template.harnessBodies[$0] }) {
             for name in placeholders(in: text)
             where !PromptContext.placeholderNames.contains(name) && seenNames.insert(name).inserted {
+                errors.append(.unknownPlaceholder(name))
+            }
+        }
+        // A placeholder from the other subject's context can never fill: flag it now, not at run time.
+        let foreign: (String) -> Bool = { name in
+            switch template.subject {
+            case .prs: return name.hasPrefix("issue.") || name.hasPrefix("issues.")
+            case .issues: return name.hasPrefix("pr.") || name.hasPrefix("stack.")
+            case .both: return false
+            }
+        }
+        for text in [template.body] + template.harnessKeys.compactMap({ template.harnessBodies[$0] }) {
+            for name in placeholders(in: text) where foreign(name) && seenNames.insert(name).inserted {
                 errors.append(.unknownPlaceholder(name))
             }
         }
@@ -1497,6 +1511,14 @@ enum PromptTemplateChecks {
                                                   checkout: one.runsCheckout(true), workingDirectory: "/tmp", promptFile: "/tmp/p.txt")
         if case .terminal(let script, _) = noCheckout { assert(!script.contains("gh pr checkout"), "issue prompt launches without a checkout") }
         else { assertionFailure("claude is a terminal harness") }
+
+        // Validation flags a placeholder the template's own subject can never fill.
+        var wrongIssue = triage; wrongIssue.body = "{{pr.url}}"
+        assert(PromptEngine.validate(wrongIssue, config: cfg) == [.unknownPlaceholder("pr.url")], "pr.* in an issue template is flagged")
+        var wrongPR = PromptStarters.templates[0]; wrongPR.body = "{{issue.url}}"
+        assert(PromptEngine.validate(wrongPR, config: cfg) == [.unknownPlaceholder("issue.url")], "issue.* in a PR template is flagged")
+        var either = triage; either.subject = .both; either.body = "{{pr.url}} {{issue.url}}"
+        assert(PromptEngine.validate(either, config: cfg).isEmpty, "a both template may use either")
 
         // {{issue.*}} are quoted into a command like {{pr.*}}: inside quotes it is refused.
         assert(PromptEngine.quotedPlaceholders(in: "claude \"{{issue.title}}\"") == ["issue.title"], "issue.* inside quotes is caught")

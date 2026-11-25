@@ -2118,6 +2118,10 @@ struct TriageDeckView: View {
                 if shortcutMatches(.dismiss, event: event) { store.archive(issue); return nil }
                 if shortcutMatches(.toggleMute, event: event) { store.toggleMute(issue.nodeId); return nil }
                 if shortcutMatches(.copyBranch, event: event) { IssueRowView.copyLink(issue); return nil }
+                if shortcutMatches(.runPrompt, event: event), FeatureFlagRegistry.issuePromptsEnabled {
+                    manager.promptPickerTarget = PromptTarget(issues: [issue])
+                    return nil
+                }
             }
         }
 
