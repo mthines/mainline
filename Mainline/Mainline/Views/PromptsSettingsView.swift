@@ -209,6 +209,7 @@ struct PromptsSettingsView: View {
         let prWords = h.subject.covers(.prs) ? PRHookEngine.parseTriggers(h.on).triggers.map(\.rawValue) : []
         let issueWords = issueHooks && h.subject.covers(.issues) ? PRHookEngine.parseIssueTriggers(h.on).triggers.map(\.rawValue) : []
         let triggers = (prWords + issueWords.filter { !prWords.contains($0) }).joined(separator: ", ")
+        guard !triggers.isEmpty else { return "inactive: no trigger it can fire on" }
         let role = HookRole.parse(h.hookRole).rawValue
         let scope = h.hookScope.isEmpty ? "all repos" : h.hookScope
         let things = issueWords.isEmpty ? "PRs" : prWords.isEmpty ? "issues" : "PRs and issues"
