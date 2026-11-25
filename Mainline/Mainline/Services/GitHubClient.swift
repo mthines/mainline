@@ -980,6 +980,11 @@ final class GitHubClient {
             PRSnapshot.loginsMatch($0, myLogin)
         } ?? false
 
+        let mergeQueueState: String? = node.mergeQueueEntry?.state ?? (node.isInMergeQueue == true ? "QUEUED" : nil)
+        let commit = node.commits?.nodes.first?.commit
+        let headOid: String = CheckContextsGate.enabled ? (commit?.oid ?? "") : ""
+        let checkResults: [CheckResult] = CheckContexts.merged(
+            commit?.statusCheckRollup?.contexts?.nodes?.compactMap { $0?.result } ?? [])
         return PRSnapshot(
             nodeId:             nodeId,
             number:             number,
@@ -1015,14 +1020,13 @@ final class GitHubClient {
             rebaseMergeAllowed: node.repository?.rebaseMergeAllowed ?? true,
             labels:             labels,
             authorIsBot:        authorIsBot,
-            mergeQueueState:    node.mergeQueueEntry?.state ?? (node.isInMergeQueue == true ? "QUEUED" : nil),
+            mergeQueueState:    mergeQueueState,
             mergeQueuePosition: node.mergeQueueEntry?.position,
             viewerHasApproved:  viewerHasApproved,
             hasApproval:        hasApproval,
             viewerIsCommitter:  viewerIsCommitter,
-            headOid:            CheckContextsGate.enabled ? (node.commits?.nodes.first?.commit.oid ?? "") : "",
-            checkResults:       CheckContexts.merged(
-                node.commits?.nodes.first?.commit.statusCheckRollup?.contexts?.nodes?.compactMap { $0?.result } ?? [])
+            checkResults:       checkResults,
+            headOid:            headOid
         )
     }
 
