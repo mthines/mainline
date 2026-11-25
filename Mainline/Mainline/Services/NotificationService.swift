@@ -54,6 +54,18 @@ final class NotificationService {
 
     static let categoryId       = "MAINLINE_PR"
     static let openActionId     = "OPEN_IN_BROWSER"
+    static let hookCategoryId   = "MAINLINE_HOOK"
+    static let hookCancelActionId = "CANCEL_HOOK"
+
+    /// Posts (or replaces, same `id`) a hook banner. With `cancellable`, it carries a Cancel button.
+    func postHook(id: String, title: String, body: String, url: String, cancellable: Bool) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.userInfo = ["url": url, "hookId": id]
+        if cancellable { content.categoryIdentifier = Self.hookCategoryId }
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
 
     // MARK: - Request permission
 
@@ -78,7 +90,10 @@ final class NotificationService {
             intentIdentifiers: [],
             options: []
         )
-        UNUserNotificationCenter.current().setNotificationCategories([category])
+        let cancel = UNNotificationAction(identifier: Self.hookCancelActionId, title: "Cancel", options: [])
+        let hookCategory = UNNotificationCategory(
+            identifier: Self.hookCategoryId, actions: [cancel, openAction], intentIdentifiers: [], options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([category, hookCategory])
 
         return await withCheckedContinuation { continuation in
             UNUserNotificationCenter.current()

@@ -141,6 +141,12 @@ final class PRManager: ObservableObject {
     /// `~/.config/mainline` prompt templates + harness config (Settings → Prompts).
     let promptStore = PromptTemplateStore()
 
+    // MARK: - PR hooks (templates with `on:`)
+
+    var hookThrottle = PRHookEngine.Throttle()
+    /// Hooks waiting out their countdown, by hook-run id (the notification's identifier).
+    var pendingHooks: [String: Task<Void, Never>] = [:]
+
     /// What the prompt-template picker is open for (a PR, or its whole stack), or `nil`.
     /// Presented at the panel level in `MenuBarView`, like `peekPR`; the deck only sets it.
     @Published var promptPickerTarget: PromptTarget?
@@ -1215,6 +1221,15 @@ final class PRManager: ObservableObject {
                   let nodeIds = notification.userInfo?["nodeIds"] as? [String] else { return }
             self.unreadPRIds.formUnion(nodeIds)
             self.settings.unreadPRIdsList = Array(self.unreadPRIds)
+        }
+
+        NotificationCenter.default.addObserver(forName: .mainlineHookEvents, object: nil, queue: .main) { [weak self] n in
+            guard let self, let events = n.userInfo?["events"] as? [HookEvent] else { return }
+            Task { @MainActor in self.handleHookEvents(events) }
+        }
+        NotificationCenter.default.addObserver(forName: .mainlineHookCancel, object: nil, queue: .main) { [weak self] n in
+            guard let self, let id = n.userInfo?["hookId"] as? String else { return }
+            Task { @MainActor in self.cancelHook(id: id) }
         }
 
         // Rebuild scope counts after every PR update, and reconcile the on-demand

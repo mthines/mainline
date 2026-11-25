@@ -92,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         PollPacingChecks.run()
         PRListExportChecks.run()
         PromptTemplateChecks.run()
+        PRHookChecks.run()
         CommentTemplateChecks.run()
         FeatureFlagChecks.run()
         IssueChecks.run()
@@ -241,6 +242,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         defer { completionHandler() }
+
+        if response.actionIdentifier == NotificationService.hookCancelActionId,
+           let id = response.notification.request.content.userInfo["hookId"] as? String {
+            NotificationCenter.default.post(name: .mainlineHookCancel, object: nil, userInfo: ["hookId": id])
+            return
+        }
 
         guard response.actionIdentifier == NotificationService.openActionId ||
               response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }

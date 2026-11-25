@@ -53,6 +53,8 @@
 		PC0000000000000000000B02 /* CommentTemplateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000B02 /* CommentTemplateStore.swift */; };
 		PC0000000000000000000B03 /* CommentPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000B03 /* CommentPickerView.swift */; };
 		PC0000000000000000000B04 /* CommentsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000000B04 /* CommentsSettingsView.swift */; };
+		PC00000000000000000B901 /* PRHookEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000B901 /* PRHookEngine.swift */; };
+		PC00000000000000000B902 /* PRHookRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF00000000000000000B902 /* PRHookRunner.swift */; };
 		PC000000000000000000A902 /* PromptTemplateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A902 /* PromptTemplateStore.swift */; };
 		PC000000000000000000A903 /* PromptPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A903 /* PromptPickerView.swift */; };
 		PC000000000000000000A904 /* PromptsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A904 /* PromptsSettingsView.swift */; };
@@ -118,6 +120,8 @@
 		PF0000000000000000000B02 /* CommentTemplateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommentTemplateStore.swift; sourceTree = "<group>"; };
 		PF0000000000000000000B03 /* CommentPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommentPickerView.swift; sourceTree = "<group>"; };
 		PF0000000000000000000B04 /* CommentsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommentsSettingsView.swift; sourceTree = "<group>"; };
+		PF00000000000000000B901 /* PRHookEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRHookEngine.swift; sourceTree = "<group>"; };
+		PF00000000000000000B902 /* PRHookRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRHookRunner.swift; sourceTree = "<group>"; };
 		PF000000000000000000A902 /* PromptTemplateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTemplateStore.swift; sourceTree = "<group>"; };
 		PF000000000000000000A903 /* PromptPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptPickerView.swift; sourceTree = "<group>"; };
 		PF000000000000000000A904 /* PromptsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptsSettingsView.swift; sourceTree = "<group>"; };
@@ -223,6 +227,8 @@
 				PX000000000000000000000A1 /* PRListExport.swift */,
 				PF0000000000000000000B01 /* CommentTemplate.swift */,
 				PF0000000000000000000B02 /* CommentTemplateStore.swift */,
+				PF00000000000000000B901 /* PRHookEngine.swift */,
+				PF00000000000000000B902 /* PRHookRunner.swift */,
 				PF000000000000000000A902 /* PromptTemplateStore.swift */,
 				PF00000000000000000000E2 /* IssueDiffEngine.swift */,
 				PF00000000000000000000E3 /* IssueStore.swift */,
@@ -392,6 +398,8 @@
 				PC0000000000000000000B02 /* CommentTemplateStore.swift in Sources */,
 				PC0000000000000000000B03 /* CommentPickerView.swift in Sources */,
 				PC0000000000000000000B04 /* CommentsSettingsView.swift in Sources */,
+				PC00000000000000000B901 /* PRHookEngine.swift in Sources */,
+				PC00000000000000000B902 /* PRHookRunner.swift in Sources */,
 				PC000000000000000000A902 /* PromptTemplateStore.swift in Sources */,
 				PC00000000000000000000E1 /* IssueSnapshot.swift in Sources */,
 				PC00000000000000000000E2 /* IssueDiffEngine.swift in Sources */,

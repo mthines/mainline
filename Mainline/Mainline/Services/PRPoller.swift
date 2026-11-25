@@ -791,6 +791,14 @@ final class PRPoller {
 
         notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
 
+        // Hooks diff the same before/after arrays, so a PR carried forward verbatim or seen for
+        // the first time fires nothing. A postponed PR (permanent mute) fires no hook either.
+        let hookEvents = PRHookEngine.events(previous: previousSnapshots, next: unique, myLogin: myLogin)
+            .filter { !muted.contains($0.pr.nodeId) }
+        if !hookEvents.isEmpty {
+            NotificationCenter.default.post(name: .mainlineHookEvents, object: nil, userInfo: ["events": hookEvents])
+        }
+
         // EVERY surviving transition marks the PR as unread — `.notify`, `.quiet`
         // AND `.off` alike. This maps the pre-filter array and deliberately
         // discards `fireTransitions`'s return value, so an event's attention level
@@ -918,6 +926,8 @@ final class PRPoller {
 
 extension Notification.Name {
     static let mainlineQuietTransitions = Notification.Name("MainlineQuietTransitions")
+    static let mainlineHookEvents = Notification.Name("MainlineHookEvents")
+    static let mainlineHookCancel = Notification.Name("MainlineHookCancel")
 }
 
 // MARK: - Carry-forward self-checks (DEBUG)
