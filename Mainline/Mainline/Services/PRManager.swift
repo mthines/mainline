@@ -146,8 +146,11 @@ final class PRManager: ObservableObject {
     var hookThrottle = PRHookEngine.Throttle()
     /// Hooks waiting out their countdown, by hook-run id (the notification's identifier).
     var pendingHooks: [String: Task<Void, Never>] = [:]
-    /// Done-set PR ids seen so far this launch (nil until the first Done set seeds it).
-    var knownDoneIds: Set<String>?
+    /// Every PR id the live store has held (open PRs), so a Done-set PR is only news if we saw it open.
+    var seenOpenIds: Set<String> = []
+    /// Done-set PRs already handled; the first Done set of a launch only fills it (nothing fires).
+    var firedDoneIds: Set<String> = []
+    var doneHooksArmed = false
 
     /// What the prompt-template picker is open for (a PR, or its whole stack), or `nil`.
     /// Presented at the panel level in `MenuBarView`, like `peekPR`; the deck only sets it.
@@ -1194,9 +1197,11 @@ final class PRManager: ObservableObject {
             // The Done set is where a just-merged PR surfaces — auto-unpin merged pins.
             self?.applyUnpinOnMerge(done)
             guard let self else { return }
-            let result = PRHookEngine.doneEvents(known: self.knownDoneIds, done: done)
-            self.knownDoneIds = result.known
-            self.handleHookEvents(result.events)
+            let result = PRHookEngine.doneEvents(seenOpen: self.seenOpenIds, fired: self.firedDoneIds, done: done)
+            self.firedDoneIds = result.fired
+            // First Done set of the launch: PRs finished while the app was closed are not news.
+            if self.doneHooksArmed { self.handleHookEvents(result.events) }
+            self.doneHooksArmed = true
         }
 
         // Mirror store updates to prs
@@ -1242,6 +1247,7 @@ final class PRManager: ObservableObject {
         // pinned-PR cache against the fresh live set (prune reappeared/unpinned,
         // fetch newly-missing pins).
         store.$snapshots
+            .handleEvents(receiveOutput: { [weak self] dict in self?.seenOpenIds.formUnion(dict.keys) })
             .map { dict in Array(dict.values) }
             .sink { [weak self] prs in
                 self?.scopeStore.rebuild(from: prs,

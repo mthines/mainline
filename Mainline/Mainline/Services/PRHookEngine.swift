@@ -73,17 +73,16 @@ enum PRHookEngine {
     }
 
     /// `merged` / `closed` events from the display-only Done set, which open-PR polls never see.
-    /// `known == nil` is the first Done set of the launch: it only seeds. `known` accumulates, so a
-    /// PR that drops out of and back into the Done window (or a partial fetch) never fires twice.
-    static func doneEvents(known: Set<String>?, done: [PRSnapshot]) -> (events: [HookEvent], known: Set<String>) {
-        let ids = Set(done.map(\.nodeId))
-        guard let known else { return ([], ids) }
-        let events = done.filter { !known.contains($0.nodeId) }.compactMap { pr -> HookEvent? in
+    /// Only a PR this app saw OPEN (`seenOpen`) can fire: the Done set is just the 30 most recently
+    /// updated finished PRs, so an old one nudged back into it by a late comment is not news.
+    /// `fired` accumulates so a PR never fires twice.
+    static func doneEvents(seenOpen: Set<String>, fired: Set<String>, done: [PRSnapshot]) -> (events: [HookEvent], fired: Set<String>) {
+        let events = done.filter { seenOpen.contains($0.nodeId) && !fired.contains($0.nodeId) }.compactMap { pr -> HookEvent? in
             if pr.merged { return HookEvent(trigger: .merged, pr: pr) }
             if pr.closed { return HookEvent(trigger: .closed, pr: pr) }
             return nil
         }
-        return (events, known.union(ids))
+        return (events, fired.union(events.map(\.pr.nodeId)))
     }
 
     /// `on: ci-failed, approved` → triggers + the words that are not triggers.
@@ -182,11 +181,11 @@ enum PRHookChecks {
         func done(_ id: String, merged: Bool) -> PRSnapshot {
             var p = pr(id); p.merged = merged; p.closed = !merged; p.state = "closed"; return p
         }
-        let seed = PRHookEngine.doneEvents(known: nil, done: [done("a", merged: true)])
-        assert(seed.events.isEmpty && seed.known == ["a"], "first Done set only seeds")
-        let next = PRHookEngine.doneEvents(known: seed.known, done: [done("a", merged: true), done("b", merged: true), done("c", merged: false)])
-        assert(next.events.map(\.trigger) == [.merged, .closed], "new Done PRs fire merged / closed")
-        assert(PRHookEngine.doneEvents(known: next.known, done: [done("b", merged: true)]).events.isEmpty, "no repeat")
+        let all = [done("a", merged: true), done("b", merged: true), done("c", merged: false)]
+        let first = PRHookEngine.doneEvents(seenOpen: ["b", "c"], fired: [], done: all)
+        assert(first.events.map(\.trigger) == [.merged, .closed], "Done PRs seen open fire merged / closed")
+        assert(!first.events.contains { $0.pr.nodeId == "a" }, "a PR never seen open (old, resurfaced) fires nothing")
+        assert(PRHookEngine.doneEvents(seenOpen: ["b", "c"], fired: first.fired, done: all).events.isEmpty, "no repeat")
 
         var th = PRHookEngine.Throttle(cooldown: 60, hourlyCap: 2)
         let t0 = Date()
