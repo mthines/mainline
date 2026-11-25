@@ -48,9 +48,10 @@ struct PromptPickerView: View {
     private var items: [Item] {
         // Filter by the query, then keep suggested-first order (so ↵ on an empty query
         // runs the best fit for this PR's state).
-        let matching = Set(PromptEngine.filter(store.templates, query: query, config: store.config).map(\.fileName))
+        let applicable = store.templates.filter { $0.subject.covers(target.subject) }
+        let matching = Set(PromptEngine.filter(applicable, query: query, config: store.config).map(\.fileName))
         let config = store.config
-        let templates = PromptState.ordered(store.templates, active: target.state(myLogin: myLogin),
+        let templates = PromptState.ordered(applicable, active: target.state(myLogin: myLogin),
                                             canRun: { PromptEngine.blockingErrors($0, config: config).isEmpty })
             .filter { matching.contains($0.template.fileName) }
             .map { Item.template($0.template, reason: $0.reason) }
@@ -352,5 +353,50 @@ struct PromptPickerView: View {
         let count = items.count
         guard count > 0 else { return }
         selected = min(max(selected + delta, 0), count - 1)
+    }
+}
+
+
+// MARK: - Menu for issue targets
+
+/// A "Run Prompt" submenu for a target that is not a deck PR (an issue or an Issues-tab
+/// section): the templates that cover the target's subject, then the picker for a free prompt.
+struct PromptSubmenu: View {
+    @ObservedObject var manager: PRManager
+    let myLogin: String
+    let target: PromptTarget
+    let title: String
+
+    var body: some View {
+        let config = manager.promptStore.config
+        let templates = manager.promptStore.templates.filter { $0.subject.covers(target.subject) }
+        let ranked = PromptState.ordered(templates, active: target.state(myLogin: myLogin),
+                                         canRun: { PromptEngine.blockingErrors($0, config: config).isEmpty })
+        Menu {
+            ForEach(ranked, id: \.template.fileName) { entry in
+                templateItem(entry.template, config: config)
+            }
+            if !ranked.isEmpty { Divider() }
+            Button("Search / Custom Prompt…") { manager.promptPickerTarget = target }
+        } label: {
+            Label(title, systemImage: "terminal")
+        }
+    }
+
+    /// A button, or a submenu with one entry per harness when the template runs on several.
+    @ViewBuilder
+    private func templateItem(_ template: PromptTemplate, config: PromptConfig) -> some View {
+        let harnesses = PromptEngine.runnableHarnesses(template, config: config)
+        if harnesses.count > 1 {
+            Menu(template.name) {
+                ForEach(harnesses, id: \.self) { key in
+                    Button(config.harnesses[key]?.label ?? key) {
+                        manager.runPromptTemplate(template.resolved(for: key), on: target)
+                    }
+                }
+            }
+        } else {
+            Button(template.name) { manager.runPromptTemplate(template, on: target) }
+        }
     }
 }

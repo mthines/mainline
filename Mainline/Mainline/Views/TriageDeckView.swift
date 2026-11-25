@@ -2118,6 +2118,10 @@ struct TriageDeckView: View {
                 if shortcutMatches(.dismiss, event: event) { store.archive(issue); return nil }
                 if shortcutMatches(.toggleMute, event: event) { store.toggleMute(issue.nodeId); return nil }
                 if shortcutMatches(.copyBranch, event: event) { IssueRowView.copyLink(issue); return nil }
+                if shortcutMatches(.runPrompt, event: event), hoveredGroup.group == nil, FeatureFlagRegistry.issuePromptsEnabled {
+                    manager.promptPickerTarget = PromptTarget(issues: [issue])
+                    return nil
+                }
             }
         }
 
@@ -2727,7 +2731,7 @@ struct TriageDeckView: View {
     private func promptMenu(for pr: PRSnapshot, members: [PRSnapshot], wholeStack: Bool, isGroup: Bool = false, title: String) -> some View {
         let target = promptTarget(for: pr, members: members, wholeStack: wholeStack, isGroup: isGroup)
         let config = manager.promptStore.config
-        let ranked = PromptState.ordered(manager.promptStore.templates,
+        let ranked = PromptState.ordered(manager.promptStore.templates.filter { $0.subject.covers(.prs) },
                                          active: target.state(myLogin: settings.githubUsername),
                                          canRun: { PromptEngine.blockingErrors($0, config: config).isEmpty })
         let suggested = ranked.filter { $0.reason != nil }
@@ -3415,7 +3419,7 @@ struct KeyCaptureView: NSViewRepresentable {
 
 /// Tracks hover for one header in its own `@State`, so hovering a section header
 /// re-renders just that header rather than the whole deck.
-private struct HoverReveal<Content: View>: View {
+struct HoverReveal<Content: View>: View {
     var onHoverChange: ((Bool) -> Void)? = nil
     @ViewBuilder let content: (Bool) -> Content
     @State private var hovering = false

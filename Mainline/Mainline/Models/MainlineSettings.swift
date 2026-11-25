@@ -169,7 +169,7 @@ struct KeyHint: Equatable {
 /// an issue) is not offered.
 enum KeyHints {
     static func hints(for focus: KeyFocusState, tab: ReviewTab, writeActionsEnabled: Bool,
-                      bindings b: InAppShortcutBindings) -> [KeyHint] {
+                      bindings b: InAppShortcutBindings, issuePromptsEnabled: Bool = false) -> [KeyHint] {
         func glyph(_ shortcut: InAppShortcut) -> String? {
             let binding = b.binding(for: shortcut)
             return binding.key.isEmpty ? nil : MainlineSettings.glyph(for: binding)
@@ -187,6 +187,7 @@ enum KeyHints {
             add(.markSeen, "seen")
             add(.dismiss, focus.issueArchived ? "restore" : "archive")
             add(.toggleMute, "mute")
+            if issuePromptsEnabled { add(.runPrompt, "agent") }
             add(.copyBranch, "copy link")
         case .pr:
             add(.peek, "peek")
@@ -226,6 +227,9 @@ enum KeyHintChecks {
         let issue = labels(KeyFocusState(kind: .issue))
         assert(issue == ["move", "open", "seen", "archive", "mute", "copy link", "all"], "issue legend: \(issue)")
         assert(labels(KeyFocusState(kind: .issue, issueArchived: true)).contains("restore"), "archived issue offers restore")
+        let withPrompts = KeyHints.hints(for: KeyFocusState(kind: .issue), tab: .issues, writeActionsEnabled: false,
+                                         bindings: b, issuePromptsEnabled: true).map(\.label)
+        assert(withPrompts.contains("agent") && !issue.contains("agent"), "issue legend offers the prompt key only with the flag on")
         let plain = labels(KeyFocusState(kind: .pr))
         assert(!plain.contains("merge") && !plain.contains("preview") && !plain.contains("comment"),
                "merge/preview/comment are offered only when they can act: \(plain)")

@@ -251,7 +251,13 @@ struct PromptsSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            Picker("Runs on", selection: binding.subject) {
+                Text("PRs").tag(PromptSubject.prs)
+                Text("Issues").tag(PromptSubject.issues)
+                Text("PRs and issues").tag(PromptSubject.both)
+            }
             Toggle("Check out the PR branch first", isOn: binding.checkout)
+                .disabled(binding.wrappedValue.subject == .issues)
             TextField("Suggest when", text: binding.when, prompt: Text("e.g. authored+conflict, authored+ci-failing"))
             Stepper("Priority: \(binding.wrappedValue.priority)", value: binding.priority, in: -100...100)
             Text("Suggested templates float to the top of the picker and menu, higher priority first. `,` = or, `+` = and, `!` = not. States: "

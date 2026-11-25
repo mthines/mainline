@@ -2,6 +2,20 @@ import Foundation
 
 // MARK: - Models
 
+/// What a template runs on (`for:` in the frontmatter). Absent = PRs, so templates that
+/// predate issue prompts never show up on an issue.
+enum PromptSubject: String, Equatable {
+    case prs, issues, both
+
+    /// Parses a `for:` value; anything unrecognised is the safe default, PRs.
+    static func parse(_ raw: String?) -> PromptSubject {
+        PromptSubject(rawValue: (raw ?? "").trimmingCharacters(in: .whitespaces).lowercased()) ?? .prs
+    }
+
+    /// Whether a template with this subject is offered for a target of `kind` (`.prs` or `.issues`).
+    func covers(_ kind: PromptSubject) -> Bool { self == .both || self == kind }
+}
+
 /// One prompt template: a Markdown file in `~/.config/mainline/prompts/`.
 ///
 ///     ---
@@ -36,6 +50,8 @@ struct PromptTemplate: Identifiable, Equatable {
     var hookScope: String = ""
     /// Hook role: `authored` (default), `reviewing` or `any`.
     var hookRole: String = ""
+    /// Whether it runs on PRs, issues or both (`for:`). Default PRs.
+    var subject: PromptSubject = .prs
 
     var id: String { fileName }
 
@@ -204,10 +220,10 @@ struct PromptConfig: Codable, Equatable {
 
 // MARK: - Target
 
-/// What a prompt runs on: one PR, or the whole stack it belongs to.
+/// What a prompt runs on: one PR, the whole stack it belongs to, or issues.
 struct PromptTarget: Equatable {
-    /// The PR the user acted on.
-    var anchor: PRSnapshot
+    /// The PR the user acted on; nil for an issue target.
+    var anchor: PRSnapshot?
     /// Its stack, bottom → top (merge order); just `[anchor]` when it isn't stacked.
     var members: [PRSnapshot]
     /// Run on every member rather than just `anchor`. Ignored when not stacked.
@@ -215,29 +231,71 @@ struct PromptTarget: Equatable {
     /// `members` is an arbitrary header group (a deck section), not a merge-ordered stack:
     /// no stack wording, no `stacked` state token.
     var isGroup: Bool = false
+    /// Non-empty for an issue target: the issue, or an Issues-tab section's issues.
+    var issues: [IssueSnapshot] = []
 
-    /// The PRs the prompt covers.
-    var prs: [PRSnapshot] { wholeStack && members.count > 1 ? members : [anchor] }
+    init(anchor: PRSnapshot, members: [PRSnapshot], wholeStack: Bool, isGroup: Bool = false) {
+        self.anchor = anchor
+        self.members = members
+        self.wholeStack = wholeStack
+        self.isGroup = isGroup
+    }
+
+    /// A prompt on one issue, or on a section of issues (`isGroup`).
+    init(issues: [IssueSnapshot], isGroup: Bool = false) {
+        precondition(!issues.isEmpty, "an issue prompt target needs at least one issue")
+        self.anchor = nil
+        self.members = []
+        self.wholeStack = false
+        self.isGroup = isGroup
+        self.issues = issues
+    }
+
+    /// This target is about issues, not PRs.
+    var isIssue: Bool { !issues.isEmpty }
+    /// Which templates apply: PR or issue ones.
+    var subject: PromptSubject { isIssue ? .issues : .prs }
+
+    /// The PRs the prompt covers (empty for an issue target).
+    var prs: [PRSnapshot] {
+        guard let anchor else { return [] }
+        return wholeStack && members.count > 1 ? members : [anchor]
+    }
     /// Whose repo, branch and checkout the session uses: a stack's base, else the PR.
+    /// PR targets only — an issue target has no PR (use `repoFullName`).
     var primary: PRSnapshot { prs[0] }
+    /// The repo the session belongs to (an issue section uses its first issue's repo).
+    var repoFullName: String { isIssue ? issues[0].repoFullName : primary.repoFullName }
     /// The anchor sits in a stack (so the scope can be switched, and `stacked` applies).
     var isStacked: Bool { members.count > 1 }
-    var isStack: Bool { prs.count > 1 }
+    var isStack: Bool { isIssue ? issues.count > 1 : prs.count > 1 }
+    /// Whether the checkout pre-step runs: an issue prompt never checks out — `gh pr checkout`
+    /// has no meaning for an issue — whatever the template says.
+    func runsCheckout(_ templateWantsCheckout: Bool) -> Bool { templateWantsCheckout && !isIssue }
+    /// How many items the prompt covers.
+    var count: Int { isIssue ? issues.count : prs.count }
 
     var context: PromptContext {
+        if isIssue {
+            var c = PromptContext(issues: issues)
+            c.isGroup = isGroup
+            return c
+        }
         var c = PromptContext(prs: prs)
         c.isGroup = isGroup
         return c
     }
 
     func state(myLogin: String) -> Set<String> {
-        PromptState.active(prs: prs, myLogin: myLogin, stacked: isStack && !isGroup)
+        if isIssue { return [] }   // issue templates are not state-suggested yet
+        return PromptState.active(prs: prs, myLogin: myLogin, stacked: isStack && !isGroup)
     }
 
-    /// "#123" or "stack #1 → #4 (4 PRs)".
+    /// "#123", "stack #1 → #4 (4 PRs)" or "3 issues".
     var title: String {
-        isGroup && isStack ? "\(prs.count) PRs"
-            : isStack ? "stack #\(prs.first!.number) → #\(prs.last!.number) (\(prs.count) PRs)" : "#\(anchor.number)"
+        if isIssue { return issues.count > 1 ? "\(issues.count) issues" : "#\(issues[0].number)" }
+        return isGroup && isStack ? "\(prs.count) PRs"
+            : isStack ? "stack #\(prs.first!.number) → #\(prs.last!.number) (\(prs.count) PRs)" : "#\(anchor!.number)"
     }
 }
 
@@ -273,14 +331,41 @@ struct PromptContext: Equatable {
         ]
     }
 
+    /// `issues` is one issue, or an Issues-tab section. `{{issue.*}}` describes the FIRST one
+    /// (the repo the session belongs to); `{{issues.*}}` lists them all and is defined for a
+    /// single issue too (size 1), so one template works for both.
+    init(issues: [IssueSnapshot]) {
+        let issue = issues[0]
+        values = [
+            "issue.url": issue.url,
+            "issue.number": String(issue.number),
+            "issue.title": issue.title,
+            "issue.repo": issue.repoFullName,
+            "issue.owner": issue.displayOrg,
+            "issue.author": issue.author,
+            "issue.labels": issue.labels.joined(separator: ", "),
+            "issue.assignees": issue.assignees.joined(separator: ", "),
+            "issues.size": String(issues.count),
+            "issues.list": PRListExport.markdown(issues: issues),
+            "issues.urls": issues.map(\.url).joined(separator: "\n"),
+        ]
+    }
+
     /// More than one PR.
     /// The PRs are a deck section, not a stack: only changes the appended wording.
     var isGroup = false
     var isStack: Bool { (Int(values["stack.size"] ?? "1") ?? 1) > 1 }
+    /// More than one issue.
+    var isIssueList: Bool { (Int(values["issues.size"] ?? "1") ?? 1) > 1 }
+    /// The context describes issues, not PRs.
+    var isIssue: Bool { values["issue.url"] != nil }
 
     static let placeholderNames = ["pr.url", "pr.number", "pr.title", "pr.repo",
                                    "pr.owner", "pr.branch", "pr.base", "pr.author",
-                                   "stack.size", "stack.prs", "stack.urls", "stack.branches"]
+                                   "stack.size", "stack.prs", "stack.urls", "stack.branches",
+                                   "issue.url", "issue.number", "issue.title", "issue.repo",
+                                   "issue.owner", "issue.author", "issue.labels", "issue.assignees",
+                                   "issues.size", "issues.list", "issues.urls"]
 }
 
 // MARK: - PR state → template suggestions
@@ -514,7 +599,8 @@ enum PromptEngine {
             harnessBodies: sections.bodies,
             on: meta["on"] ?? "",
             hookScope: meta["scope"] ?? "",
-            hookRole: meta["role"] ?? ""
+            hookRole: meta["role"] ?? "",
+            subject: PromptSubject.parse(meta["for"])
         )
     }
 
@@ -551,7 +637,7 @@ enum PromptEngine {
         name: \(t.name)
         harness: \(t.harnessKeys.joined(separator: ", "))
         checkout: \(t.checkout ? "true" : "false")
-        \(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")---
+        \(t.subject == .prs ? "" : "for: \(t.subject.rawValue)\n")\(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")---
         \(t.body)
         \(sections)
         """
@@ -582,6 +668,19 @@ enum PromptEngine {
         for text in [template.body] + template.harnessKeys.compactMap({ template.harnessBodies[$0] }) {
             for name in placeholders(in: text)
             where !PromptContext.placeholderNames.contains(name) && seenNames.insert(name).inserted {
+                errors.append(.unknownPlaceholder(name))
+            }
+        }
+        // A placeholder from the other subject's context can never fill: flag it now, not at run time.
+        let foreign: (String) -> Bool = { name in
+            switch template.subject {
+            case .prs: return name.hasPrefix("issue.") || name.hasPrefix("issues.")
+            case .issues: return name.hasPrefix("pr.") || name.hasPrefix("stack.")
+            case .both: return false
+            }
+        }
+        for text in [template.body] + template.harnessKeys.compactMap({ template.harnessBodies[$0] }) {
+            for name in placeholders(in: text) where foreign(name) && seenNames.insert(name).inserted {
                 errors.append(.unknownPlaceholder(name))
             }
         }
@@ -713,6 +812,10 @@ enum PromptEngine {
     /// On a stack, a template that never mentions `{{stack.*}}` would silently see only the
     /// base PR; append the stack list so it still knows about the rest.
     static func withStackContext(_ rendered: String, source: String, context: PromptContext) -> String {
+        if context.isIssueList, !placeholders(in: source).contains(where: { $0.hasPrefix("issues.") }) {
+            return rendered + "\n\nThis covers \(context.values["issues.size"] ?? "?") issues (they may be unrelated, possibly in different repos):\n"
+                + (context.values["issues.list"] ?? "")
+        }
         guard context.isStack,
               !placeholders(in: source).contains(where: { $0.hasPrefix("stack.") }) else { return rendered }
         let size = context.values["stack.size"] ?? "?"
@@ -784,8 +887,9 @@ enum PromptEngine {
     }
 
     /// Wraps a free-typed prompt with the PR it is about.
-    static func customBody(_ typed: String) -> String {
-        "Regarding {{pr.url}} ({{pr.title}}):\n\n\(typed)"
+    static func customBody(_ typed: String, issue: Bool = false) -> String {
+        issue ? "Regarding {{issue.url}} ({{issue.title}}):\n\n\(typed)"
+              : "Regarding {{pr.url}} ({{pr.title}}):\n\n\(typed)"
     }
 }
 
@@ -810,6 +914,23 @@ enum PromptStarters {
         ---
         Your prompt. Placeholders: {{pr.url}} {{pr.number}} {{pr.title}} {{pr.repo}}
         {{pr.owner}} {{pr.branch}} {{pr.base}} {{pr.author}}
+
+    PRs or issues
+    -------------
+    Add `for: issues` (or `for: both`) to run a template on issues instead of PRs; with no
+    `for:` it is a PR template, so it never shows up on an issue. On an issue (press the
+    Prompt key on an Issues-tab row, or right-click an issue or a section header) use:
+
+        {{issue.url}} {{issue.number}} {{issue.title}} {{issue.repo}} {{issue.owner}}
+        {{issue.author}} {{issue.labels}} {{issue.assignees}}
+
+    and these list every issue when a whole section is run (size 1 for a single issue; a
+    template that mentions none of them gets the list appended):
+
+        {{issues.size}}  {{issues.list}}  {{issues.urls}}
+
+    {{pr.*}} is not available in an issue template, and an issue prompt never runs the
+    checkout step. The issue body is not included: the agent reads it from {{issue.url}}.
 
     Several harnesses for one template
     ----------------------------------
@@ -1015,6 +1136,25 @@ enum PromptStarters {
             change, then check the telemetry from that traffic for errors and slow paths.
             """,
             when: "authored+ready+ci-passing", priority: 5),
+        // Issue starters: `for: issues` keeps them off PRs. No checkout — an issue has no branch.
+        PromptTemplate(
+            fileName: "triage-issue.md", name: "Triage issue", harness: "claude", checkout: false,
+            body: """
+            Triage {{issue.url}} — "{{issue.title}}" in {{issue.repo}}.
+            Read the issue and its comments, then say what it is (bug, feature, question),
+            how severe or valuable it looks, what is missing to act on it, and suggest
+            labels and a next step. Don't change any code or post anything.
+            """,
+            extraHarnesses: ["agent0"], subject: .issues),
+        PromptTemplate(
+            fileName: "plan-implementation.md", name: "Plan implementation", harness: "claude", checkout: false,
+            body: """
+            Plan the implementation of {{issue.url}} — "{{issue.title}}" in {{issue.repo}}.
+            Read the issue and the relevant code, then propose a short plan: the approach,
+            the files likely to change, the risks, and how to test it. Break it into
+            small tasks that could each be a PR. Don't change any code.
+            """,
+            extraHarnesses: ["agent0"], subject: .issues),
     ]
 }
 
@@ -1279,8 +1419,8 @@ enum PromptTemplateChecks {
         assert(PromptEngine.askHarnessKey(picked: nil, row: "agent0", enabled: ["agent0", "claude"]) == "agent0", "no pick keeps the row's harness")
         assert(PromptEngine.askHarnessKey(picked: "gone", row: "agent0", enabled: ["agent0"]) == "agent0", "a disabled pick falls back")
 
-        // Filtering.
-        let all = PromptStarters.templates
+        // Filtering (PR starters; the issue ones are asserted below).
+        let all = PromptStarters.templates.filter { $0.subject == .prs }
         assert(PromptEngine.filter(all, query: "", config: cfg).count == all.count, "empty query keeps all")
         assert(PromptEngine.filter(all, query: "REVIEW", config: cfg).map(\.fileName) == ["review-pr.md", "review-stack.md", "address-feedback.md", "verify-preview.md"], "name match (\"preview\" contains \"review\")")
         assert(PromptEngine.filter(all, query: "agent0", config: cfg).map(\.fileName) == ["review-pr.md", "review-stack.md", "fix-ci.md", "address-feedback.md", "analyse-telemetry.md", "verify-preview.md"], "harness-label match (any of a template's harnesses)")
@@ -1298,6 +1438,90 @@ enum PromptTemplateChecks {
         // Config round-trips as JSON.
         let data = try! JSONEncoder().encode(cfg)
         assert((try? JSONDecoder().decode(PromptConfig.self, from: data)) == cfg, "config JSON round-trip")
+
+        issueChecks(cfg)
+    }
+
+    /// Prompts on issues: `for:`, the issue context, the target, and no checkout.
+    private static func issueChecks(_ cfg: PromptConfig) {
+        func issue(_ n: Int, repo: String = "Acme/app") -> IssueSnapshot {
+            IssueSnapshot(nodeId: "i\(n)", number: n, title: "Crash on $(start) & {{prompt}}", url: "https://github.com/\(repo)/issues/\(n)",
+                          repoFullName: repo, author: "alice", assignees: ["bob"], labels: ["bug", "p1"],
+                          createdAt: Date(timeIntervalSince1970: 100), updatedAt: Date(timeIntervalSince1970: 200),
+                          commentCount: 0, comments: [], mentionsMe: false)
+        }
+
+        // `for:` parses, defaults to PRs, and round-trips.
+        func parsed(_ front: String) -> PromptTemplate { PromptEngine.parse(fileName: "t.md", text: "---\nname: t\n\(front)---\nbody")! }
+        assert(parsed("").subject == .prs, "no for: → PRs only")
+        assert(parsed("for: issues\n").subject == .issues && parsed("for: BOTH\n").subject == .both, "for: parses, case-insensitive")
+        assert(parsed("for: nonsense\n").subject == .prs, "an unknown for: falls back to PRs")
+        let forIssues = parsed("for: issues\n")
+        assert(PromptEngine.parse(fileName: "t.md", text: PromptEngine.serialize(forIssues)) == forIssues, "for: round-trips")
+        assert(!PromptEngine.serialize(parsed("")).contains("for:"), "a PR template writes no for: line")
+        assert(PromptSubject.prs.covers(.prs) && !PromptSubject.prs.covers(.issues), "prs covers only PRs")
+        assert(PromptSubject.issues.covers(.issues) && !PromptSubject.issues.covers(.prs), "issues covers only issues")
+        assert(PromptSubject.both.covers(.prs) && PromptSubject.both.covers(.issues), "both covers both")
+
+        // The starters: issue ones exist, are issue-only, and every other starter stays PR-only.
+        let starters = PromptStarters.templates
+        let issueStarters = starters.filter { $0.subject == .issues }.map(\.name)
+        assert(issueStarters == ["Triage issue", "Plan implementation"], "issue starters: \(issueStarters)")
+        assert(starters.filter { $0.subject != .issues }.allSatisfy { $0.subject == .prs }, "existing starters are PR templates")
+        assert(!starters.filter { $0.subject.covers(.prs) }.contains { $0.name == "Triage issue" }, "issue starters never offered for a PR")
+
+        // The issue context fills {{issue.*}}; a {{pr.*}} placeholder in an issue template is unknown.
+        let one = PromptTarget(issues: [issue(7)])
+        assert(one.isIssue && one.subject == .issues && !one.isStack && one.count == 1 && one.title == "#7", "single issue target")
+        assert(one.repoFullName == "Acme/app" && one.state(myLogin: "me").isEmpty, "issue target: repo, no state tokens")
+        let triage = starters.first { $0.name == "Triage issue" }!
+        let text = try! PromptEngine.renderBody(triage, context: one.context)
+        assert(text.contains("https://github.com/Acme/app/issues/7") && text.contains("Crash on $(start) & {{prompt}}"), "issue.url and title filled; values stay inert")
+        var prInIssue = triage; prInIssue.body = "{{pr.url}}"
+        assert((try? PromptEngine.renderBody(prInIssue, context: one.context)) == nil, "pr.* is unknown in an issue context")
+        var issueInPR = triage; issueInPR.body = "{{issue.url}}"
+        let prCtx = PromptContext(values: ["pr.url": "u"])
+        assert((try? PromptEngine.renderBody(issueInPR, context: prCtx)) == nil, "issue.* is unknown in a PR context")
+        for s in starters where s.subject == .issues {
+            assert(PromptEngine.validate(s, config: cfg).isEmpty && !s.checkout, "issue starter \(s.fileName) valid and checkout-free")
+        }
+        let ctx = one.context
+        assert(ctx.values["issue.labels"] == "bug, p1" && ctx.values["issue.assignees"] == "bob" && ctx.values["issue.owner"] == "Acme", "labels, assignees, owner")
+        assert(ctx.values["issues.size"] == "1" && !ctx.isIssueList, "single issue: size 1")
+
+        // A section is a group: every issue listed, the list appended when the template names none.
+        let section = PromptTarget(issues: [issue(1), issue(2, repo: "Acme/other")], isGroup: true)
+        assert(section.isStack && section.count == 2 && section.title == "2 issues" && section.repoFullName == "Acme/app", "section target")
+        var plain = triage; plain.body = "Triage {{issue.url}}"
+        let appended = PromptEngine.withStackContext(try! PromptEngine.renderBody(plain, context: section.context), source: plain.body, context: section.context)
+        assert(appended.contains("This covers 2 issues") && appended.contains("Acme/other#2"), "issue list appended")
+        var listed = triage; listed.body = "{{issues.list}}"
+        assert(!(try! PromptEngine.renderBody(listed, context: section.context)).contains("This covers"), "a template that names issues.* gets no extra list")
+
+        // A free-typed prompt is about the issue, not a PR.
+        let prefix = PromptEngine.customBody("", issue: true)
+        assert((try! PromptEngine.substitute(prefix, context: one.context)).contains("issues/7"), "custom prompt prefix names the issue")
+
+        // An issue prompt never runs the checkout step, even if the template asks for it.
+        assert(!one.runsCheckout(true) && !section.runsCheckout(true), "issue targets never check out")
+        let withCheckout = try! PromptEngine.launch(prompt: "p", harnessKey: "claude", config: cfg, context: PromptContext(values: ["pr.number": "5"]),
+                                                    checkout: true, workingDirectory: "/tmp", promptFile: "/tmp/p.txt")
+        if case .terminal(let script, _) = withCheckout { assert(script.contains("gh pr checkout"), "a PR target still checks out") }
+        let noCheckout = try! PromptEngine.launch(prompt: "p", harnessKey: "claude", config: cfg, context: one.context,
+                                                  checkout: one.runsCheckout(true), workingDirectory: "/tmp", promptFile: "/tmp/p.txt")
+        if case .terminal(let script, _) = noCheckout { assert(!script.contains("gh pr checkout"), "issue prompt launches without a checkout") }
+        else { assertionFailure("claude is a terminal harness") }
+
+        // Validation flags a placeholder the template's own subject can never fill.
+        var wrongIssue = triage; wrongIssue.body = "{{pr.url}}"
+        assert(PromptEngine.validate(wrongIssue, config: cfg) == [.unknownPlaceholder("pr.url")], "pr.* in an issue template is flagged")
+        var wrongPR = PromptStarters.templates[0]; wrongPR.body = "{{issue.url}}"
+        assert(PromptEngine.validate(wrongPR, config: cfg) == [.unknownPlaceholder("issue.url")], "issue.* in a PR template is flagged")
+        var either = triage; either.subject = .both; either.body = "{{pr.url}} {{issue.url}}"
+        assert(PromptEngine.validate(either, config: cfg).isEmpty, "a both template may use either")
+
+        // {{issue.*}} are quoted into a command like {{pr.*}}: inside quotes it is refused.
+        assert(PromptEngine.quotedPlaceholders(in: "claude \"{{issue.title}}\"") == ["issue.title"], "issue.* inside quotes is caught")
     }
 }
 #endif

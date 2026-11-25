@@ -22,5 +22,26 @@ import Foundation
 /// )
 /// ```
 enum FeatureFlagRegistry {
-    static let flags: [FlagDefinition] = []
+    static let flags: [FlagDefinition] = [
+        FlagDefinition(
+            key: issuePromptsKey,
+            description: "Run prompt templates on issues (A key, row and section menus on the Issues tab)",
+            type: .boolean,
+            variants: ["off": .bool(false), "on": .bool(true)],
+            defaultVariant: "on",
+            experiment: nil,
+            owner: "mthines",
+            tags: ["issues", "prompts"]
+        ),
+    ]
+
+    /// Gates running prompt templates on issues.
+    static let issuePromptsKey = "issue-prompts"
+
+    /// Resolved without a telemetry record: it is read while rendering the Issues tab and
+    /// its key legend, which would otherwise count an evaluation per redraw.
+    static var issuePromptsEnabled: Bool {
+        if case .bool(true)? = FeatureFlagClient.shared.resolveWithoutRecording(issuePromptsKey).value { return true }
+        return false
+    }
 }

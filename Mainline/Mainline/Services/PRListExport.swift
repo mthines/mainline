@@ -19,6 +19,21 @@ enum PRListExport {
         return lines.joined(separator: "\n")
     }
 
+    /// Markdown list for a section of issues: link + title, then who/labels/age-free facts.
+    static func markdown(issues: [IssueSnapshot]) -> String {
+        var lines: [String] = []
+        for issue in issues {
+            lines.append("- [\(issue.repoFullName)#\(issue.number)](\(issue.url)) \(issue.title)")
+            var parts: [String] = []
+            if !issue.author.isEmpty { parts.append("author: @\(issue.author)") }
+            if !issue.assignees.isEmpty { parts.append("assigned: " + issue.assignees.map { "@\($0)" }.joined(separator: ", ")) }
+            if !issue.labels.isEmpty { parts.append("labels: " + issue.labels.joined(separator: ", ")) }
+            if issue.commentCount > 0 { parts.append("\(issue.commentCount) comments") }
+            if !parts.isEmpty { lines.append("  - \(parts.joined(separator: " · "))") }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     /// The per-PR status line, most decision-relevant facts first.
     static func details(_ pr: PRSnapshot) -> [String] {
         var parts: [String] = []
