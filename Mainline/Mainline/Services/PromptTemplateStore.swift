@@ -231,6 +231,22 @@ final class PromptTemplateStore: ObservableObject {
         NSWorkspace.shared.open(promptsDirectory)
     }
 
+    /// Opens a template's file in the user's default editor for `.md`.
+    func openInEditor(_ template: PromptTemplate) {
+        NSWorkspace.shared.open(promptsDirectory.appendingPathComponent(template.fileName))
+    }
+
+    /// A starter hook (`on: ci-failed`), saved and returned so the caller can open it.
+    func newHook() -> PromptTemplate {
+        var t = newTemplate()
+        t.name = "New hook"
+        t.fileName = PromptEngine.fileName(forName: t.name, existing: Set(templates.map(\.fileName)))
+        t.on = "ci-failed"
+        t.body = "CI failed on {{pr.url}}. Investigate the failing checks and push a fix."
+        save(t)
+        return t
+    }
+
     func openConfig() {
         seedIfNeeded()
         NSWorkspace.shared.open(configURL)

@@ -146,6 +146,8 @@ final class PRManager: ObservableObject {
     var hookThrottle = PRHookEngine.Throttle()
     /// Hooks waiting out their countdown, by hook-run id (the notification's identifier).
     var pendingHooks: [String: Task<Void, Never>] = [:]
+    /// Done-set PR ids seen so far this launch (nil until the first Done set seeds it).
+    var knownDoneIds: Set<String>?
 
     /// What the prompt-template picker is open for (a PR, or its whole stack), or `nil`.
     /// Presented at the panel level in `MenuBarView`, like `peekPR`; the deck only sets it.
@@ -1191,6 +1193,10 @@ final class PRManager: ObservableObject {
             self?.donePRs = done
             // The Done set is where a just-merged PR surfaces — auto-unpin merged pins.
             self?.applyUnpinOnMerge(done)
+            guard let self else { return }
+            let result = PRHookEngine.doneEvents(known: self.knownDoneIds, done: done)
+            self.knownDoneIds = result.known
+            self.handleHookEvents(result.events)
         }
 
         // Mirror store updates to prs

@@ -850,7 +850,7 @@ enum PromptStarters {
         when: !conflict                  # optional extra state guard, as above
 
     Triggers: approved, changes-requested, ci-failed, ci-passed, conflict, ready-to-merge,
-    new-comment, review-requested, ready-for-review. A hook never fires for a PR's first
+    new-comment, review-requested, ready-for-review, merged, closed. A hook never fires for a PR's first
     sighting, at most once per PR + trigger per 30 minutes, and at most 10 launches an hour.
     `role` defaults to authored so an agent never starts on a stranger's PR unless you say so.
 

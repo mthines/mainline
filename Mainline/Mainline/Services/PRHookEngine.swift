@@ -11,6 +11,8 @@ enum HookTrigger: String, CaseIterable {
     case newComment = "new-comment"
     case reviewRequested = "review-requested"
     case readyForReview = "ready-for-review"
+    case merged
+    case closed
 
     var meaning: String {
         switch self {
@@ -23,6 +25,8 @@ enum HookTrigger: String, CaseIterable {
         case .newComment: return "a new human comment or review"
         case .reviewRequested: return "a review was requested from you"
         case .readyForReview: return "a draft became ready"
+        case .merged: return "the PR was merged"
+        case .closed: return "the PR was closed without merging"
         }
     }
 }
@@ -66,6 +70,20 @@ enum PRHookEngine {
             if old.isDraft, !pr.isDraft { add(.readyForReview) }
         }
         return out
+    }
+
+    /// `merged` / `closed` events from the display-only Done set, which open-PR polls never see.
+    /// `known == nil` is the first Done set of the launch: it only seeds. `known` accumulates, so a
+    /// PR that drops out of and back into the Done window (or a partial fetch) never fires twice.
+    static func doneEvents(known: Set<String>?, done: [PRSnapshot]) -> (events: [HookEvent], known: Set<String>) {
+        let ids = Set(done.map(\.nodeId))
+        guard let known else { return ([], ids) }
+        let events = done.filter { !known.contains($0.nodeId) }.compactMap { pr -> HookEvent? in
+            if pr.merged { return HookEvent(trigger: .merged, pr: pr) }
+            if pr.closed { return HookEvent(trigger: .closed, pr: pr) }
+            return nil
+        }
+        return (events, known.union(ids))
     }
 
     /// `on: ci-failed, approved` → triggers + the words that are not triggers.
@@ -154,6 +172,15 @@ enum PRHookChecks {
         assert(!PRHookEngine.matches(hook, event: HookEvent(trigger: .ciFailed, pr: pr()), myLogin: "me"), "wrong trigger")
         hook.when = "conflict"
         assert(!PRHookEngine.matches(hook, event: ev, myLogin: "me"), "when: guard")
+
+        func done(_ id: String, merged: Bool) -> PRSnapshot {
+            var p = pr(id); p.merged = merged; p.closed = !merged; p.state = "closed"; return p
+        }
+        let seed = PRHookEngine.doneEvents(known: nil, done: [done("a", merged: true)])
+        assert(seed.events.isEmpty && seed.known == ["a"], "first Done set only seeds")
+        let next = PRHookEngine.doneEvents(known: seed.known, done: [done("a", merged: true), done("b", merged: true), done("c", merged: false)])
+        assert(next.events.map(\.trigger) == [.merged, .closed], "new Done PRs fire merged / closed")
+        assert(PRHookEngine.doneEvents(known: next.known, done: [done("b", merged: true)]).events.isEmpty, "no repeat")
 
         var th = PRHookEngine.Throttle(cooldown: 60, hourlyCap: 2)
         let t0 = Date()
