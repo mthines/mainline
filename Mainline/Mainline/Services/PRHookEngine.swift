@@ -52,7 +52,7 @@ enum IssueHookTrigger: String, CaseIterable {
         switch self {
         case .newIssue: return "a new issue in a repo watched at All issues (needs role: any)"
         case .assigned: return "an issue was assigned to you (needs role: any)"
-        case .mentioned: return "you were first @-mentioned on the issue (needs role: any)"
+        case .mentioned: return "you were newly @-mentioned on the issue (needs role: any)"
         case .newComment: return "a human other than you commented"
         case .closed: return "a followed issue was closed"
         }
