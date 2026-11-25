@@ -180,6 +180,11 @@ struct PromptsSettingsView: View {
                                   systemImage: "exclamationmark.triangle")
                                 .font(.caption).foregroundStyle(.orange)
                         }
+                        if PRHookEngine.isHook(hook), hook.subject.covers(.issues), !PRHookEngine.prBodyRenders(hook) {
+                            Label("Prompt uses `{{issue.*}}`, so it never fires on a PR: use `{{pr.*}}`, or `for: issues`",
+                                  systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
                         if issueHooks, PRHookEngine.isIssueHook(hook), !PRHookEngine.issueBodyRenders(hook) {
                             Label("Prompt uses `{{pr.*}}`, so it never fires on an issue: use `{{issue.*}}`",
                                   systemImage: "exclamationmark.triangle")

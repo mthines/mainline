@@ -220,6 +220,17 @@ enum PRHookEngine {
         return (try? PromptEngine.renderBody(t, context: PromptTarget(issues: [sample]).context)) != nil
     }
 
+    /// The PR-side mirror of `issueBodyRenders`, for a `for: both` hook: `matches` skips a PR event
+    /// whose prompt can't be filled (an `{{issue.*}}` body), so Settings warns it never fires on a PR.
+    static func prBodyRenders(_ t: PromptTemplate) -> Bool {
+        let sample = PRSnapshot(
+            nodeId: "sample", number: 1, title: "t", htmlUrl: "u", repoFullName: "o/r", isDraft: false, state: "open",
+            reviewDecision: nil, ciStatus: .pending, reviewState: .none, commentCount: 0, updatedAt: "",
+            author: "a", requestedReviewers: [], mergeable: true)
+        let context = PromptTarget(anchor: sample, members: [sample], wholeStack: false).context
+        return (try? PromptEngine.renderBody(t, context: context)) != nil
+    }
+
     /// The (hook, event) pairs one issue poll launches: every match, but at most ONE per hook per
     /// issue. A comment that first @-mentions you yields both `mentioned` and `new-comment`, and the
     /// throttle keys them apart, so without this a hook on both starts two agents for one comment.
@@ -380,8 +391,10 @@ enum PRHookChecks {
         var both = PromptTemplate(fileName: "b.md", name: "b", harness: "claude", checkout: false, body: "Look at {{issue.url}}")
         both.subject = .both; both.on = "approved"
         assert(!PRHookEngine.matches(both, event: ev, myLogin: "me"), "a for: both {{issue.*}} body never fires on a PR")
+        assert(!PRHookEngine.prBodyRenders(both), "Settings warns about an {{issue.*}} body on a for: both hook")
         both.body = "Look at {{pr.url}}"
         assert(PRHookEngine.matches(both, event: ev, myLogin: "me"), "a for: both {{pr.*}} body does")
+        assert(PRHookEngine.prBodyRenders(both), "no warning for a {{pr.*}} body")
 
         func done(_ id: String, merged: Bool) -> PRSnapshot {
             var p = pr(id); p.merged = merged; p.closed = !merged; p.state = "closed"; return p
