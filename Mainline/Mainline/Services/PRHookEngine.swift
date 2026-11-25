@@ -49,7 +49,9 @@ enum PRHookEngine {
             let failed: (CIStatus) -> Bool = { $0 == .failure || $0 == .error }
             if !failed(old.ciStatus), failed(pr.ciStatus) { add(.ciFailed) }
             if old.ciStatus != .success, pr.ciStatus == .success { add(.ciPassed) }
-            if old.mergeable == true, pr.mergeable == false { add(.conflict) }   // nil (UNKNOWN) is not clean
+            // GitHub reports UNKNOWN (nil) while it recomputes after a push, so true → nil → false is the usual
+        // path to a conflict; the throttle's cooldown bounds a CONFLICTING → UNKNOWN → CONFLICTING repeat.
+        if old.mergeable != false, pr.mergeable == false { add(.conflict) }
             let oldTokens = PromptState.active(pr: old, myLogin: myLogin)
             if !oldTokens.contains("ready-to-merge"),
                PromptState.active(pr: pr, myLogin: myLogin).contains("ready-to-merge") { add(.readyToMerge) }
@@ -152,6 +154,8 @@ enum PRHookChecks {
         assert(triggers(pr(ci: .failure), pr(ci: .error)).isEmpty, "failure → error is not a new failure")
         assert(triggers(pr(), pr(ci: .success)).contains(.ciPassed), "ci-passed")
         assert(triggers(pr(), pr(mergeable: false)).contains(.conflict), "conflict")
+        assert(triggers(pr(mergeable: nil), pr(mergeable: false)).contains(.conflict), "UNKNOWN → conflicting still fires")
+        assert(triggers(pr(mergeable: false), pr(mergeable: false)).isEmpty, "still conflicting fires nothing")
         assert(triggers(pr(draft: true), pr()).contains(.readyForReview), "draft → ready")
 
         let t = PRHookEngine.parseTriggers("ci-failed, Approved, nope")
