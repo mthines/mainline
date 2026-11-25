@@ -1,0 +1,47 @@
+# .agents/aw/release.yml — deployment-verify. Committed; no secrets.
+# Field reference: the deployment-verify skill's rules/config.md. Written by /deployment-verify setup.
+# Personal policy (rollback: ask | auto | never) goes in ~/.agents/aw/config.yml → policies.
+version: 1
+telemetry:
+  kind: dash0-mcp                       # dash0-mcp | command
+  # No Dash0 MCP server is configured for this repo, so the URL is explicit and the token comes from the env.
+  url: https://api.eu-west-1.aws.dash0.com/mcp
+  token_env: DASH0_AUTH_TOKEN           # export a read-only Dash0 token; never commit it
+on_exception: ""
+environments:
+  production:
+    # Mainline is a macOS menu-bar app with no hosted service: a merge to main cuts a release
+    # (CI → version → release-macos) and users pick it up via Homebrew. Pass --deployed-at.
+    dataset: default
+    deploy: { detect: manual }
+    traffic: real
+    ingest_wait_seconds: 45
+  local:
+    dataset: ""                         # your local dataset; set it in ~/.agents/aw/config.yml
+    deploy: { detect: manual }          # the app restart is the deploy
+    traffic: ""                         # menu-bar app: traffic is what you do in the running app
+    ingest_wait_seconds: 45
+flags:
+  # Flags live in the compiled-in FeatureFlagRegistry (Services/FeatureFlags/); nothing can set
+  # them remotely. A flag is flipped by a follow-up PR that changes the registry and ships a release.
+  providers: []
+pipeline:                               # atelier's Deliver stage (rules/config.md § pipeline)
+  workflow: CI
+  required_jobs: [test]                 # version / release-macos skip when no release is due; never list them
+  timeout_minutes: 30
+  on_red: fix-first
+rollback:
+  - kind: revert-pr                     # no platform rollback for a shipped app binary
+steps: [100]
+step_window_minutes: 10
+max_hold_minutes: 30
+thresholds:
+  min_test_requests: 20
+  min_reference_requests: 20
+  max_error_rate_delta_pp: 5
+  max_latency_ratio: 3
+  min_latency_delta_ms: 50
+notify: []
+people: {}
+posting:
+  forbidden: []
