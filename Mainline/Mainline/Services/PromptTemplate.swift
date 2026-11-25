@@ -853,6 +853,8 @@ enum PromptStarters {
     new-comment, review-requested, ready-for-review, merged, closed. A hook never fires for a PR's first
     sighting, at most once per PR + trigger per 30 minutes, and at most 10 launches an hour.
     `role` defaults to authored so an agent never starts on a stranger's PR unless you say so.
+    A hook never runs the checkout step (parallel hooks would switch branches in one clone):
+    have the prompt create its own worktree from {{pr.branch}}.
 
     Comments must be on their own line: a trailing "# …" would become part of the value.
     A bad `when:` only switches the suggestion off — the template still runs.

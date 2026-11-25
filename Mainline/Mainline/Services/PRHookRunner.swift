@@ -64,7 +64,7 @@ extension PRManager {
             let context = target.context
             let prompt = try PromptEngine.renderBody(template, context: context)
             let summary = try PromptLauncher.run(
-                prompt: prompt, harnessKey: template.harness, checkout: template.checkout,
+                prompt: prompt, harnessKey: template.harness, checkout: false,   // never: parallel hooks would switch branches in one clone
                 pr: event.pr, context: context, config: config, terminal: settings.promptTerminal)
             TelemetryService.shared.recordTriageInteraction("run_hook")
             notifications.postHook(id: id, title: "Hook started: \(hook.name)", body: summary, url: event.pr.htmlUrl, cancellable: false)
