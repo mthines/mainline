@@ -26,11 +26,14 @@ struct IssueReply: Codable, Equatable {
     let createdAt: Date
     /// GitHub `authorAssociation` (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE...).
     let association: String
+    /// The author is a GitHub App (`__typename == "Bot"`, whose GraphQL login has no `[bot]` suffix).
+    let isBot: Bool
 
-    init(author: String, createdAt: Date, association: String) {
+    init(author: String, createdAt: Date, association: String, isBot: Bool = false) {
         self.author = author
         self.createdAt = createdAt
         self.association = association
+        self.isBot = isBot
     }
 
     init(from decoder: Decoder) throws {
@@ -38,9 +41,10 @@ struct IssueReply: Codable, Equatable {
         author = try c.decodeIfPresent(String.self, forKey: .author) ?? ""
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(timeIntervalSince1970: 0)
         association = try c.decodeIfPresent(String.self, forKey: .association) ?? "NONE"
+        isBot = try c.decodeIfPresent(Bool.self, forKey: .isBot) ?? false
     }
 
-    private enum CodingKeys: String, CodingKey { case author, createdAt, association }
+    private enum CodingKeys: String, CodingKey { case author, createdAt, association, isBot }
 }
 
 /// Canonical diff unit for one issue (the issue-side twin of `PRSnapshot`).

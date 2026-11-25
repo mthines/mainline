@@ -174,7 +174,7 @@ enum PRHookEngine {
         for issue in next {
             guard let old = previous[issue.nodeId], issue.commentCount > old.commentCount,
                   let last = issue.comments.last,
-                  !PRSnapshot.loginsMatch(last.author, myLogin), !isBotLogin(last.author) else { continue }
+                  !PRSnapshot.loginsMatch(last.author, myLogin), !last.isBot else { continue }
             out.append(IssueHookEvent(trigger: .newComment, issue: issue))
         }
         out += closed.filter { previous[$0.nodeId] != nil }.map { IssueHookEvent(trigger: .closed, issue: $0) }
@@ -189,8 +189,6 @@ enum PRHookEngine {
         return previous.values.filter { !have.contains($0.nodeId) && watchLevel($0.repoFullName) != .off }
             .sorted { $0.nodeId < $1.nodeId }
     }
-
-    private static func isBotLogin(_ login: String) -> Bool { login.lowercased().hasSuffix("[bot]") }
 
     /// Whether `template` fires for an issue event: subject, trigger, repo scope, then role.
     /// `role: authored` (default) = you opened the issue; `any` opts in to other people's
@@ -375,7 +373,9 @@ enum IssueHookChecks {
                           createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0),
                           commentCount: comments.count, comments: comments)
         }
-        func reply(_ by: String) -> IssueReply { IssueReply(author: by, createdAt: Date(), association: "NONE") }
+        func reply(_ by: String, bot: Bool = false) -> IssueReply {
+            IssueReply(author: by, createdAt: Date(), association: "NONE", isBot: bot)
+        }
         func triggers(_ prev: [IssueSnapshot], _ next: [IssueSnapshot], _ tr: [IssueTransition] = [],
                       closed: [IssueSnapshot] = []) -> [IssueHookTrigger] {
             PRHookEngine.issueEvents(previous: Dictionary(uniqueKeysWithValues: prev.map { ($0.nodeId, $0) }),
@@ -391,7 +391,7 @@ enum IssueHookChecks {
         assert(triggers([a], [a]).isEmpty, "an unchanged issue fires nothing")
         assert(triggers([a], [issue(comments: [reply("bob")])]) == [.newComment], "someone else's comment")
         assert(triggers([a], [issue(comments: [reply("Mads")])]).isEmpty, "your own comment fires nothing")
-        assert(triggers([a], [issue(comments: [reply("github-actions[bot]")])]).isEmpty, "a bot comment fires nothing")
+        assert(triggers([a], [issue(comments: [reply("github-actions", bot: true)])]).isEmpty, "a bot comment fires nothing")
         assert(triggers([], [issue(comments: [reply("bob")])]).isEmpty, "a first-seen issue's comments are not new")
         assert(triggers([a], [], closed: [a]) == [.closed], "closed")
         assert(triggers([a], [], closed: [issue("x")]).isEmpty, "closed only for an issue this app followed")

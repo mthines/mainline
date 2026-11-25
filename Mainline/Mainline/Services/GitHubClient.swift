@@ -2040,7 +2040,8 @@ extension GitHubClient {
         let commentNodes = (node.comments?.nodes ?? []).compactMap { $0 }
         let replies = commentNodes.map {
             IssueReply(author: $0.author?.login ?? "", createdAt: parseIssueDate($0.createdAt),
-                       association: $0.authorAssociation ?? "NONE")
+                       association: $0.authorAssociation ?? "NONE",
+                       isBot: PRSnapshot.isBot(typename: $0.author?.typename, login: $0.author?.login))
         }
         let mentioned = IssueSnapshot.mentions(node.body ?? "", login: myLogin)
             || commentNodes.contains { IssueSnapshot.mentions($0.body ?? "", login: myLogin) }
