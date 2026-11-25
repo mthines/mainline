@@ -24,7 +24,7 @@ enum HookTrigger: String, CaseIterable {
         case .ciPassed: return "CI went green"
         case .conflict: return "the PR got a merge conflict"
         case .readyToMerge: return "approved, green and mergeable"
-        case .newComment: return "someone else commented or reviewed"
+        case .newComment: return "a human other than you commented or reviewed"
         case .reviewRequested: return "you or your team was asked to review (needs role: reviewing or any)"
         case .readyForReview: return "a draft was marked ready"
         case .merged: return "the PR merged"
