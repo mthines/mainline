@@ -180,6 +180,11 @@ struct PromptsSettingsView: View {
                                   systemImage: "exclamationmark.triangle")
                                 .font(.caption).foregroundStyle(.orange)
                         }
+                        if issueHooks, PRHookEngine.isIssueHook(hook), !PRHookEngine.issueBodyRenders(hook) {
+                            Label("Prompt uses `{{pr.*}}`, so it never fires on an issue: use `{{issue.*}}`",
+                                  systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
                     }
                     Spacer()
                     Button("Open in Editor") { store.openInEditor(hook) }

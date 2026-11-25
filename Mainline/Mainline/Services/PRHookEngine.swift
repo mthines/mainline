@@ -210,6 +210,14 @@ enum PRHookEngine {
         return (try? PromptEngine.renderBody(t, context: PromptTarget(issues: [event.issue]).context)) != nil
     }
 
+    /// Whether an issue hook's prompt can be filled for an issue. `matches` skips one that can't
+    /// (a `{{pr.*}}` body), so Settings uses this to warn that it will never fire on an issue.
+    static func issueBodyRenders(_ t: PromptTemplate) -> Bool {
+        let sample = IssueSnapshot(nodeId: "sample", number: 1, title: "t", url: "u", repoFullName: "o/r", author: "a",
+                                   createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0))
+        return (try? PromptEngine.renderBody(t, context: PromptTarget(issues: [sample]).context)) != nil
+    }
+
     /// The (hook, event) pairs one issue poll launches: every match, but at most ONE per hook per
     /// issue. A comment that first @-mentions you yields both `mentioned` and `new-comment`, and the
     /// throttle keys them apart, so without this a hook on both starts two agents for one comment.
@@ -289,6 +297,7 @@ extension PRHookEngine {
         let issueBlock = issues ? [
             "#",
             "# Issue triggers (set `for: issues`, or `for: both` for PRs and issues; use {{issue.*}}):",
+            "#   The prompt below uses {{pr.*}}: rewrite it with {{issue.url}} etc., or it never fires on an issue.",
         ] + lines(issueTriggers) + [
             "#   On issues, role: authored = you opened it, any = anyone; reviewing never matches,",
             "#   and an issue hook with `when:` never fires.",
@@ -462,8 +471,10 @@ enum IssueHookChecks {
         let closedIssue = IssueHookEvent(trigger: .closed, issue: a)
         both.body = "Look at {{pr.url}}"
         assert(!PRHookEngine.matches(both, issueEvent: closedIssue, myLogin: me), "a {{pr.*}} body never fires on an issue")
+        assert(!PRHookEngine.issueBodyRenders(both), "Settings warns about a {{pr.*}} body on an issue hook")
         both.body = "Look at {{issue.url}}"
         assert(PRHookEngine.matches(both, issueEvent: closedIssue, myLogin: me), "an {{issue.*}} body does")
+        assert(PRHookEngine.issueBodyRenders(both), "no warning for an {{issue.*}} body")
         var issuesOnly = both; issuesOnly.subject = .issues
         assert(PRHookEngine.unknownTriggers(issuesOnly, issues: true) == ["approved", "nope"],
                "a PR trigger is unknown on a for: issues hook")
