@@ -93,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         PRListExportChecks.run()
         PromptTemplateChecks.run()
         PRHookChecks.run()
+        IssueHookChecks.run()
         CommentTemplateChecks.run()
         FeatureFlagChecks.run()
         IssueChecks.run()

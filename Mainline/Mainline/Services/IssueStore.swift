@@ -19,6 +19,9 @@ final class IssueStore: ObservableObject {
     /// Lowercased repos that were Off at the last poll. Their issues never reach the baseline,
     /// so a repo switched back on is seeded for one poll instead of re-announcing everything.
     private var offRepos: Set<String> = []
+    /// False until a launch's first non-seeding poll: that poll diffs against a baseline from the
+    /// last run, so everything that changed while the app was closed would fire hooks at once.
+    private var issueHooksArmed = false
 
     private let settings: MainlineSettings
     private let notifications: NotificationService
@@ -162,11 +165,13 @@ final class IssueStore: ObservableObject {
             })
         var carriedIssues = carry.issues
         var carriedCount = carry.carried
+        var vettedStates: [String: String] = [:]   // reused by the hook `closed` lookup below
         if carry.carried > 0 {
             // Vet what was carried blind: an issue closed since it was last seen must not
             // linger, since an `is:open` search can never return it to clear it.
             let carriedIds = carry.issues.map(\.nodeId).filter { merged[$0] == nil }
             if let states = try? await client.fetchIssueStates(nodeIds: carriedIds, token: token) {
+                vettedStates = states
                 let closed = Set(carriedIds.filter { states[$0] == "CLOSED" })
                 carriedIssues.removeAll { closed.contains($0.nodeId) }
                 carriedCount -= closed.count
@@ -184,6 +189,7 @@ final class IssueStore: ObservableObject {
             watchLevel: { [settings] in settings.issueWatchLevel(forRepo: $0) },
             seedRepos: seedRepos, now: Date())
 
+        let previousBaseline = baseline
         var updated: [String: IssueSnapshot] = [:]
         for issue in next { updated[issue.nodeId] = issue }
         baseline = updated
@@ -204,10 +210,37 @@ final class IssueStore: ObservableObject {
         if !seeding {
             notifications.fireIssueTransitions(transitions, settings: settings)
             markUnread(transitions.filter { settings.level(for: $0.event) != .off }.map { $0.issue.nodeId })
+            let armed = issueHooksArmed
+            issueHooksArmed = true
+            if armed, FeatureFlagRegistry.issueHooksEnabled {
+                await postHookEvents(previous: previousBaseline, next: next, transitions: transitions,
+                                     knownStates: vettedStates, myLogin: myLogin, client: client, token: token)
+            }
         }
         pruneUnread()
 
         TelemetryService.shared.recordIssuePoll(observed: next.count, carriedForward: carriedCount)
+    }
+
+    /// Posts this poll's issue-hook events. `closed` needs one `nodes(ids:)` lookup, made only
+    /// when an issue left the followed set: an `is:open` search cannot say why it left.
+    /// `knownStates` are the states the carry-forward vetting already fetched this poll, so an
+    /// issue it dropped as closed is not looked up twice.
+    private func postHookEvents(previous: [String: IssueSnapshot], next: [IssueSnapshot],
+                                transitions: [IssueTransition], knownStates: [String: String], myLogin: String,
+                                client: GitHubClient, token: String) async {
+        let left = PRHookEngine.leftIssues(previous: previous, next: next,
+                                           watchLevel: { [settings] in settings.issueWatchLevel(forRepo: $0) })
+        var states = knownStates
+        let unknown = left.map(\.nodeId).filter { states[$0] == nil }
+        if !unknown.isEmpty, let fetched = try? await client.fetchIssueStates(nodeIds: unknown, token: token) {
+            states.merge(fetched) { _, new in new }
+        }
+        let closed = left.filter { states[$0.nodeId] == "CLOSED" }
+        let events = PRHookEngine.issueEvents(previous: previous, next: next, transitions: transitions,
+                                              closed: closed, myLogin: myLogin)
+        guard !events.isEmpty else { return }
+        NotificationCenter.default.post(name: .mainlineIssueHookEvents, object: nil, userInfo: ["events": events])
     }
 
     // MARK: - Unread / mute (one set serves the Issues tab and the Inbox)

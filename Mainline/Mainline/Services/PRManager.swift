@@ -1246,6 +1246,10 @@ final class PRManager: ObservableObject {
             guard let self, let events = n.userInfo?["events"] as? [HookEvent] else { return }
             Task { @MainActor in await self.handleHookEvents(events) }
         }
+        NotificationCenter.default.addObserver(forName: .mainlineIssueHookEvents, object: nil, queue: .main) { [weak self] n in
+            guard let self, let events = n.userInfo?["events"] as? [IssueHookEvent] else { return }
+            Task { @MainActor in await self.handleIssueHookEvents(events) }
+        }
         NotificationCenter.default.addObserver(forName: .mainlineHookCancel, object: nil, queue: .main) { [weak self] n in
             guard let self, let id = n.userInfo?["hookId"] as? String else { return }
             Task { @MainActor in self.cancelHook(id: id) }

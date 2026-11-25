@@ -33,6 +33,16 @@ enum FeatureFlagRegistry {
             owner: "mthines",
             tags: ["issues", "prompts"]
         ),
+        FlagDefinition(
+            key: issueHooksKey,
+            description: "Hooks on issues: a template with `on:` and `for: issues` starts by itself on issue changes",
+            type: .boolean,
+            variants: ["off": .bool(false), "on": .bool(true)],
+            defaultVariant: "off",
+            experiment: nil,
+            owner: "mthines",
+            tags: ["issues", "hooks"]
+        ),
     ]
 
     /// Gates running prompt templates on issues.
@@ -42,6 +52,16 @@ enum FeatureFlagRegistry {
     /// its key legend, which would otherwise count an evaluation per redraw.
     static var issuePromptsEnabled: Bool {
         if case .bool(true)? = FeatureFlagClient.shared.resolveWithoutRecording(issuePromptsKey).value { return true }
+        return false
+    }
+
+    /// Gates hooks on issues (issue triggers, their events, Settings and starter text).
+    static let issueHooksKey = "issue-hooks"
+
+    /// Resolved without a telemetry record: Settings reads it on every render and the issue
+    /// poll on every cycle.
+    static var issueHooksEnabled: Bool {
+        if case .bool(true)? = FeatureFlagClient.shared.resolveWithoutRecording(issueHooksKey).value { return true }
         return false
     }
 }

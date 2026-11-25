@@ -1,0 +1,5 @@
+PRHookChecks.run(); print("PR HOOK CHECKS PASS")
+IssueDiffChecks.run(); print("ISSUE DIFF CHECKS PASS")
+IssueHookChecks.run(); print("ISSUE HOOK CHECKS PASS")
+FeatureFlagChecks.run(); print("FEATURE FLAG CHECKS PASS")
+assert(!FeatureFlagRegistry.issueHooksEnabled, "issue-hooks ships off"); print("ISSUE HOOKS FLAG DEFAULT OFF")
