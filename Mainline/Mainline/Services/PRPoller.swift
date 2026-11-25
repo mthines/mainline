@@ -37,6 +37,7 @@ final class PRPoller {
     private let client:       GitHubClient
     private let store:        PRStateStore
     private let notifications: NotificationService
+    private var hooksHavePolledOnce = false
     private let settings:     MainlineSettings
 
     private var pollingTask: Task<Void, Never>?
@@ -70,7 +71,8 @@ final class PRPoller {
     /// (`PRManager.donePRs`). These NEVER pass through `PRStateStore` /
     /// `PRDiffEngine` / notifications, so a merged PR can't fire a "new PR" banner.
     /// Set by `PRManager`; nil = no Done fetch performed.
-    var onDonePRs: (([PRSnapshot]) -> Void)?
+    /// Second argument: every Done tab answered (a skipped tab means the set is partial).
+    var onDonePRs: (([PRSnapshot], Bool) -> Void)?
 
     /// Issue state, polled alongside the PRs. Set by `PRManager`; nil = no issue fetch.
     var issueStore: IssueStore?
@@ -760,6 +762,8 @@ final class PRPoller {
         // to review lists quietly — no banner, no unread dot — so turning the
         // setting on can't announce every open PR on the team. A direct request (or
         // one for a configured focus team) ends the quiet.
+        var quietDiscoveredIds = Set<String>()
+        var discoveredRequests: [HookEvent] = []
         if settings.discoverFocusAuthorPRs {
             let configured = settings.reviewFocusByOrg
             let placement = settings.committedPRPlacement
@@ -781,15 +785,30 @@ final class PRPoller {
                     // "review requested from me" (`.readyForReview`).
                     transitions.append(pr.reviewRequestSource(myLogin: myLogin) == .team
                         ? .newPR(pr) : .readyForReview(pr))
+                    // Covers a team request going quiet → loud (the hook diff only sees `.none` → set).
+                    discoveredRequests.append(HookEvent(trigger: .reviewRequested, pr: pr))
                 }
             }
             let quietIds = Set(unique.filter(quiet).map(\.nodeId))
+            quietDiscoveredIds = quietIds
             if !quietIds.isEmpty {
                 transitions.removeAll { quietIds.contains($0.prNodeId) }
             }
         }
 
         notifications.fireTransitions(transitions, settings: settings, myLogin: myLogin)
+
+        // Hooks diff the same before/after arrays, so a PR carried forward verbatim or seen for
+        // the first time fires nothing. A postponed PR (permanent mute) fires no hook either.
+        let hookEvents = (PRHookEngine.events(previous: previousSnapshots, next: unique, myLogin: myLogin) + discoveredRequests)
+            .filter { !muted.contains($0.pr.nodeId) && !quietDiscoveredIds.contains($0.pr.nodeId) }
+        // The first poll of a launch only re-bases: changes made while the app was closed are not
+        // something to auto-launch an agent for.
+        let hooksArmed = hooksHavePolledOnce
+        hooksHavePolledOnce = true
+        if hooksArmed, !hookEvents.isEmpty {
+            NotificationCenter.default.post(name: .mainlineHookEvents, object: nil, userInfo: ["events": hookEvents])
+        }
 
         // EVERY surviving transition marks the PR as unread — `.notify`, `.quiet`
         // AND `.off` alike. This maps the pre-filter array and deliberately
@@ -885,6 +904,7 @@ final class PRPoller {
 
         let tabs: [ReviewTab] = [.created, .forMe]
         var collected: [PRSnapshot] = []
+        var complete = true
 
         for tab in tabs {
             do {
@@ -894,6 +914,7 @@ final class PRPoller {
                 // 304 (notModified), cancellation, transient 5xx, auth, decoding —
                 // all non-critical for the display-only Done section. Skip this tab
                 // and keep whatever we already have; the next poll retries.
+                complete = false
                 continue
             }
         }
@@ -912,12 +933,14 @@ final class PRPoller {
         }
         let unique = order.compactMap { merged[$0] }
 
-        onDonePRs(unique)
+        onDonePRs(unique, complete)
     }
 }
 
 extension Notification.Name {
     static let mainlineQuietTransitions = Notification.Name("MainlineQuietTransitions")
+    static let mainlineHookEvents = Notification.Name("MainlineHookEvents")
+    static let mainlineHookCancel = Notification.Name("MainlineHookCancel")
 }
 
 // MARK: - Carry-forward self-checks (DEBUG)

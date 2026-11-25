@@ -23,6 +23,13 @@ Mainline fills a template with the PR's facts and starts the session for you.
 
 See [Settings → Prompts](./settings.md#prompts) for the full list of options.
 
+## Hooks
+
+A prompt template with an `on:` line also runs by itself when a PR changes state, for example `on: ci-failed, approved`.
+- **Triggers:** approved, changes-requested, ci-failed, ci-passed, conflict, ready-to-merge, new-comment, review-requested, ready-for-review, merged, closed.
+- **Scope:** `scope:` limits the hook to repos (`owner/repo`, `owner/*`, `*`). `role:` is `authored` (default, your own PRs), `reviewing` or `any`. `when:` adds a PR-state guard.
+- **Safety:** a notification with a Cancel button counts down before each launch (10s by default). Hooks are held when notifications are off, never fire for your own comments, and run at most once per PR and trigger every 30 minutes and 10 times an hour. A hook never runs the checkout step.
+
 ## Comment templates
 
 Press `W` on a PR, or right-click → **Comment**.

@@ -729,6 +729,8 @@ final class MainlineSettings: ObservableObject {
         static let writeActionsEnabled  = "writeActionsEnabled"
         static let mergeMethodPreference = "mergeMethodPreference"
         static let promptTerminal        = "promptTerminal"
+        static let hooksPaused           = "hooksPaused"
+        static let hookCountdownSeconds  = "hookCountdownSeconds"
         static let prOpenTarget         = "prOpenTarget"
         static let linearRepoFilter     = "linearRepoFilter"
         static let defaultSnoozeDuration = "defaultSnoozeDuration"
@@ -877,6 +879,16 @@ final class MainlineSettings: ObservableObject {
     /// The user's preferred merge method for in-app merges. Default `.auto`.
     @Published var mergeMethodPreference: MergeMethodPreference {
         didSet { defaults.set(mergeMethodPreference.rawValue, forKey: Keys.mergeMethodPreference) }
+    }
+
+    /// Master switch for PR hooks (templates with `on:`). Paused = nothing launches.
+    @Published var hooksPaused: Bool {
+        didSet { defaults.set(hooksPaused, forKey: Keys.hooksPaused) }
+    }
+
+    /// Seconds a hook waits (with a Cancel button on its notification) before it launches. 0 = at once.
+    @Published var hookCountdownSeconds: Int {
+        didSet { defaults.set(hookCountdownSeconds, forKey: Keys.hookCountdownSeconds) }
     }
 
     /// Terminal app CLI prompt-template harnesses open in (Settings → Prompts).
@@ -1701,6 +1713,10 @@ final class MainlineSettings: ObservableObject {
         // Merge method preference — default Auto (picks the repo's allowed method)
         mergeMethodPreference = defaults.string(forKey: Keys.mergeMethodPreference)
             .flatMap { MergeMethodPreference(rawValue: $0) } ?? .auto
+
+        // Hooks — load only (persisted by their didSets)
+        hooksPaused = defaults.bool(forKey: Keys.hooksPaused)
+        hookCountdownSeconds = defaults.object(forKey: Keys.hookCountdownSeconds) as? Int ?? 10
 
         // Terminal for prompt-template CLI harnesses — load only (persisted by its didSet)
         promptTerminal = defaults.string(forKey: Keys.promptTerminal).flatMap(PromptTerminal.init(rawValue:)) ?? .auto

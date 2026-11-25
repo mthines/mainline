@@ -32,6 +32,8 @@ struct PromptsSettingsView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
 
+        hooksSection
+
         Section("Templates") {
             if store.templates.isEmpty {
                 Text("No templates yet.").foregroundStyle(.secondary)
@@ -148,6 +150,59 @@ struct PromptsSettingsView: View {
                 .disabled(index == count - 1).help("Lower priority")
         }
         .buttonStyle(.borderless)
+    }
+
+    // MARK: Hooks
+
+    private var hooks: [PromptTemplate] { store.templates.filter { !$0.on.trimmingCharacters(in: .whitespaces).isEmpty } }
+
+    @ViewBuilder private var hooksSection: some View {
+        Section("Hooks") {
+            Text("A template with an `on:` line also runs by itself when a PR changes state. Each launch is announced by a notification you can cancel (with notifications off, hooks are held unless the countdown is 0). Edit the file to change triggers, repos, role or prompt. New Hook creates an inactive file: uncomment its `on:` line to turn it on.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Pause all hooks", isOn: $settings.hooksPaused)
+            Stepper(value: $settings.hookCountdownSeconds, in: 0...120, step: 5) {
+                Text(settings.hookCountdownSeconds == 0
+                     ? "Start immediately (no countdown)"
+                     : "Wait \(settings.hookCountdownSeconds)s before starting")
+            }
+            if hooks.isEmpty {
+                Text("No hooks yet.").foregroundStyle(.secondary)
+            }
+            ForEach(hooks) { hook in
+                let parsed = PRHookEngine.parseTriggers(hook.on)
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hook.name)
+                        Text(hookSummary(hook)).font(.caption).foregroundStyle(.secondary)
+                        if !parsed.unknown.isEmpty {
+                            Label("Unknown trigger: \(parsed.unknown.joined(separator: ", "))",
+                                  systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                    }
+                    Spacer()
+                    Button("Open in Editor") { store.openInEditor(hook) }
+                }
+            }
+            HStack {
+                Button {
+                    store.openInEditor(store.newHook())
+                } label: { Label("New Hook", systemImage: "plus") }
+                Spacer()
+                Button("Open Folder") { store.revealPromptsFolder() }
+            }
+            Text("Triggers: " + HookTrigger.allCases.map(\.rawValue).joined(separator: ", "))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func hookSummary(_ h: PromptTemplate) -> String {
+        let triggers = PRHookEngine.parseTriggers(h.on).triggers.map(\.rawValue).joined(separator: ", ")
+        let role = HookRole.parse(h.hookRole).rawValue
+        let scope = h.hookScope.isEmpty ? "all repos" : h.hookScope
+        return "on \(triggers) · \(role) PRs · \(scope)"
     }
 
     // MARK: Editor

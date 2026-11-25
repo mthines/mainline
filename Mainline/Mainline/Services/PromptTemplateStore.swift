@@ -231,6 +231,27 @@ final class PromptTemplateStore: ObservableObject {
         NSWorkspace.shared.open(promptsDirectory)
     }
 
+    /// Opens a template's file in the user's default editor for `.md`.
+    func openInEditor(_ template: PromptTemplate) {
+        NSWorkspace.shared.open(promptsDirectory.appendingPathComponent(template.fileName))
+    }
+
+    /// An INACTIVE starter hook (its `on:` line is commented out), saved and returned so the caller can open it.
+    func newHook() -> PromptTemplate {
+        var t = newTemplate()
+        t.name = "New hook"
+        t.fileName = PromptEngine.fileName(forName: t.name, existing: Set(templates.map(\.fileName)))
+        t.body = "In a new git worktree of {{pr.branch}}, investigate the failing checks on {{pr.url}} and push a fix."
+        // Inert until activated: a live `on:` with no scope would run on every repo at once.
+        let text = PromptEngine.serialize(t).replacingOccurrences(
+            of: "checkout: false\n",
+            with: "checkout: false\n# Uncomment to activate (see README.txt):\n# on: ci-failed\n# scope: owner/repo\n")
+        try? FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
+        try? text.write(to: promptsDirectory.appendingPathComponent(t.fileName), atomically: true, encoding: .utf8)
+        reload()
+        return t
+    }
+
     func openConfig() {
         seedIfNeeded()
         NSWorkspace.shared.open(configURL)

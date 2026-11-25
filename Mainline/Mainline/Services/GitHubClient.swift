@@ -863,6 +863,9 @@ final class GitHubClient {
         let lastReviewIsBot  = PRSnapshot.isBot(typename: lastReviewAuthor?.typename,
                                                 login: lastReviewAuthor?.login)
 
+        let lastCommentIsViewer = PRSnapshot.loginsMatch(lastCommentAuthor?.login ?? "", myLogin)
+        let lastReviewIsViewer  = PRSnapshot.loginsMatch(lastReviewAuthor?.login ?? "", myLogin)
+
         // Derive a coarse reviewState for diff-engine continuity and open/in-review split.
         let reviewState: ReviewState
         switch decision {
@@ -954,6 +957,8 @@ final class GitHubClient {
             reviewCount:        reviewCount,
             lastCommentIsBot:   lastCommentIsBot,
             lastReviewIsBot:    lastReviewIsBot,
+            lastCommentIsViewer: lastCommentIsViewer,
+            lastReviewIsViewer: lastReviewIsViewer,
             updatedAt:          node.updatedAt ?? "",
             author:             authorLogin,
             requestedReviewers: requestedReviewers,

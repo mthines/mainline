@@ -30,6 +30,12 @@ struct PromptTemplate: Identifiable, Equatable {
     /// Prompt text for a harness that needs its own wording (Claude Code has slash
     /// commands, Agent0 does not). A harness without an entry uses `body`.
     var harnessBodies: [String: String] = [:]
+    /// Hook triggers (`on: ci-failed, approved`, see `PRHookEngine`). Empty = a plain template.
+    var on: String = ""
+    /// Hook repo scope (`owner/repo`, `owner/*`, `*`; comma-separated, empty = everywhere).
+    var hookScope: String = ""
+    /// Hook role: `authored` (default), `reviewing` or `any`.
+    var hookRole: String = ""
 
     var id: String { fileName }
 
@@ -505,7 +511,10 @@ enum PromptEngine {
             when: meta["when"] ?? "",
             priority: Int(meta["priority"] ?? "") ?? 0,
             extraHarnesses: Array(keys.dropFirst()),
-            harnessBodies: sections.bodies
+            harnessBodies: sections.bodies,
+            on: meta["on"] ?? "",
+            hookScope: meta["scope"] ?? "",
+            hookRole: meta["role"] ?? ""
         )
     }
 
@@ -542,7 +551,7 @@ enum PromptEngine {
         name: \(t.name)
         harness: \(t.harnessKeys.joined(separator: ", "))
         checkout: \(t.checkout ? "true" : "false")
-        \(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")---
+        \(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")---
         \(t.body)
         \(sections)
         """
@@ -829,6 +838,23 @@ enum PromptStarters {
         when: authored+conflict, authored+ci-failing
         # someone else's PR, not a draft
         when: reviewing+ready
+
+    Hooks: run a template automatically
+    -----------------------------------
+    Add `on:` and the template ALSO runs by itself when a poll sees that change. A countdown
+    notification (Cancel button) shows first; Settings → Prompts can pause all hooks.
+
+        on: approved, ci-failed          # triggers, comma-separated
+        scope: acme/*, me/side-project   # optional: owner/repo, owner/*, * (default everywhere)
+        role: authored                   # authored (default) | reviewing | any
+        when: !conflict                  # optional extra state guard, as above
+
+    Triggers: approved, changes-requested, ci-failed, ci-passed, conflict, ready-to-merge,
+    new-comment, review-requested, ready-for-review, merged, closed. A hook never fires for a PR's first
+    sighting, at most once per PR + trigger per 30 minutes, and at most 10 launches an hour.
+    `role` defaults to authored so an agent never starts on a stranger's PR unless you say so.
+    A hook never runs the checkout step (parallel hooks would switch branches in one clone):
+    have the prompt create its own worktree from {{pr.branch}}.
 
     Comments must be on their own line: a trailing "# …" would become part of the value.
     A bad `when:` only switches the suggestion off — the template still runs.
