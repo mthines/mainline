@@ -158,7 +158,7 @@ struct PromptsSettingsView: View {
 
     @ViewBuilder private var hooksSection: some View {
         Section("Hooks") {
-            Text("A template with an `on:` line also runs by itself when a PR changes state. Each launch is announced by a notification you can cancel (with notifications off, hooks are held unless the countdown is 0). Edit the file to change triggers, repos, role or prompt. "New Hook" creates an inactive file: uncomment its `on:` line to turn it on.")
+            Text("A template with an `on:` line also runs by itself when a PR changes state. Each launch is announced by a notification you can cancel (with notifications off, hooks are held unless the countdown is 0). Edit the file to change triggers, repos, role or prompt. New Hook creates an inactive file: uncomment its `on:` line to turn it on.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Pause all hooks", isOn: $settings.hooksPaused)
             Stepper(value: $settings.hookCountdownSeconds, in: 0...120, step: 5) {
