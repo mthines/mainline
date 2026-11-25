@@ -3,26 +3,31 @@ import Foundation
 /// Impure shell for PR hooks: turns poll events into agent launches, with a visible,
 /// cancellable countdown. A hook is a prompt template with `on:` (see `PRHookEngine`).
 extension PRManager {
-    func handleHookEvents(_ events: [HookEvent]) {
+    func handleHookEvents(_ events: [HookEvent]) async {
         guard !settings.hooksPaused, RateLimitMonitor.shared.active == nil else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isHook)
         guard !hooks.isEmpty else { return }
+        let muted = settings.notifMutedNodeIds   // postponed PRs fire nothing
+        let me = settings.githubUsername
+        let launches = events.filter { !muted.contains($0.pr.nodeId) }.flatMap { event in
+            hooks.filter { PRHookEngine.matches($0, event: event, myLogin: me) }.map { (hook: $0, event: event) }
+        }
+        guard !launches.isEmpty else { return }
+
         // The countdown's only Cancel button is on the macOS notification. With banners off a hook
         // would start an agent nobody can stop, so hold it (and say why) rather than launch blind.
-        if settings.hookCountdownSeconds > 0,
-           [.denied, .silent, .notDetermined].contains(notificationAuthorization) {
-            showInfoToast("Hooks held: notifications are off, so a hook couldn't be cancelled. Enable them, or set the countdown to 0.",
-                          symbol: "bell.slash", seconds: 8)
-            return
-        }
-        let muted = settings.notifMutedNodeIds
-        let events = events.filter { !muted.contains($0.pr.nodeId) }   // postponed PRs fire nothing
-        let me = settings.githubUsername
-        for event in events {
-            for hook in hooks where PRHookEngine.matches(hook, event: event, myLogin: me) {
-                guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else { continue }
-                schedule(hook, for: event)
+        // Re-read the state: the user may have turned banners off since launch.
+        if settings.hookCountdownSeconds > 0 {
+            await refreshNotificationAuthorization()
+            guard notificationAuthorization.canDeliverBanners else {
+                showInfoToast("Hooks held: notifications are off, so a hook couldn't be cancelled. Enable them, or set the countdown to 0.",
+                              symbol: "bell.slash", seconds: 8)
+                return
             }
+        }
+        for (hook, event) in launches {
+            guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else { continue }
+            schedule(hook, for: event)
         }
     }
 

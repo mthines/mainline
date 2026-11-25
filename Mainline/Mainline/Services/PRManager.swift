@@ -1200,7 +1200,7 @@ final class PRManager: ObservableObject {
             let result = PRHookEngine.doneEvents(seenOpen: self.seenOpenIds, fired: self.firedDoneIds, done: done)
             self.firedDoneIds = result.fired
             // First Done set of the launch: PRs finished while the app was closed are not news.
-            if self.doneHooksArmed { self.handleHookEvents(result.events) }
+            if self.doneHooksArmed { Task { await self.handleHookEvents(result.events) } }
             self.doneHooksArmed = true
         }
 
@@ -1236,7 +1236,7 @@ final class PRManager: ObservableObject {
 
         NotificationCenter.default.addObserver(forName: .mainlineHookEvents, object: nil, queue: .main) { [weak self] n in
             guard let self, let events = n.userInfo?["events"] as? [HookEvent] else { return }
-            Task { @MainActor in self.handleHookEvents(events) }
+            Task { @MainActor in await self.handleHookEvents(events) }
         }
         NotificationCenter.default.addObserver(forName: .mainlineHookCancel, object: nil, queue: .main) { [weak self] n in
             guard let self, let id = n.userInfo?["hookId"] as? String else { return }
