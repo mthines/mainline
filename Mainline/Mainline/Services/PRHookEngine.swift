@@ -87,7 +87,7 @@ enum PRHookEngine {
         return (triggers, unknown)
     }
 
-    static func isHook(_ t: PromptTemplate) -> Bool { !parseTriggers(t.on).triggers.isEmpty }
+    static func isHook(_ t: PromptTemplate) -> Bool { t.subject.covers(.prs) && !parseTriggers(t.on).triggers.isEmpty }
 
     /// Whether `template` fires for `event`: trigger, repo scope, role, then the `when:` guard.
     static func matches(_ t: PromptTemplate, event: HookEvent, myLogin: String) -> Bool {
