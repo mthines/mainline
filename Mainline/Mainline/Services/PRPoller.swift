@@ -761,6 +761,7 @@ final class PRPoller {
         // to review lists quietly — no banner, no unread dot — so turning the
         // setting on can't announce every open PR on the team. A direct request (or
         // one for a configured focus team) ends the quiet.
+        var quietDiscoveredIds = Set<String>()
         if settings.discoverFocusAuthorPRs {
             let configured = settings.reviewFocusByOrg
             let placement = settings.committedPRPlacement
@@ -785,6 +786,7 @@ final class PRPoller {
                 }
             }
             let quietIds = Set(unique.filter(quiet).map(\.nodeId))
+            quietDiscoveredIds = quietIds
             if !quietIds.isEmpty {
                 transitions.removeAll { quietIds.contains($0.prNodeId) }
             }
@@ -795,7 +797,7 @@ final class PRPoller {
         // Hooks diff the same before/after arrays, so a PR carried forward verbatim or seen for
         // the first time fires nothing. A postponed PR (permanent mute) fires no hook either.
         let hookEvents = PRHookEngine.events(previous: previousSnapshots, next: unique, myLogin: myLogin)
-            .filter { !muted.contains($0.pr.nodeId) }
+            .filter { !muted.contains($0.pr.nodeId) && !quietDiscoveredIds.contains($0.pr.nodeId) }
         // The first poll of a launch only re-bases: changes made while the app was closed are not
         // something to auto-launch an agent for.
         let hooksArmed = hooksHavePolledOnce
