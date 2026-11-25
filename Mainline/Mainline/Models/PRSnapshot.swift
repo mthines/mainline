@@ -293,6 +293,9 @@ struct PRSnapshot: Codable, Equatable {
     var lastCommentIsBot: Bool
     /// Whether the most recent review was authored by a bot/app. false when none.
     var lastReviewIsBot: Bool
+    /// The latest comment / review was written by the viewer (a hook must not fire on your own words).
+    var lastCommentIsViewer: Bool = false
+    var lastReviewIsViewer: Bool = false
     var updatedAt: String           // ISO 8601
     let author: String              // PR author login
     var requestedReviewers: [String] // logins requested for review (User reviewers)
@@ -432,6 +435,8 @@ struct PRSnapshot: Codable, Equatable {
         reviewCount: Int = 0,
         lastCommentIsBot: Bool = false,
         lastReviewIsBot: Bool = false,
+        lastCommentIsViewer: Bool = false,
+        lastReviewIsViewer: Bool = false,
         updatedAt: String,
         author: String,
         requestedReviewers: [String],
@@ -473,6 +478,8 @@ struct PRSnapshot: Codable, Equatable {
         self.reviewCount = reviewCount
         self.lastCommentIsBot = lastCommentIsBot
         self.lastReviewIsBot = lastReviewIsBot
+        self.lastCommentIsViewer = lastCommentIsViewer
+        self.lastReviewIsViewer = lastReviewIsViewer
         self.updatedAt = updatedAt
         self.author = author
         self.requestedReviewers = requestedReviewers
@@ -504,7 +511,7 @@ struct PRSnapshot: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case nodeId, number, title, htmlUrl, repoFullName, isDraft, state
         case merged, closed, reviewDecision, ciStatus, reviewState
-        case commentCount, reviewCount, lastCommentIsBot, lastReviewIsBot
+        case commentCount, reviewCount, lastCommentIsBot, lastReviewIsBot, lastCommentIsViewer, lastReviewIsViewer
         case updatedAt, author, requestedReviewers, requestedTeams, tabs
         case mergeable, headRefName, baseRefName, linesAdded, linesDeleted
         case sensitivePathFlags, unresolvedThreadCount
@@ -531,6 +538,8 @@ struct PRSnapshot: Codable, Equatable {
         reviewCount           = try c.decodeIfPresent(Int.self,        forKey: .reviewCount) ?? 0
         lastCommentIsBot      = try c.decodeIfPresent(Bool.self,       forKey: .lastCommentIsBot) ?? false
         lastReviewIsBot       = try c.decodeIfPresent(Bool.self,       forKey: .lastReviewIsBot) ?? false
+        lastCommentIsViewer   = try c.decodeIfPresent(Bool.self,       forKey: .lastCommentIsViewer) ?? false
+        lastReviewIsViewer    = try c.decodeIfPresent(Bool.self,       forKey: .lastReviewIsViewer) ?? false
         updatedAt             = try c.decode(String.self,              forKey: .updatedAt)
         author                = try c.decode(String.self,              forKey: .author)
         requestedReviewers    = try c.decode([String].self,            forKey: .requestedReviewers)

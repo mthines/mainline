@@ -55,8 +55,8 @@ enum PRHookEngine {
             let oldTokens = PromptState.active(pr: old, myLogin: myLogin)
             if !oldTokens.contains("ready-to-merge"),
                PromptState.active(pr: pr, myLogin: myLogin).contains("ready-to-merge") { add(.readyToMerge) }
-            let newComment = pr.commentCount > old.commentCount && !pr.lastCommentIsBot
-            let newReview = pr.reviewCount > old.reviewCount && !pr.lastReviewIsBot
+            let newComment = pr.commentCount > old.commentCount && !pr.lastCommentIsBot && !pr.lastCommentIsViewer
+            let newReview = pr.reviewCount > old.reviewCount && !pr.lastReviewIsBot && !pr.lastReviewIsViewer
             if newComment || newReview { add(.newComment) }
             if !old.tabs.contains(.forMe), pr.tabs.contains(.forMe) { add(.reviewRequested) }
             if old.isDraft, !pr.isDraft { add(.readyForReview) }
@@ -157,6 +157,10 @@ enum PRHookChecks {
         assert(triggers(pr(mergeable: nil), pr(mergeable: false)).contains(.conflict), "UNKNOWN → conflicting still fires")
         assert(triggers(pr(mergeable: false), pr(mergeable: false)).isEmpty, "still conflicting fires nothing")
         assert(triggers(pr(draft: true), pr()).contains(.readyForReview), "draft → ready")
+        var mine = pr(); mine.commentCount = 1; mine.lastCommentIsViewer = true
+        var theirs = pr(); theirs.commentCount = 1
+        assert(triggers(pr(), mine).isEmpty, "your own comment fires no new-comment")
+        assert(triggers(pr(), theirs) == [.newComment], "someone else's comment does")
 
         let t = PRHookEngine.parseTriggers("ci-failed, Approved, nope")
         assert(t.triggers == [.ciFailed, .approved] && t.unknown == ["nope"], "parseTriggers")
