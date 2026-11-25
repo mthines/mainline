@@ -46,13 +46,19 @@ enum HookRole: String {
 
 /// Pure hook logic: which events a poll produced, which templates they fire, and how often.
 enum PRHookEngine {
-    /// Events between two snapshot sets. A PR with no previous snapshot is a baseline, never
-    /// an event — so the first poll, and a PR first seen after an incomplete fetch, fire nothing.
+    /// Events between two snapshot sets. An empty `previous` is a baseline (first poll): no events.
+    /// A PR missing from a non-empty `previous` fires only `review-requested` (a PR you are asked to
+    /// review first appears exactly that way); the carry-forward guard keeps incomplete fetches from
+    /// making old PRs look new.
     static func events(previous: [String: PRSnapshot], next: [PRSnapshot], myLogin: String) -> [HookEvent] {
+        guard !previous.isEmpty else { return [] }
         var out: [HookEvent] = []
         for pr in next {
-            guard let old = previous[pr.nodeId] else { continue }
             func add(_ t: HookTrigger) { out.append(HookEvent(trigger: t, pr: pr)) }
+            guard let old = previous[pr.nodeId] else {
+                if pr.tabs.contains(.forMe), pr.reviewRequestSource(myLogin: myLogin) != .none { add(.reviewRequested) }
+                continue
+            }
 
             if old.reviewDecision != .approved, pr.reviewDecision == .approved { add(.approved) }
             if old.reviewDecision != .changesRequested, pr.reviewDecision == .changesRequested { add(.changesRequested) }
@@ -151,7 +157,11 @@ enum PRHookChecks {
         func triggers(_ a: PRSnapshot, _ b: PRSnapshot) -> Set<HookTrigger> {
             Set(PRHookEngine.events(previous: [a.nodeId: a], next: [b], myLogin: "me").map(\.trigger))
         }
-        assert(PRHookEngine.events(previous: [:], next: [pr()], myLogin: "me").isEmpty, "new PR is a baseline, not an event")
+        assert(PRHookEngine.events(previous: [:], next: [pr()], myLogin: "me").isEmpty, "empty previous is a baseline, not an event")
+        var asked = pr("n2", author: "them"); asked.tabs = [.forMe]; asked.requestedReviewers = ["me"]
+        assert(PRHookEngine.events(previous: ["n1": pr()], next: [asked], myLogin: "me").map(\.trigger) == [.reviewRequested],
+               "a new PR already asking for you fires review-requested")
+        assert(PRHookEngine.events(previous: ["n1": pr()], next: [pr("n3")], myLogin: "me").isEmpty, "other new PRs fire nothing")
         assert(triggers(pr(), pr(decision: .approved)) == [.approved], "approved")
         assert(triggers(pr(decision: .approved), pr(decision: .approved)).isEmpty, "steady state fires nothing")
         assert(triggers(pr(), pr(ci: .failure)).contains(.ciFailed), "ci-failed")
