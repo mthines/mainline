@@ -13,6 +13,24 @@ enum HookTrigger: String, CaseIterable {
     case readyForReview = "ready-for-review"
     case merged
     case closed
+
+    /// One line per trigger for the New Hook starter's comments. Exhaustive, so a new trigger
+    /// does not compile until it says what it means.
+    var summary: String {
+        switch self {
+        case .approved: return "a reviewer approved"
+        case .changesRequested: return "a reviewer requested changes"
+        case .ciFailed: return "CI went red"
+        case .ciPassed: return "CI went green"
+        case .conflict: return "the PR got a merge conflict"
+        case .readyToMerge: return "approved, green and mergeable"
+        case .newComment: return "a human other than you commented or reviewed"
+        case .reviewRequested: return "you or your team was asked to review (needs role: reviewing or any)"
+        case .readyForReview: return "a draft was marked ready"
+        case .merged: return "the PR merged"
+        case .closed: return "the PR closed without merging"
+        }
+    }
 }
 
 struct HookEvent: Equatable {
@@ -131,9 +149,37 @@ enum PRHookEngine {
     }
 }
 
+extension PRHookEngine {
+    /// The commented-out frontmatter a New Hook starts with: the activation lines, then every
+    /// option and trigger, so the file explains itself without the README. Lines start with `#`,
+    /// which the frontmatter parser skips.
+    static var starterFrontmatter: String {
+        let width = HookTrigger.allCases.map(\.rawValue.count).max() ?? 0
+        let triggers = HookTrigger.allCases.map {
+            "#   \($0.rawValue.padding(toLength: width, withPad: " ", startingAt: 0))  \($0.summary)"
+        }
+        return ([
+            "# Uncomment `on:` (and narrow `scope:`) to activate:",
+            "# on: ci-failed",
+            "# scope: owner/repo",
+            "#",
+            "# on:    one or more triggers, comma-separated",
+        ] + triggers + [
+            "# scope: owner/repo, owner/*, or * (default: every repo)",
+            "# role:  authored (default) | reviewing | any",
+            "# when:  optional state guard, e.g. !conflict (see README.txt)",
+        ]).joined(separator: "\n") + "\n"
+    }
+}
+
 #if DEBUG
 enum PRHookChecks {
     static func run() {
+        for t in HookTrigger.allCases {
+            assert(PRHookEngine.starterFrontmatter.contains("#   \(t.rawValue) "), "starter lists \(t.rawValue)")
+        }
+        assert(PRHookEngine.starterFrontmatter.split(separator: "\n").allSatisfy { $0.hasPrefix("#") },
+               "starter frontmatter is all comments")
         func pr(_ id: String = "n1", ci: CIStatus = .pending, decision: ReviewDecision? = nil, mergeable: Bool? = true,
                 draft: Bool = false, author: String = "me") -> PRSnapshot {
             PRSnapshot(
