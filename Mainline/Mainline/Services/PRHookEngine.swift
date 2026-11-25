@@ -65,7 +65,7 @@ enum PRHookEngine {
             let failed: (CIStatus) -> Bool = { $0 == .failure || $0 == .error }
             if !failed(old.ciStatus), failed(pr.ciStatus) { add(.ciFailed) }
             if old.ciStatus != .success, pr.ciStatus == .success { add(.ciPassed) }
-            if old.mergeable != false, pr.mergeable == false { add(.conflict) }
+            if old.mergeable == true, pr.mergeable == false { add(.conflict) }   // nil (UNKNOWN) is not clean
             let oldTokens = PromptState.active(pr: old, myLogin: myLogin)
             if !oldTokens.contains("ready-to-merge"),
                PromptState.active(pr: pr, myLogin: myLogin).contains("ready-to-merge") { add(.readyToMerge) }

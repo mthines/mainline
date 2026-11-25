@@ -37,6 +37,7 @@ final class PRPoller {
     private let client:       GitHubClient
     private let store:        PRStateStore
     private let notifications: NotificationService
+    private var hooksHavePolledOnce = false
     private let settings:     MainlineSettings
 
     private var pollingTask: Task<Void, Never>?
@@ -795,7 +796,11 @@ final class PRPoller {
         // the first time fires nothing. A postponed PR (permanent mute) fires no hook either.
         let hookEvents = PRHookEngine.events(previous: previousSnapshots, next: unique, myLogin: myLogin)
             .filter { !muted.contains($0.pr.nodeId) }
-        if !hookEvents.isEmpty {
+        // The first poll of a launch only re-bases: changes made while the app was closed are not
+        // something to auto-launch an agent for.
+        let hooksArmed = hooksHavePolledOnce
+        hooksHavePolledOnce = true
+        if hooksArmed, !hookEvents.isEmpty {
             NotificationCenter.default.post(name: .mainlineHookEvents, object: nil, userInfo: ["events": hookEvents])
         }
 
