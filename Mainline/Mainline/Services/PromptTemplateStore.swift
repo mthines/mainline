@@ -241,9 +241,14 @@ final class PromptTemplateStore: ObservableObject {
         var t = newTemplate()
         t.name = "New hook"
         t.fileName = PromptEngine.fileName(forName: t.name, existing: Set(templates.map(\.fileName)))
-        t.on = "ci-failed"
         t.body = "CI failed on {{pr.url}}. Investigate the failing checks and push a fix."
-        save(t)
+        // Inert until activated: a live `on:` with no scope would run on every repo at once.
+        let text = PromptEngine.serialize(t).replacingOccurrences(
+            of: "checkout: false\n",
+            with: "checkout: false\n# Uncomment to activate (see README.txt):\n# on: ci-failed\n# scope: owner/repo\n")
+        try? FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
+        try? text.write(to: promptsDirectory.appendingPathComponent(t.fileName), atomically: true, encoding: .utf8)
+        reload()
         return t
     }
 
