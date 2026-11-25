@@ -172,9 +172,11 @@ enum PRHookEngine {
             }
         }
         for issue in next {
-            guard let old = previous[issue.nodeId], issue.commentCount > old.commentCount,
-                  let last = issue.comments.last,
-                  !PRSnapshot.loginsMatch(last.author, myLogin), !last.isBot else { continue }
+            guard let old = previous[issue.nodeId], issue.commentCount > old.commentCount else { continue }
+            // Every comment added since the last poll (as far as the fetched tail reaches), not just
+            // the newest: Bob's comment still counts when you or a bot replied before the next poll.
+            let added = issue.comments.suffix(issue.commentCount - old.commentCount)
+            guard added.contains(where: { !PRSnapshot.loginsMatch($0.author, myLogin) && !$0.isBot }) else { continue }
             out.append(IssueHookEvent(trigger: .newComment, issue: issue))
         }
         out += closed.filter { previous[$0.nodeId] != nil }.map { IssueHookEvent(trigger: .closed, issue: $0) }
@@ -427,6 +429,11 @@ enum IssueHookChecks {
         assert(triggers([a], [issue(comments: [reply("bob")])]) == [.newComment], "someone else's comment")
         assert(triggers([a], [issue(comments: [reply("Mads")])]).isEmpty, "your own comment fires nothing")
         assert(triggers([a], [issue(comments: [reply("github-actions", bot: true)])]).isEmpty, "a bot comment fires nothing")
+        assert(triggers([a], [issue(comments: [reply("bob"), reply("mads")])]) == [.newComment],
+               "someone's comment counts even when yours came after it in the same poll")
+        let seen = issue(comments: [reply("bob")])
+        assert(triggers([seen], [issue(comments: [reply("bob"), reply("mads")])]).isEmpty,
+               "an already-seen comment does not fire again behind your new one")
         assert(triggers([], [issue(comments: [reply("bob")])]).isEmpty, "a first-seen issue's comments are not new")
         assert(triggers([a], [], closed: [a]) == [.closed], "closed")
         assert(triggers([a], [], closed: [issue("x")]).isEmpty, "closed only for an issue this app followed")
