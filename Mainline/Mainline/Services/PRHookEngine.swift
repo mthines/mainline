@@ -157,12 +157,12 @@ enum PRHookEngine {
 
     /// Issue-hook events from one issue poll. `transitions` is that poll's `IssueDiffEngine.diff`
     /// (so watch levels, seeding and the new-issue age limit already apply); `closed` are the
-    /// issues that left the followed set and GitHub reports CLOSED. An empty `previous` is a
-    /// baseline: no events.
+    /// issues that left the followed set and GitHub reports CLOSED. The caller suppresses a
+    /// launch's first poll (its baseline is from the last run).
     static func issueEvents(previous: [String: IssueSnapshot], next: [IssueSnapshot],
                             transitions: [IssueTransition], closed: [IssueSnapshot],
                             myLogin: String) -> [IssueHookEvent] {
-        guard !previous.isEmpty, !myLogin.isEmpty else { return [] }
+        guard !myLogin.isEmpty else { return [] }
         var out: [IssueHookEvent] = transitions.compactMap {
             switch $0 {
             case .newIssue(let i): return IssueHookEvent(trigger: .newIssue, issue: i)
@@ -204,7 +204,10 @@ enum PRHookEngine {
         case .reviewing: return false
         case .any: break
         }
-        return t.when.trimmingCharacters(in: .whitespaces).isEmpty
+        guard t.when.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        // A `for: both` hook written for PRs (`{{pr.*}}`) cannot render for an issue: skip it here,
+        // before the countdown and the throttle, rather than fail after both.
+        return (try? PromptEngine.renderBody(t, context: PromptTarget(issues: [event.issue]).context)) != nil
     }
 
     /// Whether `template` fires for `event`: trigger, repo scope, role, then the `when:` guard.
@@ -383,7 +386,7 @@ enum IssueHookChecks {
         }
 
         let a = issue()
-        assert(triggers([], [a], [.newIssue(a)]).isEmpty, "an empty previous is a baseline: no events")
+        assert(triggers([], [a], [.assigned(a)]) == [.assigned], "with nothing followed before, a transition still fires")
         assert(triggers([a], [a, issue("i2")], [.newIssue(issue("i2"))]) == [.newIssue], "new-issue")
         assert(triggers([a], [a], [.assigned(a)]) == [.assigned], "assigned")
         assert(triggers([a], [a], [.mentioned(a)]) == [.mentioned], "mentioned")
@@ -432,6 +435,12 @@ enum IssueHookChecks {
         both.subject = .both; both.on = "closed, approved, nope"
         assert(PRHookEngine.isHook(both) && PRHookEngine.isIssueHook(both), "for: both is a hook on either")
         assert(PRHookEngine.unknownTriggers(both, issues: true) == ["nope"], "unknown words for for: both")
+        both.hookRole = "any"
+        let closedIssue = IssueHookEvent(trigger: .closed, issue: a)
+        both.body = "Look at {{pr.url}}"
+        assert(!PRHookEngine.matches(both, issueEvent: closedIssue, myLogin: me), "a {{pr.*}} body never fires on an issue")
+        both.body = "Look at {{issue.url}}"
+        assert(PRHookEngine.matches(both, issueEvent: closedIssue, myLogin: me), "an {{issue.*}} body does")
         var issuesOnly = both; issuesOnly.subject = .issues
         assert(PRHookEngine.unknownTriggers(issuesOnly, issues: true) == ["approved", "nope"],
                "a PR trigger is unknown on a for: issues hook")
