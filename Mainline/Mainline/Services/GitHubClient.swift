@@ -320,6 +320,7 @@ private struct GraphQLCommitNode: Decodable {
 }
 
 private struct GraphQLCommit: Decodable {
+    let oid: String?
     let statusCheckRollup: GraphQLRollup?
 }
 
@@ -1019,6 +1020,7 @@ final class GitHubClient {
             viewerHasApproved:  viewerHasApproved,
             hasApproval:        hasApproval,
             viewerIsCommitter:  viewerIsCommitter,
+            headOid:            CheckContextsGate.enabled ? (node.commits?.nodes.first?.commit.oid ?? "") : "",
             checkResults:       CheckContexts.merged(
                 node.commits?.nodes.first?.commit.statusCheckRollup?.contexts?.nodes?.compactMap { $0?.result } ?? [])
         )
@@ -1085,7 +1087,7 @@ final class GitHubClient {
         commits(last: 1) {
           nodes {
             commit {
-              statusCheckRollup { state\(CheckContexts.selection(enabled: CheckContextsGate.enabled)) }
+              \(CheckContexts.commitSelection(enabled: CheckContextsGate.enabled))statusCheckRollup { state\(CheckContexts.selection(enabled: CheckContextsGate.enabled)) }
             }
           }
         }

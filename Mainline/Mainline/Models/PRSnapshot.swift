@@ -430,6 +430,9 @@ struct PRSnapshot: Codable, Equatable {
     /// check hook exists (else empty). Feeds `PRHookEngine.checkEvents` and nothing else: NOT
     /// compared in PRDiffEngine. Decoded with `decodeIfPresent` + default `[]`.
     var checkResults: [CheckResult]
+    /// Head commit the `checkResults` belong to (empty unless fetched with them). Lets a check that
+    /// fails again after a push count as a new failure. `decodeIfPresent`, not in PRDiffEngine.
+    var headOid: String
 
     /// Total lines changed in this PR.
     var totalLines: Int { linesAdded + linesDeleted }
@@ -477,7 +480,8 @@ struct PRSnapshot: Codable, Equatable {
         viewerHasApproved: Bool = false,
         hasApproval: Bool = false,
         viewerIsCommitter: Bool = false,
-        checkResults: [CheckResult] = []
+        checkResults: [CheckResult] = [],
+        headOid: String = ""
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -522,6 +526,7 @@ struct PRSnapshot: Codable, Equatable {
         self.hasApproval = hasApproval
         self.viewerIsCommitter = viewerIsCommitter
         self.checkResults = checkResults
+        self.headOid = headOid
     }
 
     // MARK: - Codable (explicit to support decodeIfPresent defaults for new fields)
@@ -535,7 +540,7 @@ struct PRSnapshot: Codable, Equatable {
         case sensitivePathFlags, unresolvedThreadCount
         case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
         case vercelPreviewUrl, vercelPreviewCheckedAt
-        case labels, authorIsBot, mergeQueueState, mergeQueuePosition, viewerHasApproved, hasApproval, viewerIsCommitter, checkResults
+        case labels, authorIsBot, mergeQueueState, mergeQueuePosition, viewerHasApproved, hasApproval, viewerIsCommitter, checkResults, headOid
     }
 
     init(from decoder: Decoder) throws {
@@ -584,6 +589,7 @@ struct PRSnapshot: Codable, Equatable {
         hasApproval           = try c.decodeIfPresent(Bool.self,       forKey: .hasApproval) ?? false
         viewerIsCommitter     = try c.decodeIfPresent(Bool.self,       forKey: .viewerIsCommitter) ?? false
         checkResults          = try c.decodeIfPresent([CheckResult].self, forKey: .checkResults) ?? []
+        headOid               = try c.decodeIfPresent(String.self,     forKey: .headOid) ?? ""
     }
 
     // MARK: - Bot detection

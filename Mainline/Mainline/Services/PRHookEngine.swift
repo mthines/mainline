@@ -68,6 +68,9 @@ enum CheckContexts {
 
     /// The selection nested in `statusCheckRollup`, or nothing while per-check data isn't wanted,
     /// so the query text with the flag off is exactly what it was.
+    /// The head commit's oid, selected next to the rollup so a push is visible to `checkEvents`.
+    static func commitSelection(enabled: Bool) -> String { enabled ? "oid " : "" }
+
     static func selection(enabled: Bool) -> String {
         guard enabled else { return "" }
         return """
@@ -217,8 +220,13 @@ enum PRHookEngine {
         for pr in next where !pr.checkResults.isEmpty {
             guard let old = previous[pr.nodeId] else { continue }
             let before = Dictionary(old.checkResults.map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })
+            // A new head (a push) starts the checks over: what the new head reports is news even when
+            // the same check failed on the old one, or finished before the next poll. Only when BOTH
+            // snapshots carry results and a head, so an upgrade or a flag flip still fires nothing.
+            let pushed = !old.checkResults.isEmpty && !old.headOid.isEmpty && !pr.headOid.isEmpty && old.headOid != pr.headOid
             for check in pr.checkResults {
-                guard let was = before[check.name] else { continue }
+                let was: CheckState
+                if let seen = before[check.name] { was = pushed ? .other : seen } else if pushed { was = .other } else { continue }
                 if was != .failed, check.state == .failed {
                     out.append(CheckHookEvent(trigger: .checkFailed, pr: pr, check: check.name))
                 }
@@ -750,6 +758,14 @@ enum CheckHookChecks {
         json.removeValue(forKey: "checkResults")
         let decoded = try! JSONDecoder().decode(PRSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
         assert(decoded.checkResults.isEmpty, "a snapshot persisted before this field decodes with no checks")
+        // A push: failing again on the new head fires; a new check that already failed fires; no head info stays silent.
+        func at(_ oid: String, _ checks: [CheckResult]) -> PRSnapshot { var p = pr(checks: checks); p.headOid = oid; return p }
+        assert(events(at("a", [c("X", .failed)]), at("b", [c("X", .failed)])).map(\.trigger) == [.checkFailed], "failed again after a push")
+        assert(events(at("a", [c("Y", .passed)]), at("b", [c("X", .failed)])).count == 1, "a check that is new on the new head fires")
+        assert(events(at("a", [c("X", .failed)]), at("a", [c("X", .failed)])).isEmpty, "same head, still failing: nothing")
+        assert(events(at("", [c("X", .failed)]), at("b", [c("X", .failed)])).isEmpty, "previous had no head: nothing")
+        assert(events(at("a", []), at("b", [c("X", .failed)])).isEmpty, "previous had no checks: nothing")
+        assert(CheckContexts.commitSelection(enabled: false).isEmpty, "flag off: no oid in the query")
         print("CHECK HOOK absent-previous OK")
 
         // AC-5: with the flag off, check triggers are unknown and nothing is fetched.
