@@ -105,7 +105,10 @@ enum PRHookEngine {
         guard scopes.isEmpty || scopes.contains(where: { CommentEngine.patternMatches($0, repo: repo) }) else { return false }
         let state = PromptState.active(pr: event.pr, myLogin: myLogin)
         switch HookRole.parse(t.hookRole) {
-        case .authored: guard state.contains("authored") else { return false }
+        // `authored` means YOU opened it. `PromptState`'s `authored` token also covers a PR you merely
+        // committed to, and commit authorship (a `Co-authored-by:` trailer, an email) is forgeable by a
+        // stranger — so a hook never trusts it. `role: any` is the explicit opt-in.
+        case .authored: guard PRSnapshot.loginsMatch(event.pr.author, myLogin) else { return false }
         case .reviewing: guard state.contains("reviewing") else { return false }
         case .any: break
         }
@@ -167,6 +170,9 @@ enum PRHookChecks {
         assert(PRHookEngine.matches(hook, event: ev, myLogin: "me"), "authored PR matches by default")
         assert(!PRHookEngine.matches(hook, event: HookEvent(trigger: .approved, pr: pr(author: "them")), myLogin: "me"),
                "someone else's PR needs role: reviewing/any")
+        var committed = pr(author: "them"); committed.viewerIsCommitter = true
+        assert(!PRHookEngine.matches(hook, event: HookEvent(trigger: .approved, pr: committed), myLogin: "me"),
+               "a forgeable committer link is not authorship")
         hook.hookRole = "any"
         assert(PRHookEngine.matches(hook, event: HookEvent(trigger: .approved, pr: pr(author: "them")), myLogin: "me"), "role any")
         assert(!PRHookEngine.matches(hook, event: HookEvent(trigger: .ciFailed, pr: pr()), myLogin: "me"), "wrong trigger")
