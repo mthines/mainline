@@ -7,6 +7,16 @@ extension PRManager {
         guard !settings.hooksPaused, RateLimitMonitor.shared.active == nil else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isHook)
         guard !hooks.isEmpty else { return }
+        // The countdown's only Cancel button is on the macOS notification. With banners off a hook
+        // would start an agent nobody can stop, so hold it (and say why) rather than launch blind.
+        if settings.hookCountdownSeconds > 0,
+           [.denied, .silent, .notDetermined].contains(notificationAuthorization) {
+            showInfoToast("Hooks held: notifications are off, so a hook couldn't be cancelled. Enable them, or set the countdown to 0.",
+                          symbol: "bell.slash", seconds: 8)
+            return
+        }
+        let muted = settings.notifMutedNodeIds
+        let events = events.filter { !muted.contains($0.pr.nodeId) }   // postponed PRs fire nothing
         let me = settings.githubUsername
         for event in events {
             for hook in hooks where PRHookEngine.matches(hook, event: event, myLogin: me) {
