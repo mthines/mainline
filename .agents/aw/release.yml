@@ -4,9 +4,10 @@
 version: 1
 telemetry:
   kind: dash0-mcp                       # dash0-mcp | command
+  # Release builds export to vars.OTEL_EXPORTER_OTLP_ENDPOINT (Dash0 dev, GCP europe-west4), so query that org.
   # No Dash0 MCP server is configured for this repo, so the URL is explicit and the token comes from the env.
-  url: https://api.eu-west-1.aws.dash0.com/mcp
-  token_env: DASH0_AUTH_TOKEN           # export a read-only Dash0 token; never commit it
+  url: https://api.europe-west4.gcp.dash0-dev.com/mcp
+  token_env: DASH0_AUTH_TOKEN           # export a read-only token for the dash0-dev org; never commit it
 on_exception: ""
 environments:
   production:
