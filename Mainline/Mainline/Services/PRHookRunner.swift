@@ -20,7 +20,7 @@ extension PRManager {
         if settings.hookCountdownSeconds > 0 {
             await refreshNotificationAuthorization()
             guard notificationAuthorization.canDeliverBanners else {
-                showInfoToast("Hooks held: notifications are off, so a hook couldn't be cancelled. Enable them, or set the countdown to 0.",
+                showInfoToast("Hook skipped: notifications are off, so it couldn't be cancelled. Enable them, or set the countdown to 0.",
                               symbol: "bell.slash", seconds: 8)
                 return
             }
