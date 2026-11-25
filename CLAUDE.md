@@ -8,7 +8,14 @@ xcodebuild -scheme Mainline -configuration Debug -destination "platform=macOS" b
 
 # Quick build check after editing
 xcodebuild -scheme Mainline -configuration Debug -destination "platform=macOS" build 2>&1 | tail -5
+
+# Pure hook/issue/flag self-checks without Xcode (Linux or macOS swiftc; on macOS set SDKROOT)
+SDKROOT=$(xcrun --show-sdk-path) bash scripts/selfcheck-linux/build.sh
 ```
+
+`scripts/selfcheck-linux/build.sh` compiles a **hand-kept list** of pure source files plus
+`stubs.swift` / `main.swift` from the same folder. When a file in that list starts depending on
+another type, add that file to the list (or a stub), or the script stops compiling.
 
 ## Release
 
