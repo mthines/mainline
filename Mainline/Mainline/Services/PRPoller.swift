@@ -762,6 +762,7 @@ final class PRPoller {
         // setting on can't announce every open PR on the team. A direct request (or
         // one for a configured focus team) ends the quiet.
         var quietDiscoveredIds = Set<String>()
+        var discoveredRequests: [HookEvent] = []
         if settings.discoverFocusAuthorPRs {
             let configured = settings.reviewFocusByOrg
             let placement = settings.committedPRPlacement
@@ -783,6 +784,8 @@ final class PRPoller {
                     // "review requested from me" (`.readyForReview`).
                     transitions.append(pr.reviewRequestSource(myLogin: myLogin) == .team
                         ? .newPR(pr) : .readyForReview(pr))
+                    // Discovery tagged it `.forMe` from the start, so the hook diff can't see the request.
+                    discoveredRequests.append(HookEvent(trigger: .reviewRequested, pr: pr))
                 }
             }
             let quietIds = Set(unique.filter(quiet).map(\.nodeId))
@@ -796,7 +799,7 @@ final class PRPoller {
 
         // Hooks diff the same before/after arrays, so a PR carried forward verbatim or seen for
         // the first time fires nothing. A postponed PR (permanent mute) fires no hook either.
-        let hookEvents = PRHookEngine.events(previous: previousSnapshots, next: unique, myLogin: myLogin)
+        let hookEvents = (PRHookEngine.events(previous: previousSnapshots, next: unique, myLogin: myLogin) + discoveredRequests)
             .filter { !muted.contains($0.pr.nodeId) && !quietDiscoveredIds.contains($0.pr.nodeId) }
         // The first poll of a launch only re-bases: changes made while the app was closed are not
         // something to auto-launch an agent for.
