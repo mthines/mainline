@@ -165,11 +165,13 @@ final class IssueStore: ObservableObject {
             })
         var carriedIssues = carry.issues
         var carriedCount = carry.carried
+        var vettedStates: [String: String] = [:]   // reused by the hook `closed` lookup below
         if carry.carried > 0 {
             // Vet what was carried blind: an issue closed since it was last seen must not
             // linger, since an `is:open` search can never return it to clear it.
             let carriedIds = carry.issues.map(\.nodeId).filter { merged[$0] == nil }
             if let states = try? await client.fetchIssueStates(nodeIds: carriedIds, token: token) {
+                vettedStates = states
                 let closed = Set(carriedIds.filter { states[$0] == "CLOSED" })
                 carriedIssues.removeAll { closed.contains($0.nodeId) }
                 carriedCount -= closed.count
@@ -212,7 +214,7 @@ final class IssueStore: ObservableObject {
             issueHooksArmed = true
             if armed, FeatureFlagRegistry.issueHooksEnabled {
                 await postHookEvents(previous: previousBaseline, next: next, transitions: transitions,
-                                     myLogin: myLogin, client: client, token: token)
+                                     knownStates: vettedStates, myLogin: myLogin, client: client, token: token)
             }
         }
         pruneUnread()
@@ -222,15 +224,19 @@ final class IssueStore: ObservableObject {
 
     /// Posts this poll's issue-hook events. `closed` needs one `nodes(ids:)` lookup, made only
     /// when an issue left the followed set: an `is:open` search cannot say why it left.
+    /// `knownStates` are the states the carry-forward vetting already fetched this poll, so an
+    /// issue it dropped as closed is not looked up twice.
     private func postHookEvents(previous: [String: IssueSnapshot], next: [IssueSnapshot],
-                                transitions: [IssueTransition], myLogin: String,
+                                transitions: [IssueTransition], knownStates: [String: String], myLogin: String,
                                 client: GitHubClient, token: String) async {
         let left = PRHookEngine.leftIssues(previous: previous, next: next,
                                            watchLevel: { [settings] in settings.issueWatchLevel(forRepo: $0) })
-        var closed: [IssueSnapshot] = []
-        if !left.isEmpty, let states = try? await client.fetchIssueStates(nodeIds: left.map(\.nodeId), token: token) {
-            closed = left.filter { states[$0.nodeId] == "CLOSED" }
+        var states = knownStates
+        let unknown = left.map(\.nodeId).filter { states[$0] == nil }
+        if !unknown.isEmpty, let fetched = try? await client.fetchIssueStates(nodeIds: unknown, token: token) {
+            states.merge(fetched) { _, new in new }
         }
+        let closed = left.filter { states[$0.nodeId] == "CLOSED" }
         let events = PRHookEngine.issueEvents(previous: previous, next: next, transitions: transitions,
                                               closed: closed, myLogin: myLogin)
         guard !events.isEmpty else { return }
