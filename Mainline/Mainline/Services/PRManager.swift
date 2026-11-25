@@ -167,11 +167,15 @@ final class PRManager: ObservableObject {
             if let error = PromptEngine.blockingErrors(template, config: config).first { throw error }
             let context = target.context
             let prompt = try PromptEngine.renderBody(template, context: context)
+            // An issue prompt never checks out: `gh pr checkout` has no meaning for an issue.
             let summary = try PromptLauncher.run(
-                prompt: prompt, harnessKey: template.harness, checkout: template.checkout,
-                pr: target.primary, context: context, config: config, terminal: settings.promptTerminal)
-            TelemetryService.shared.recordTriageInteraction(target.isStack ? "run_prompt_template_stack" : "run_prompt_template")
-            showInfoToast(summary + (target.isStack ? " · \(target.prs.count) PRs" : ""), symbol: "terminal", seconds: 4)
+                prompt: prompt, harnessKey: template.harness, checkout: target.runsCheckout(template.checkout),
+                repo: target.repoFullName, context: context, config: config, terminal: settings.promptTerminal)
+            TelemetryService.shared.recordTriageInteraction(
+                target.isIssue ? "run_prompt_template_issue"
+                    : target.isStack ? "run_prompt_template_stack" : "run_prompt_template")
+            showInfoToast(summary + (target.isStack ? " · \(target.count) \(target.isIssue ? "issues" : "PRs")" : ""),
+                          symbol: "terminal", seconds: 4)
         } catch {
             showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
         }
@@ -185,14 +189,17 @@ final class PRManager: ObservableObject {
             let context = target.context
             // Only the PR prefix is a template; the typed text is literal, so a question
             // about a Helm / Jinja `{{ … }}` template launches instead of failing.
-            let prefix = PromptEngine.customBody("")
+            let prefix = PromptEngine.customBody("", issue: target.isIssue)
             let rendered = try PromptEngine.substitute(prefix, context: context) + typed
             let prompt = PromptEngine.withStackContext(rendered, source: prefix, context: context)
             let summary = try PromptLauncher.run(
                 prompt: prompt, harnessKey: harnessKey, checkout: false,
-                pr: target.primary, context: context, config: config, terminal: settings.promptTerminal)
-            TelemetryService.shared.recordTriageInteraction(target.isStack ? "run_custom_prompt_stack" : "run_custom_prompt")
-            showInfoToast(summary + (target.isStack ? " · \(target.prs.count) PRs" : ""), symbol: "terminal", seconds: 4)
+                repo: target.repoFullName, context: context, config: config, terminal: settings.promptTerminal)
+            TelemetryService.shared.recordTriageInteraction(
+                target.isIssue ? "run_custom_prompt_issue"
+                    : target.isStack ? "run_custom_prompt_stack" : "run_custom_prompt")
+            showInfoToast(summary + (target.isStack ? " · \(target.count) \(target.isIssue ? "issues" : "PRs")" : ""),
+                          symbol: "terminal", seconds: 4)
         } catch {
             showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
         }

@@ -280,18 +280,26 @@ enum PromptLauncher {
     static func run(prompt: String, harnessKey: String, checkout: Bool, pr: PRSnapshot,
                     context: PromptContext? = nil, config: PromptConfig,
                     terminal: PromptTerminal) throws -> String {
+        try run(prompt: prompt, harnessKey: harnessKey, checkout: checkout, repo: pr.repoFullName,
+                context: context ?? PromptContext(pr: pr), config: config, terminal: terminal)
+    }
+
+    /// Runs `prompt` for something in `repo` (a PR or an issue): the repo picks the local clone
+    /// and the `repoUrls` override. `context` is required here, since there is no PR to derive it from.
+    static func run(prompt: String, harnessKey: String, checkout: Bool, repo: String,
+                    context: PromptContext, config: PromptConfig,
+                    terminal: PromptTerminal) throws -> String {
         // Only the entry that WINS for this harness (most specific, non-blank) can break the launch.
-        let winner = config.matchingRepoUrls(forRepo: pr.repoFullName).last {
+        let winner = config.matchingRepoUrls(forRepo: repo).last {
             !($0.overrides[harnessKey]?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty
         }
         if let winner, config.brokenRepoUrls.contains(where: { $0.pattern == winner.pattern && $0.harness == harnessKey }) {
             throw PromptError.repoUrlMissingPrompt(pattern: winner.pattern, harness: harnessKey)
         }
-        let config = config.resolved(forRepo: pr.repoFullName)
-        let context = context ?? PromptContext(pr: pr)
+        let config = config.resolved(forRepo: repo)
         let harness = config.harnesses[harnessKey]
         let label = harness?.label ?? harnessKey
-        let localPath = config.localPath(forRepo: pr.repoFullName)
+        let localPath = config.localPath(forRepo: repo)
 
         if let localPath, harness?.isWeb == false {
             var isDir: ObjCBool = false
@@ -324,7 +332,7 @@ enum PromptLauncher {
 
             var summary = "Started \(label)"
             if let localPath { summary += " in \((localPath as NSString).abbreviatingWithTildeInPath)" }
-            else if checkout { summary += " in ~ (no path for \(pr.repoFullName) in config.json — checkout skipped)" }
+            else if checkout { summary += " in ~ (no path for \(repo) in config.json — checkout skipped)" }
             return summary
         }
     }

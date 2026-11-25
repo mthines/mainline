@@ -64,7 +64,8 @@ struct KeyboardLegend: View {
         let focus = settings.selectedTab == .issues ? store.issues : store.deck
         let hints = KeyHints.hints(for: focus, tab: settings.selectedTab,
                                    writeActionsEnabled: settings.writeActionsEnabled,
-                                   bindings: settings.shortcutBindings)
+                                   bindings: settings.shortcutBindings,
+                                   issuePromptsEnabled: FeatureFlagRegistry.issuePromptsEnabled)
         HStack(spacing: 0) {
             Text(hints.map(\.text).joined(separator: "   ·   "))
                 .font(.caption2)
@@ -254,6 +255,11 @@ struct IssueRowView: View {
         Divider()
         Button("Copy link") { Self.copyLink(issue) }
             .menuShortcut(.copyBranch, settings)
+        if FeatureFlagRegistry.issuePromptsEnabled {
+            Divider()
+            PromptSubmenu(manager: manager, myLogin: settings.githubUsername,
+                          target: PromptTarget(issues: [issue]), title: "Run Prompt")
+        }
     }
 
     static func copyLink(_ issue: IssueSnapshot) {
@@ -319,17 +325,17 @@ struct IssuesView: View {
             ForEach(IssueSection.allCases, id: \.rawValue) { section in
                 if let items = sections[section], !items.isEmpty {
                     if section == .muted {
-                        collapsibleHeader("eye.slash", IssueSection.muted.title, count: items.count,
+                        collapsibleHeader("eye.slash", IssueSection.muted.title, items: items,
                                           expanded: $mutedExpanded)
                         if mutedExpanded { rows(items, muted: true, archived: false, indexOf: indexOf) }
                     } else {
-                        header(section.title, count: items.count)
+                        header(section.title, items: items)
                         rows(items, muted: false, archived: false, indexOf: indexOf)
                     }
                 }
             }
             if !archived.isEmpty {
-                collapsibleHeader("archivebox", "Archived", count: archived.count, expanded: $archivedExpanded)
+                collapsibleHeader("archivebox", "Archived", items: archived, expanded: $archivedExpanded)
                 if archivedExpanded {
                     rows(archived, muted: false, archived: true, indexOf: indexOf)
                 }
@@ -391,8 +397,15 @@ struct IssuesView: View {
             return nil
         }
         guard selectedIndex < order.count else { return event }
+        // The prompt picker owns the keyboard while it is open.
+        if manager.promptPickerTarget != nil { return event }
         let issue = order[selectedIndex]
         let store = manager.issueStore
+
+        if match(.runPrompt), FeatureFlagRegistry.issuePromptsEnabled {
+            manager.promptPickerTarget = PromptTarget(issues: [issue])
+            return nil
+        }
 
         if event.keyCode == 36 {   // Return
             manager.openIssue(issue)
@@ -422,22 +435,61 @@ struct IssuesView: View {
         }
     }
 
-    private func header(_ title: String, count: Int) -> some View {
-        HStack(spacing: 6) {
-            Text(title).font(.caption).fontWeight(.bold)
-            Text("\(count)")
-                .font(.caption).foregroundStyle(.secondary)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(.quaternary, in: Capsule())
-            Spacer()
+    private func header(_ title: String, items: [IssueSnapshot]) -> some View {
+        HoverReveal { hovering in
+            HStack(spacing: 6) {
+                Text(title).font(.caption).fontWeight(.bold)
+                Text("\(items.count)")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                Spacer()
+                copyButton(title, items, visible: hovering)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+            .contentShape(Rectangle())
+            .contextMenu { sectionMenu(title, items) }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
     }
 
-    private func collapsibleHeader(_ icon: String, _ title: String, count: Int,
+    /// A section header's right-click menu: copy its issues, or run a prompt on all of them.
+    @ViewBuilder
+    private func sectionMenu(_ title: String, _ items: [IssueSnapshot]) -> some View {
+        Button("Copy Issue List (\(items.count))") { copyList(title, items) }
+        if FeatureFlagRegistry.issuePromptsEnabled, !items.isEmpty {
+            PromptSubmenu(manager: manager, myLogin: settings.githubUsername,
+                          target: PromptTarget(issues: items, isGroup: true),
+                          title: "Run Prompt on \(title) (\(items.count))")
+        }
+    }
+
+    private func copyList(_ heading: String, _ items: [IssueSnapshot]) {
+        guard !items.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(PRListExport.markdown(issues: items), forType: .string)
+        let noun = items.count == 1 ? "issue" : "issues"
+        manager.showInfoToast("Copied \(items.count) \(noun): \(heading)", symbol: "doc.on.doc")
+    }
+
+    private func copyButton(_ heading: String, _ items: [IssueSnapshot], visible: Bool) -> some View {
+        Button { copyList(heading, items) } label: {
+            Image(systemName: "doc.on.doc")
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(width: 18, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Copy \(items.count == 1 ? "this issue" : "these \(items.count) issues") as a Markdown list")
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible)
+    }
+
+    private func collapsibleHeader(_ icon: String, _ title: String, items: [IssueSnapshot],
                                    expanded: Binding<Bool>) -> some View {
+        let count = items.count
+        return HoverReveal { hovering in
         Button { expanded.wrappedValue.toggle() } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.caption2).foregroundStyle(.secondary)
@@ -456,5 +508,10 @@ struct IssuesView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .trailing) {
+            copyButton(title, items, visible: hovering).padding(.trailing, 12 + 18)
+        }
+        .contextMenu { sectionMenu(title, items) }
+        }
     }
 }
