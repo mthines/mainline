@@ -26,9 +26,8 @@ extension PRManager {
         guard !hooks.isEmpty else { return }
         let muted = Set(settings.mutedIssueIds)
         let me = settings.githubUsername
-        let launches = events.filter { !muted.contains($0.issue.nodeId) }.flatMap { event in
-            hooks.filter { PRHookEngine.matches($0, issueEvent: event, myLogin: me) }.map { (hook: $0, event: event) }
-        }
+        let launches = PRHookEngine.issueLaunches(hooks, events: events.filter { !muted.contains($0.issue.nodeId) },
+                                                  myLogin: me)
         guard !launches.isEmpty, await canCountDown() else { return }
         for (hook, event) in launches {
             guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else { continue }

@@ -210,6 +210,18 @@ enum PRHookEngine {
         return (try? PromptEngine.renderBody(t, context: PromptTarget(issues: [event.issue]).context)) != nil
     }
 
+    /// The (hook, event) pairs one issue poll launches: every match, but at most ONE per hook per
+    /// issue. A comment that first @-mentions you yields both `mentioned` and `new-comment`, and the
+    /// throttle keys them apart, so without this a hook on both starts two agents for one comment.
+    /// The first event wins (`issueEvents` lists transitions, so `mentioned`, before `new-comment`).
+    static func issueLaunches(_ hooks: [PromptTemplate], events: [IssueHookEvent],
+                              myLogin: String) -> [(hook: PromptTemplate, event: IssueHookEvent)] {
+        var seen = Set<String>()
+        return events.flatMap { event in
+            hooks.filter { matches($0, issueEvent: event, myLogin: myLogin) }.map { (hook: $0, event: event) }
+        }.filter { seen.insert("\($0.hook.fileName)|\($0.event.issue.nodeId)").inserted }
+    }
+
     /// Whether `template` fires for `event`: trigger, repo scope, role, then the `when:` guard.
     static func matches(_ t: PromptTemplate, event: HookEvent, myLogin: String) -> Bool {
         guard parseTriggers(t.on).triggers.contains(event.trigger) else { return false }
@@ -460,6 +472,18 @@ enum IssueHookChecks {
 
         assert(PRHookEngine.Throttle.key("h", theirs) != PRHookEngine.Throttle.key("h", IssueHookEvent(trigger: .closed, issue: a)),
                "throttle keys differ per trigger")
+
+        var onBoth = PromptTemplate(fileName: "m.md", name: "m", harness: "claude", checkout: false, body: "{{issue.url}}")
+        onBoth.subject = .issues; onBoth.on = "mentioned, new-comment"; onBoth.hookRole = "any"
+        let commented = issue(comments: [reply("bob")])
+        let mentionEvents = PRHookEngine.issueEvents(previous: ["i1": a], next: [commented], transitions: [.mentioned(commented)],
+                                                     closed: [], myLogin: me)
+        assert(mentionEvents.map(\.trigger) == [.mentioned, .newComment], "a mentioning comment yields both, mentioned first")
+        let launched = PRHookEngine.issueLaunches([onBoth], events: mentionEvents, myLogin: me)
+        assert(launched.map(\.event.trigger) == [.mentioned], "one comment launches a hook once, as mentioned")
+        var other = onBoth; other.fileName = "o.md"
+        assert(PRHookEngine.issueLaunches([onBoth, other], events: mentionEvents, myLogin: me).count == 2,
+               "each hook still launches once")
         let starter = PRHookEngine.starterFrontmatter(issues: true)
         for t in IssueHookTrigger.allCases { assert(starter.contains("#   \(t.rawValue) "), "starter lists \(t.rawValue)") }
         assert(!PRHookEngine.starterFrontmatter.contains("new-issue"), "flag off: no issue triggers in the starter")
