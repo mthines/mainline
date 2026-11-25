@@ -63,14 +63,14 @@ struct CheckHookEvent: Equatable {
 /// and matching a hook's `check:` against a name. Never sent to telemetry (names are repo data).
 enum CheckContexts {
     /// Checks fetched per PR. A PR with more reports only the first; the rest never fire (a check
-    /// that was not in the previous snapshot cannot fire), so truncation cannot cause a spurious event.
+    /// missing from a FULL previous page cannot fire), so truncation cannot cause a spurious event.
     static let pageSize = 50
 
-    /// The selection nested in `statusCheckRollup`, or nothing while per-check data isn't wanted,
-    /// so the query text with the flag off is exactly what it was.
     /// The head commit's oid, selected next to the rollup so a push is visible to `checkEvents`.
     static func commitSelection(enabled: Bool) -> String { enabled ? "oid " : "" }
 
+    /// The selection nested in `statusCheckRollup`, or nothing while per-check data isn't wanted,
+    /// so the query text with the flag off is exactly what it was.
     static func selection(enabled: Bool) -> String {
         guard enabled else { return "" }
         return """
@@ -210,7 +210,8 @@ enum PRHookEngine {
         return out
     }
 
-    /// Check events between two snapshot sets. A check absent from the previous snapshot never fires:
+    /// Check events between two snapshot sets. A check absent from the previous snapshot fires only after a push,
+    /// or on the same head when that snapshot was fetched with checks and its page was not full; otherwise never:
     /// an old persisted snapshot, a carried-forward PR, a PR fetched while the flag was off, or a check
     /// that only now fits in the fetched page all look like "new", and firing on them would re-notify
     /// every red check (the diff-baseline rule). Only an observed transition counts.
@@ -224,9 +225,13 @@ enum PRHookEngine {
             // the same check failed on the old one, or finished before the next poll. Only when BOTH
             // snapshots carry results and a head, so an upgrade or a flag flip still fires nothing.
             let pushed = !old.checkResults.isEmpty && !old.headOid.isEmpty && !pr.headOid.isEmpty && old.headOid != pr.headOid
+            // Same head, fetched with checks, previous page not full: a check missing before had not been
+            // reported yet (queued late, or the rollup was still empty right after a push).
+            let completeOnSameHead = !old.headOid.isEmpty && old.headOid == pr.headOid && old.checkResults.count < CheckContexts.pageSize
             for check in pr.checkResults {
                 let was: CheckState
-                if let seen = before[check.name] { was = pushed ? .other : seen } else if pushed { was = .other } else { continue }
+                if let seen = before[check.name] { was = pushed ? .other : seen }
+                else if pushed || completeOnSameHead { was = .other } else { continue }
                 if was != .failed, check.state == .failed {
                     out.append(CheckHookEvent(trigger: .checkFailed, pr: pr, check: check.name))
                 }
@@ -765,6 +770,9 @@ enum CheckHookChecks {
         assert(events(at("a", [c("X", .failed)]), at("a", [c("X", .failed)])).isEmpty, "same head, still failing: nothing")
         assert(events(at("", [c("X", .failed)]), at("b", [c("X", .failed)])).isEmpty, "previous had no head: nothing")
         assert(events(at("a", []), at("b", [c("X", .failed)])).isEmpty, "previous had no checks: nothing")
+        assert(events(at("b", []), at("b", [c("X", .failed)])).map(\.check) == ["X"], "same head, rollup was empty: a late check fires")
+        assert(events(at("b", [c("V", .other)]), at("b", [c("V", .passed), c("X", .failed)])).filter { $0.trigger == .checkFailed }.count == 1,
+               "same head, a check that appears later fires")
         assert(CheckContexts.commitSelection(enabled: false).isEmpty, "flag off: no oid in the query")
         print("CHECK HOOK absent-previous OK")
 
