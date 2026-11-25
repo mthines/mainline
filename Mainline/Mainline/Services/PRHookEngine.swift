@@ -160,7 +160,7 @@ enum PRHookChecks {
         assert(triggers(pr(draft: true), pr()).contains(.readyForReview), "draft → ready")
         var req = pr(); req.tabs = [.forMe]; req.requestedReviewers = ["me"]
         assert(triggers(pr(), req) == [.reviewRequested], "a review request on a tracked PR")
-        var back = pr(); back.tabs = [.forMe]; var held = req; held.tabs = []
+        var held = req; held.tabs = []
         assert(triggers(held, req).isEmpty, "regaining the For me tab after a partial poll is not a new request")
         var mine = pr(); mine.commentCount = 1; mine.lastCommentIsViewer = true
         var theirs = pr(); theirs.commentCount = 1

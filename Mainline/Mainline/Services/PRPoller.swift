@@ -785,7 +785,7 @@ final class PRPoller {
                     // "review requested from me" (`.readyForReview`).
                     transitions.append(pr.reviewRequestSource(myLogin: myLogin) == .team
                         ? .newPR(pr) : .readyForReview(pr))
-                    // Discovery tagged it `.forMe` from the start, so the hook diff can't see the request.
+                    // Covers a team request going quiet → loud (the hook diff only sees `.none` → set).
                     discoveredRequests.append(HookEvent(trigger: .reviewRequested, pr: pr))
                 }
             }
