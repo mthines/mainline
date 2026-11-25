@@ -1192,6 +1192,10 @@ final class PRManager: ObservableObject {
         )
 
         poller.issueStore = issueStore
+        poller.checkContextsWanted = { [weak self] in
+            guard let self else { return false }
+            return CheckContexts.wanted(flagOn: FeatureFlagRegistry.checkHooksEnabled, templates: self.promptStore.templates)
+        }
         issueStore.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -1244,7 +1248,11 @@ final class PRManager: ObservableObject {
 
         NotificationCenter.default.addObserver(forName: .mainlineHookEvents, object: nil, queue: .main) { [weak self] n in
             guard let self, let events = n.userInfo?["events"] as? [HookEvent] else { return }
-            Task { @MainActor in await self.handleHookEvents(events) }
+            let checkEvents = n.userInfo?["checkEvents"] as? [CheckHookEvent] ?? []
+            Task { @MainActor in
+                await self.handleHookEvents(events)
+                await self.handleCheckHookEvents(checkEvents)
+            }
         }
         NotificationCenter.default.addObserver(forName: .mainlineIssueHookEvents, object: nil, queue: .main) { [weak self] n in
             guard let self, let events = n.userInfo?["events"] as? [IssueHookEvent] else { return }

@@ -50,6 +50,10 @@ struct PromptTemplate: Identifiable, Equatable {
     var hookScope: String = ""
     /// Hook role: `authored` (default), `reviewing` or `any`.
     var hookRole: String = ""
+    /// The CI check a `check-failed` / `check-passed` hook watches (`check:`): one name, matched
+    /// case-insensitively, `*` = any run of characters. It is its own field because check names
+    /// contain commas (`build (ubuntu, 20)`), which the comma-separated `on:` line cannot hold.
+    var hookCheck: String = ""
     /// Whether it runs on PRs, issues or both (`for:`). Default PRs.
     var subject: PromptSubject = .prs
 
@@ -600,6 +604,7 @@ enum PromptEngine {
             on: meta["on"] ?? "",
             hookScope: meta["scope"] ?? "",
             hookRole: meta["role"] ?? "",
+            hookCheck: meta["check"] ?? "",
             subject: PromptSubject.parse(meta["for"])
         )
     }
@@ -637,7 +642,7 @@ enum PromptEngine {
         name: \(t.name)
         harness: \(t.harnessKeys.joined(separator: ", "))
         checkout: \(t.checkout ? "true" : "false")
-        \(t.subject == .prs ? "" : "for: \(t.subject.rawValue)\n")\(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")---
+        \(t.subject == .prs ? "" : "for: \(t.subject.rawValue)\n")\(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")\(t.hookCheck.isEmpty ? "" : "check: \(t.hookCheck)\n")---
         \(t.body)
         \(sections)
         """

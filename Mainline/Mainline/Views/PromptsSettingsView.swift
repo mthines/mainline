@@ -170,13 +170,18 @@ struct PromptsSettingsView: View {
                 Text("No hooks yet.").foregroundStyle(.secondary)
             }
             ForEach(hooks) { hook in
-                let unknown = PRHookEngine.unknownTriggers(hook, issues: issueHooks)
+                let unknown = PRHookEngine.unknownTriggers(hook, issues: issueHooks, checks: checkHooks)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(hook.name)
                         Text(hookSummary(hook)).font(.caption).foregroundStyle(.secondary)
                         if !unknown.isEmpty {
                             Label("Unknown trigger: \(unknown.joined(separator: ", "))",
+                                  systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                        if checkHooks, PRHookEngine.checkHookMissingName(hook) {
+                            Label("A `check-failed` / `check-passed` hook needs `check:` set to the check's name, or it never fires",
                                   systemImage: "exclamationmark.triangle")
                                 .font(.caption).foregroundStyle(.orange)
                         }
@@ -204,6 +209,11 @@ struct PromptsSettingsView: View {
             }
             Text("Triggers: " + HookTrigger.allCases.map(\.rawValue).joined(separator: ", "))
                 .font(.caption).foregroundStyle(.secondary)
+            if checkHooks {
+                Text("Check triggers (also set `check:` to one check name): "
+                     + CheckHookTrigger.allCases.map(\.rawValue).joined(separator: ", "))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if issueHooks {
                 Text("Issue triggers (`for: issues` or `for: both`): "
                      + IssueHookTrigger.allCases.map(\.rawValue).joined(separator: ", "))
@@ -214,11 +224,14 @@ struct PromptsSettingsView: View {
     }
 
     private var issueHooks: Bool { FeatureFlagRegistry.issueHooksEnabled }
+    private var checkHooks: Bool { FeatureFlagRegistry.checkHooksEnabled }
 
     private func hookSummary(_ h: PromptTemplate) -> String {
         let prWords = h.subject.covers(.prs) ? PRHookEngine.parseTriggers(h.on).triggers.map(\.rawValue) : []
         let issueWords = issueHooks && h.subject.covers(.issues) ? PRHookEngine.parseIssueTriggers(h.on).triggers.map(\.rawValue) : []
-        let triggers = (prWords + issueWords.filter { !prWords.contains($0) }).joined(separator: ", ")
+        let checkWords = checkHooks && h.subject.covers(.prs) ? PRHookEngine.parseCheckTriggers(h.on).triggers.map(\.rawValue) : []
+        let named = checkWords.isEmpty || h.hookCheck.isEmpty ? "" : " “\(h.hookCheck)”"
+        let triggers = (prWords + checkWords.map { $0 + named } + issueWords.filter { !prWords.contains($0) }).joined(separator: ", ")
         guard !triggers.isEmpty else { return "inactive: no trigger it can fire on" }
         let role = HookRole.parse(h.hookRole).rawValue
         let scope = h.hookScope.isEmpty ? "all repos" : h.hookScope

@@ -38,6 +38,9 @@ final class PRPoller {
     private let store:        PRStateStore
     private let notifications: NotificationService
     private var hooksHavePolledOnce = false
+    /// Whether this poll should ask GitHub for per-check data: flag `check-hooks` on and a check hook
+    /// exists. Set by `PRManager` (which owns the templates); read once at the start of each poll.
+    var checkContextsWanted: () -> Bool = { false }
     private let settings:     MainlineSettings
 
     private var pollingTask: Task<Void, Never>?
@@ -439,6 +442,8 @@ final class PRPoller {
             statusMessage = "Rate limited — resumes \(RateLimitClassifier.clockLabel(hit.resetAt))"
             return
         }
+        // Per-check data rides the heavy PR search, so it is requested only while a check hook can use it.
+        CheckContextsGate.enabled = checkContextsWanted()
         // The Done searches are display-only and change slowly: run them every
         // `PollPacing.secondaryInterval`, not every poll. Issues stay on every poll —
         // they fire assigned/mentioned notifications. The decision is a PARAMETER, never
@@ -806,8 +811,14 @@ final class PRPoller {
         // something to auto-launch an agent for.
         let hooksArmed = hooksHavePolledOnce
         hooksHavePolledOnce = true
-        if hooksArmed, !hookEvents.isEmpty {
-            NotificationCenter.default.post(name: .mainlineHookEvents, object: nil, userInfo: ["events": hookEvents])
+        // Check events diff the same arrays; a check absent from the previous snapshot fires nothing.
+        let checkEvents = CheckContextsGate.enabled
+            ? PRHookEngine.checkEvents(previous: previousSnapshots, next: unique)
+                .filter { !muted.contains($0.pr.nodeId) && !quietDiscoveredIds.contains($0.pr.nodeId) }
+            : []
+        if hooksArmed, !hookEvents.isEmpty || !checkEvents.isEmpty {
+            NotificationCenter.default.post(name: .mainlineHookEvents, object: nil,
+                                            userInfo: ["events": hookEvents, "checkEvents": checkEvents])
         }
 
         // EVERY surviving transition marks the PR as unread — `.notify`, `.quiet`

@@ -43,6 +43,16 @@ enum FeatureFlagRegistry {
             owner: "mthines",
             tags: ["issues", "hooks"]
         ),
+        FlagDefinition(
+            key: checkHooksKey,
+            description: "Hooks on one named CI check: `on: check-failed` / `check-passed` with `check:` start by themselves when that check changes",
+            type: .boolean,
+            variants: ["off": .bool(false), "on": .bool(true)],
+            defaultVariant: "off",
+            experiment: nil,
+            owner: "mthines",
+            tags: ["hooks", "ci"]
+        ),
     ]
 
     /// Gates running prompt templates on issues.
@@ -62,6 +72,16 @@ enum FeatureFlagRegistry {
     /// poll on every cycle.
     static var issueHooksEnabled: Bool {
         if case .bool(true)? = FeatureFlagClient.shared.resolveWithoutRecording(issueHooksKey).value { return true }
+        return false
+    }
+
+    /// Gates hooks on one named CI check (check triggers, the per-check query selection, Settings and starter text).
+    static let checkHooksKey = "check-hooks"
+
+    /// Resolved without a telemetry record: Settings reads it on every render and every poll asks it
+    /// whether to request per-check data.
+    static var checkHooksEnabled: Bool {
+        if case .bool(true)? = FeatureFlagClient.shared.resolveWithoutRecording(checkHooksKey).value { return true }
         return false
     }
 }

@@ -10,6 +10,17 @@ enum CIStatus: String, Codable, Equatable {
     case error
 }
 
+/// One named CI check on a PR's head commit (a GitHub Actions job or a legacy commit status),
+/// reduced to what a check hook needs. `other` covers pending, cancelled, skipped and neutral.
+enum CheckState: String, Codable, Equatable {
+    case passed, failed, other
+}
+
+struct CheckResult: Codable, Equatable {
+    var name: String
+    var state: CheckState
+}
+
 enum ReviewState: String, Codable, Equatable {
     case none
     case requested
@@ -415,6 +426,11 @@ struct PRSnapshot: Codable, Equatable {
     /// for backward compat. NOT compared in PRDiffEngine.
     var viewerIsCommitter: Bool
 
+    /// Per-check results of the head commit, fetched only while flag `check-hooks` is on and a
+    /// check hook exists (else empty). Feeds `PRHookEngine.checkEvents` and nothing else: NOT
+    /// compared in PRDiffEngine. Decoded with `decodeIfPresent` + default `[]`.
+    var checkResults: [CheckResult]
+
     /// Total lines changed in this PR.
     var totalLines: Int { linesAdded + linesDeleted }
 
@@ -460,7 +476,8 @@ struct PRSnapshot: Codable, Equatable {
         mergeQueuePosition: Int? = nil,
         viewerHasApproved: Bool = false,
         hasApproval: Bool = false,
-        viewerIsCommitter: Bool = false
+        viewerIsCommitter: Bool = false,
+        checkResults: [CheckResult] = []
     ) {
         self.nodeId = nodeId
         self.number = number
@@ -504,6 +521,7 @@ struct PRSnapshot: Codable, Equatable {
         self.viewerHasApproved = viewerHasApproved
         self.hasApproval = hasApproval
         self.viewerIsCommitter = viewerIsCommitter
+        self.checkResults = checkResults
     }
 
     // MARK: - Codable (explicit to support decodeIfPresent defaults for new fields)
@@ -517,7 +535,7 @@ struct PRSnapshot: Codable, Equatable {
         case sensitivePathFlags, unresolvedThreadCount
         case mergeCommitAllowed, squashMergeAllowed, rebaseMergeAllowed
         case vercelPreviewUrl, vercelPreviewCheckedAt
-        case labels, authorIsBot, mergeQueueState, mergeQueuePosition, viewerHasApproved, hasApproval, viewerIsCommitter
+        case labels, authorIsBot, mergeQueueState, mergeQueuePosition, viewerHasApproved, hasApproval, viewerIsCommitter, checkResults
     }
 
     init(from decoder: Decoder) throws {
@@ -565,6 +583,7 @@ struct PRSnapshot: Codable, Equatable {
         viewerHasApproved     = try c.decodeIfPresent(Bool.self,       forKey: .viewerHasApproved) ?? false
         hasApproval           = try c.decodeIfPresent(Bool.self,       forKey: .hasApproval) ?? false
         viewerIsCommitter     = try c.decodeIfPresent(Bool.self,       forKey: .viewerIsCommitter) ?? false
+        checkResults          = try c.decodeIfPresent([CheckResult].self, forKey: .checkResults) ?? []
     }
 
     // MARK: - Bot detection
