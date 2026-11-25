@@ -786,6 +786,7 @@ final class MainlineSettings: ObservableObject {
         static let issueRepoWatchLevels  = "issueRepoWatchLevels"
         static let issueOrgWatchLevels   = "issueOrgWatchLevels"
         static let showNewIssuesInInbox  = "showNewIssuesInInbox"
+        static let watchOwnRepoIssues    = "watchOwnRepoIssues"
         static let mutedIssueIds         = "mutedIssueIds"
         static let unreadIssueIds        = "unreadIssueIds"
         static let archivedIssues        = "archivedIssues"
@@ -1189,6 +1190,12 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(showNewIssuesInInbox, forKey: Keys.showNewIssuesInInbox) }
     }
 
+    /// "Watch issues on my own repositories" — repos owned by the viewer's own login default
+    /// to All issues (an explicit repo or org level still wins). Orgs stay opt-in. Default ON.
+    @Published var watchOwnRepoIssues: Bool {
+        didSet { defaults.set(watchOwnRepoIssues, forKey: Keys.watchOwnRepoIssues) }
+    }
+
     /// Issues the user muted (hidden from every issue view, and never notify).
     @Published var mutedIssueIds: [String] {
         didSet { defaults.set(mutedIssueIds, forKey: Keys.mutedIssueIds) }
@@ -1207,12 +1214,20 @@ final class MainlineSettings: ObservableObject {
         didSet { defaults.set(archivedIssues, forKey: Keys.archivedIssues) }
     }
 
-    /// Effective watch level: repo override, else org default, else `.onlyMine`.
+    /// Whether `repo` lives under the viewer's own account (personal, not an org).
+    private func isOwnRepo(_ key: String) -> Bool {
+        guard watchOwnRepoIssues else { return false }
+        return key.split(separator: "/").first.map { PRSnapshot.loginsMatch(String($0), githubUsername) } ?? false
+    }
+
+    /// Effective watch level: repo override, else org default, else All issues for the
+    /// viewer's own repos (when `watchOwnRepoIssues`), else `.onlyMine`.
     func issueWatchLevel(forRepo repo: String) -> IssueWatchLevel {
         let key = repo.lowercased()
         if let raw = issueRepoWatchLevels[key], let level = IssueWatchLevel(rawValue: raw) { return level }
         let org = key.split(separator: "/").first.map(String.init) ?? ""
         if let raw = issueOrgWatchLevels[org], let level = IssueWatchLevel(rawValue: raw) { return level }
+        if isOwnRepo(key) { return .allIssues }
         return IssueWatchLevel.default
     }
 
@@ -1229,16 +1244,21 @@ final class MainlineSettings: ObservableObject {
 
     /// Orgs and repos currently at All issues (drives the second, broader fetch).
     /// Repos covered by an All-issues org are not repeated.
-    var issueAllTargets: (orgs: [String], repos: [String]) {
+    /// `users` is the viewer's own account when personal repos are watched by default and
+    /// no explicit org-level entry overrides it (searched with `user:`, not `org:`).
+    var issueAllTargets: (orgs: [String], repos: [String], users: [String]) {
         let orgs = issueOrgWatchLevels.filter { $0.value == IssueWatchLevel.allIssues.rawValue }.map { $0.key }.sorted()
         let repos = issueRepoWatchLevels.filter { entry in
             guard entry.value == IssueWatchLevel.allIssues.rawValue else { return false }
             let org = entry.key.split(separator: "/").first.map(String.init) ?? ""
             return !orgs.contains(org)
         }.map { $0.key }.sorted()
-        return (orgs, repos)
+        let me = githubUsername.lowercased()
+        let users = watchOwnRepoIssues && !me.isEmpty && issueOrgWatchLevels[me] == nil ? [me] : []
+        return (orgs, repos, users)
     }
 
+    /// Explicit opt-ins only: the personal default alone must not conjure an empty Issues tab.
     var hasAllIssuesRepo: Bool {
         let t = issueAllTargets
         return !t.orgs.isEmpty || !t.repos.isEmpty
@@ -1769,6 +1789,8 @@ final class MainlineSettings: ObservableObject {
         issueOrgWatchLevels = defaults.dictionary(forKey: Keys.issueOrgWatchLevels) as? [String: String] ?? [:]
         showNewIssuesInInbox = defaults.object(forKey: Keys.showNewIssuesInInbox) == nil
             ? true : defaults.bool(forKey: Keys.showNewIssuesInInbox)
+        watchOwnRepoIssues = defaults.object(forKey: Keys.watchOwnRepoIssues) == nil
+            ? true : defaults.bool(forKey: Keys.watchOwnRepoIssues)
         mutedIssueIds = defaults.stringArray(forKey: Keys.mutedIssueIds) ?? []
         unreadIssueIds = defaults.stringArray(forKey: Keys.unreadIssueIds) ?? []
         archivedIssues = defaults.dictionary(forKey: Keys.archivedIssues) as? [String: Double] ?? [:]

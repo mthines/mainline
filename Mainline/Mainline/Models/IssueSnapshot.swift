@@ -287,6 +287,8 @@ enum IssueChecks {
         let drive = IssueReply(author: "carol", createdAt: Date(timeIntervalSince1970: 160), association: "NONE")
 
         assert(IssueWatchLevel.default == .onlyMine, "default watch level is Only mine")
+        assert(IssueStore.allIssuesQueries(orgs: [], repos: [], users: ["mthines"])
+               == ["is:open is:issue user:mthines sort:updated-desc"], "own account searched with user:")
         assert(IssueWatchLevel.allCases.map(\.title) == ["All issues", "Only mine", "Off"], "watch level labels")
 
         assert(IssueSnapshot.mentions("ping @mads please", login: me), "mention matches case-insensitively")

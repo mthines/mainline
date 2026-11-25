@@ -134,6 +134,6 @@ For the full list of `UserDefaults` keys and their types, see [`../CLAUDE.md`](.
 
 ## Issues
 
-The Issues tab follows GitHub issues. Pick a level per organization or repository in Settings → Issues (or right-click a repo chip): **All issues**, **Only mine** (default; issues you opened, are assigned, mentioned in, or replied to), or **Off**.
+The Issues tab follows GitHub issues. Pick a level per organization or repository in Settings → Issues (or right-click a repo chip): **All issues**, **Only mine** (default for organizations; issues you opened, are assigned, mentioned in, or replied to), or **Off**. Repositories under your own GitHub account default to **All issues**; turn that off with "Watch all issues on my own repositories" in the same pane.
 
 **Show new issues in Inbox** (on by default) adds new issues from All-issues repos (unanswered, unassigned, and opened within the last 3 days; older ones count as backlog and stay in the Issues tab) to the Inbox's issue group, which shows up to three rows and a "+N more" link to the rest. With it off, new issues stay out of the Inbox and a single "N new issues → Issues tab" line links to them. Assigned issues, mentions, and replies always appear in the Inbox. The first complete poll only records a baseline and sends no notifications.

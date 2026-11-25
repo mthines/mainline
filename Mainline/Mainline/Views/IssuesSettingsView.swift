@@ -11,8 +11,19 @@ struct IssuesSettingsView: View {
 
     var body: some View {
         Section("How it works") {
-            Label("“Only mine” follows issues you opened, are assigned to, or are mentioned in. “All issues” also surfaces every new issue on that repo. “Off” ignores the repo. Repos default to Only mine.",
+            Label("“Only mine” follows issues you opened, are assigned to, or are mentioned in. “All issues” also surfaces every new issue on that repo. “Off” ignores the repo. Repos default to Only mine, except your own personal repos (see below).",
                   systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Section("Personal repositories") {
+            Toggle("Watch all issues on my own repositories", isOn: Binding(
+                get: { settings.watchOwnRepoIssues },
+                set: { settings.watchOwnRepoIssues = $0; manager.issueStore.refilter() }
+            ))
+            Text("Repos under your own GitHub account default to All issues, so issues others open there show up without any setup. Organizations stay opt-in, and a level you set below always wins.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
