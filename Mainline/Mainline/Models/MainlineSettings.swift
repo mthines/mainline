@@ -1216,9 +1216,8 @@ final class MainlineSettings: ObservableObject {
 
     /// Whether `repo` lives under the viewer's own account (personal, not an org).
     private func isOwnRepo(_ key: String) -> Bool {
-        let me = githubUsername.lowercased()
-        guard watchOwnRepoIssues, !me.isEmpty else { return false }
-        return key.split(separator: "/").first.map { String($0) == me } ?? false
+        guard watchOwnRepoIssues else { return false }
+        return key.split(separator: "/").first.map { PRSnapshot.loginsMatch(String($0), githubUsername) } ?? false
     }
 
     /// Effective watch level: repo override, else org default, else All issues for the
