@@ -245,7 +245,7 @@ final class PromptTemplateStore: ObservableObject {
         // Inert until activated: a live `on:` with no scope would run on every repo at once.
         let text = PromptEngine.serialize(t).replacingOccurrences(
             of: "checkout: false\n",
-            with: "checkout: false\n# Uncomment to activate (see README.txt):\n# on: ci-failed\n# scope: owner/repo\n")
+            with: "checkout: false\n" + PRHookEngine.starterFrontmatter)
         try? FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
         try? text.write(to: promptsDirectory.appendingPathComponent(t.fileName), atomically: true, encoding: .utf8)
         reload()

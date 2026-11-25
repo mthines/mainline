@@ -970,8 +970,7 @@ enum PromptStarters {
         role: authored                   # authored (default) | reviewing | any
         when: !conflict                  # optional extra state guard, as above
 
-    Triggers: approved, changes-requested, ci-failed, ci-passed, conflict, ready-to-merge,
-    new-comment, review-requested, ready-for-review, merged, closed. A hook never fires for a PR's first
+    Triggers: \(HookTrigger.allCases.map(\.rawValue).joined(separator: ", ")). A hook never fires for a PR's first
     sighting, at most once per PR + trigger per 30 minutes, and at most 10 launches an hour.
     `role` defaults to authored so an agent never starts on a stranger's PR unless you say so.
     A hook never runs the checkout step (parallel hooks would switch branches in one clone):
