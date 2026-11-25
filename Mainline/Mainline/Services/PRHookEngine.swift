@@ -13,22 +13,6 @@ enum HookTrigger: String, CaseIterable {
     case readyForReview = "ready-for-review"
     case merged
     case closed
-
-    var meaning: String {
-        switch self {
-        case .approved: return "the PR became approved"
-        case .changesRequested: return "a reviewer requested changes"
-        case .ciFailed: return "CI turned red"
-        case .ciPassed: return "CI turned green"
-        case .conflict: return "the PR got a merge conflict"
-        case .readyToMerge: return "approved, green, mergeable and not queued"
-        case .newComment: return "a new human comment or review"
-        case .reviewRequested: return "a review was requested from you"
-        case .readyForReview: return "a draft became ready"
-        case .merged: return "the PR was merged"
-        case .closed: return "the PR was closed without merging"
-        }
-    }
 }
 
 struct HookEvent: Equatable {
