@@ -71,8 +71,8 @@ final class IssueStore: ObservableObject {
     static let involvesQuery = "is:open is:issue involves:@me sort:updated-desc"
 
     /// The "All issues" queries: one search per chunk of `org:` / `repo:` qualifiers.
-    static func allIssuesQueries(orgs: [String], repos: [String]) -> [String] {
-        let targets = orgs.map { "org:\($0)" } + repos.map { "repo:\($0)" }
+    nonisolated static func allIssuesQueries(orgs: [String], repos: [String], users: [String] = []) -> [String] {
+        let targets = orgs.map { "org:\($0)" } + users.map { "user:\($0)" } + repos.map { "repo:\($0)" }
         guard !targets.isEmpty else { return [] }
         return stride(from: 0, to: targets.count, by: targetsPerQuery).map { start in
             let chunk = targets[start..<min(start + targetsPerQuery, targets.count)]
@@ -120,7 +120,7 @@ final class IssueStore: ObservableObject {
         }
 
         let targets = settings.issueAllTargets
-        for query in Self.allIssuesQueries(orgs: targets.orgs, repos: targets.repos) {
+        for query in Self.allIssuesQueries(orgs: targets.orgs, repos: targets.repos, users: targets.users) {
             // A limit hit by an earlier query: stop here instead of firing the rest
             // into a refused client — the poll stays incomplete, so nothing is dropped.
             if RateLimitMonitor.shared.blockedHit(for: RateLimitMonitor.pollResource) != nil {
