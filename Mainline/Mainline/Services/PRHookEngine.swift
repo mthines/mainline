@@ -227,7 +227,12 @@ enum PRHookEngine {
         }
         if !t.when.trimmingCharacters(in: .whitespaces).isEmpty,
            PromptState.matchedAlternative(t.when, active: state) == nil { return false }
-        return true
+        // The mirror of the issue side: a `for: both` hook written for issues (`{{issue.*}}`) cannot
+        // render for a PR, so skip it before the countdown and the throttle. A PR-only hook is not
+        // checked, so a broken one still fails visibly ("Hook failed").
+        guard t.subject.covers(.issues) else { return true }
+        let context = PromptTarget(anchor: event.pr, members: [event.pr], wholeStack: false).context
+        return (try? PromptEngine.renderBody(t, context: context)) != nil
     }
 
     /// Per-PR-per-hook-per-trigger cooldown plus a global hourly cap, so a flapping check or a
@@ -348,6 +353,12 @@ enum PRHookChecks {
         assert(!PRHookEngine.matches(hook, event: HookEvent(trigger: .ciFailed, pr: pr()), myLogin: "me"), "wrong trigger")
         hook.when = "conflict"
         assert(!PRHookEngine.matches(hook, event: ev, myLogin: "me"), "when: guard")
+
+        var both = PromptTemplate(fileName: "b.md", name: "b", harness: "claude", checkout: false, body: "Look at {{issue.url}}")
+        both.subject = .both; both.on = "approved"
+        assert(!PRHookEngine.matches(both, event: ev, myLogin: "me"), "a for: both {{issue.*}} body never fires on a PR")
+        both.body = "Look at {{pr.url}}"
+        assert(PRHookEngine.matches(both, event: ev, myLogin: "me"), "a for: both {{pr.*}} body does")
 
         func done(_ id: String, merged: Bool) -> PRSnapshot {
             var p = pr(id); p.merged = merged; p.closed = !merged; p.state = "closed"; return p
