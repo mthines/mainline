@@ -149,7 +149,6 @@ enum PRHookEngine {
     }
 }
 
-#if DEBUG
 extension PRHookEngine {
     /// The commented-out frontmatter a New Hook starts with: the activation lines, then every
     /// option and trigger, so the file explains itself without the README. Lines start with `#`,
@@ -173,6 +172,7 @@ extension PRHookEngine {
     }
 }
 
+#if DEBUG
 enum PRHookChecks {
     static func run() {
         for t in HookTrigger.allCases {
