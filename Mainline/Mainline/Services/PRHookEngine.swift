@@ -38,6 +38,107 @@ struct HookEvent: Equatable {
     let pr: PRSnapshot
 }
 
+/// A change to ONE named CI check on a PR (flag `check-hooks`). Kept apart from `HookTrigger`
+/// so a hook on a check never changes how the rollup triggers (`ci-failed`) behave.
+enum CheckHookTrigger: String, CaseIterable {
+    case checkFailed = "check-failed"
+    case checkPassed = "check-passed"
+
+    var summary: String {
+        switch self {
+        case .checkFailed: return "the check named by `check:` failed (set `check:`)"
+        case .checkPassed: return "the check named by `check:` passed (set `check:`)"
+        }
+    }
+}
+
+struct CheckHookEvent: Equatable {
+    let trigger: CheckHookTrigger
+    let pr: PRSnapshot
+    /// The check's name as GitHub reports it.
+    let check: String
+}
+
+/// Pure helpers for per-check data: the GraphQL selection, reducing a node to a `CheckState`,
+/// and matching a hook's `check:` against a name. Never sent to telemetry (names are repo data).
+enum CheckContexts {
+    /// Checks fetched per PR. A PR with more reports only the first; the rest never fire (a check
+    /// missing from a FULL previous page cannot fire), so truncation cannot cause a spurious event.
+    static let pageSize = 50
+
+    /// The head commit's oid, selected next to the rollup so a push is visible to `checkEvents`.
+    static func commitSelection(enabled: Bool) -> String { enabled ? "oid " : "" }
+
+    /// The selection nested in `statusCheckRollup`, or nothing while per-check data isn't wanted,
+    /// so the query text with the flag off is exactly what it was.
+    static func selection(enabled: Bool) -> String {
+        guard enabled else { return "" }
+        return """
+
+                  contexts(first: \(pageSize)) {
+                    nodes {
+                      __typename
+                      ... on CheckRun { name conclusion }
+                      ... on StatusContext { context state }
+                    }
+                  }
+        """
+    }
+
+    /// Whether to ask GitHub for per-check data: the flag is on and some hook names a check.
+    static func wanted(flagOn: Bool, templates: [PromptTemplate]) -> Bool {
+        flagOn && templates.contains(where: PRHookEngine.isCheckHook)
+    }
+
+    static func state(checkRunConclusion: String?) -> CheckState {
+        switch checkRunConclusion?.uppercased() {
+        case "SUCCESS": return .passed
+        case "FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED": return .failed
+        default: return .other   // in progress, cancelled, skipped, neutral, stale
+        }
+    }
+
+    static func state(statusContext state: String?) -> CheckState {
+        switch state?.uppercased() {
+        case "SUCCESS": return .passed
+        case "FAILURE", "ERROR": return .failed
+        default: return .other   // pending, expected
+        }
+    }
+
+    /// One result per name: a name reported twice (a re-run) is failed if either failed, passed only if all passed.
+    static func merged(_ results: [CheckResult]) -> [CheckResult] {
+        var order: [String] = []
+        var byName: [String: CheckState] = [:]
+        for r in results {
+            guard !r.name.isEmpty else { continue }
+            if let old = byName[r.name] {
+                byName[r.name] = (old == .failed || r.state == .failed) ? .failed : (old == .passed && r.state == .passed ? .passed : .other)
+            } else { order.append(r.name); byName[r.name] = r.state }
+        }
+        return order.map { CheckResult(name: $0, state: byName[$0] ?? .other) }
+    }
+
+    /// Case-insensitive exact match of `name` against `pattern`; `*` matches any run of characters.
+    static func matches(pattern: String, name: String) -> Bool {
+        let p = Array(pattern.trimmingCharacters(in: .whitespaces).lowercased())
+        let n = Array(name.trimmingCharacters(in: .whitespaces).lowercased())
+        guard !p.isEmpty else { return false }
+        var memo: [Int: Bool] = [:]
+        func go(_ i: Int, _ j: Int) -> Bool {
+            let key = i * (n.count + 1) + j
+            if let hit = memo[key] { return hit }
+            let result: Bool
+            if i == p.count { result = j == n.count }
+            else if p[i] == "*" { result = go(i + 1, j) || (j < n.count && go(i, j + 1)) }
+            else { result = j < n.count && p[i] == n[j] && go(i + 1, j + 1) }
+            memo[key] = result
+            return result
+        }
+        return go(0, 0)
+    }
+}
+
 /// An issue change a hook can fire on: a template whose `for:` covers issues. Raw values are
 /// what its `on:` line says; `new-comment` and `closed` share their spelling with the PR triggers,
 /// so a `for: both` hook fires on either.
@@ -109,6 +210,39 @@ enum PRHookEngine {
         return out
     }
 
+    /// Check events between two snapshot sets. A check absent from the previous snapshot fires only after a push,
+    /// or on the same head when that snapshot was fetched with checks and its page was not full; otherwise never:
+    /// an old persisted snapshot, a carried-forward PR, a PR fetched while the flag was off, or a check
+    /// that only now fits in the fetched page all look like "new", and firing on them would re-notify
+    /// every red check (the diff-baseline rule). Only an observed transition counts.
+    static func checkEvents(previous: [String: PRSnapshot], next: [PRSnapshot]) -> [CheckHookEvent] {
+        guard !previous.isEmpty else { return [] }
+        var out: [CheckHookEvent] = []
+        for pr in next where !pr.checkResults.isEmpty {
+            guard let old = previous[pr.nodeId] else { continue }
+            let before = Dictionary(old.checkResults.map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })
+            // A new head (a push) starts the checks over: what the new head reports is news even when
+            // the same check failed on the old one, or finished before the next poll. Only when BOTH
+            // snapshots carry results and a head, so an upgrade or a flag flip still fires nothing.
+            let pushed = !old.checkResults.isEmpty && !old.headOid.isEmpty && !pr.headOid.isEmpty && old.headOid != pr.headOid
+            // Same head, fetched with checks, previous page not full: a check missing before had not been
+            // reported yet (queued late, or the rollup was still empty right after a push).
+            let completeOnSameHead = !old.headOid.isEmpty && old.headOid == pr.headOid && old.checkResults.count < CheckContexts.pageSize
+            for check in pr.checkResults {
+                let was: CheckState
+                if let seen = before[check.name] { was = pushed ? .other : seen }
+                else if pushed || completeOnSameHead { was = .other } else { continue }
+                if was != .failed, check.state == .failed {
+                    out.append(CheckHookEvent(trigger: .checkFailed, pr: pr, check: check.name))
+                }
+                if was != .passed, check.state == .passed {
+                    out.append(CheckHookEvent(trigger: .checkPassed, pr: pr, check: check.name))
+                }
+            }
+        }
+        return out
+    }
+
     /// `merged` / `closed` events from the display-only Done set, which open-PR polls never see.
     /// Only a PR this app saw OPEN (`seenOpen`) can fire: the Done set is just the 30 most recently
     /// updated finished PRs, so an old one nudged back into it by a late comment is not news.
@@ -137,6 +271,21 @@ enum PRHookEngine {
         return (triggers, unknown)
     }
 
+    /// `on: check-failed` → check triggers + the words that are not check triggers.
+    static func parseCheckTriggers(_ text: String) -> (triggers: [CheckHookTrigger], unknown: [String]) { parse(text) }
+
+    /// A hook on a named check: PR subject, a check trigger, and the `check:` it watches.
+    static func isCheckHook(_ t: PromptTemplate) -> Bool {
+        t.subject.covers(.prs) && !parseCheckTriggers(t.on).triggers.isEmpty
+            && !t.hookCheck.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// A check trigger with no `check:` can never fire; Settings shows this.
+    static func checkHookMissingName(_ t: PromptTemplate) -> Bool {
+        t.subject.covers(.prs) && !parseCheckTriggers(t.on).triggers.isEmpty
+            && t.hookCheck.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     static func isHook(_ t: PromptTemplate) -> Bool { t.subject.covers(.prs) && !parseTriggers(t.on).triggers.isEmpty }
 
     static func isIssueHook(_ t: PromptTemplate) -> Bool {
@@ -145,13 +294,15 @@ enum PRHookEngine {
 
     /// The `on:` words that are a trigger for none of the subjects the template's `for:` covers.
     /// `issues` says whether issue triggers are live (flag `issue-hooks`): while off, they are unknown.
-    static func unknownTriggers(_ t: PromptTemplate, issues: Bool) -> [String] {
+    /// `checks` says whether check triggers are live (flag `check-hooks`): while off, they are unknown.
+    static func unknownTriggers(_ t: PromptTemplate, issues: Bool, checks: Bool = false) -> [String] {
         let words = t.on.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
         return words.filter { word in
             guard !word.isEmpty else { return false }
             let pr = t.subject.covers(.prs) && HookTrigger(rawValue: word) != nil
             let issue = issues && t.subject.covers(.issues) && IssueHookTrigger(rawValue: word) != nil
-            return !pr && !issue
+            let check = checks && t.subject.covers(.prs) && CheckHookTrigger(rawValue: word) != nil
+            return !pr && !issue && !check
         }
     }
 
@@ -246,15 +397,29 @@ enum PRHookEngine {
     /// Whether `template` fires for `event`: trigger, repo scope, role, then the `when:` guard.
     static func matches(_ t: PromptTemplate, event: HookEvent, myLogin: String) -> Bool {
         guard parseTriggers(t.on).triggers.contains(event.trigger) else { return false }
-        let repo = event.pr.repoFullName
+        return passesFilters(t, pr: event.pr, myLogin: myLogin)
+    }
+
+    /// Whether `template` fires for a check event: a check trigger, the named check, then the same
+    /// scope / role / `when:` filters as every PR hook.
+    static func matches(_ t: PromptTemplate, checkEvent event: CheckHookEvent, myLogin: String) -> Bool {
+        guard t.subject.covers(.prs), parseCheckTriggers(t.on).triggers.contains(event.trigger),
+              CheckContexts.matches(pattern: t.hookCheck, name: event.check) else { return false }
+        return passesFilters(t, pr: event.pr, myLogin: myLogin)
+    }
+
+    /// The filters every PR hook shares once its trigger matched: repo scope, role, `when:`, and the
+    /// `for: both` render guard.
+    private static func passesFilters(_ t: PromptTemplate, pr: PRSnapshot, myLogin: String) -> Bool {
+        let repo = pr.repoFullName
         let scopes = CommentEngine.parseScope(t.hookScope)
         guard scopes.isEmpty || scopes.contains(where: { CommentEngine.patternMatches($0, repo: repo) }) else { return false }
-        let state = PromptState.active(pr: event.pr, myLogin: myLogin)
+        let state = PromptState.active(pr: pr, myLogin: myLogin)
         switch HookRole.parse(t.hookRole) {
         // `authored` means YOU opened it. `PromptState`'s `authored` token also covers a PR you merely
         // committed to, and commit authorship (a `Co-authored-by:` trailer, an email) is forgeable by a
         // stranger — so a hook never trusts it. `role: any` is the explicit opt-in.
-        case .authored: guard PRSnapshot.loginsMatch(event.pr.author, myLogin) else { return false }
+        case .authored: guard PRSnapshot.loginsMatch(pr.author, myLogin) else { return false }
         case .reviewing: guard state.contains("reviewing") else { return false }
         case .any: break
         }
@@ -264,7 +429,7 @@ enum PRHookEngine {
         // render for a PR, so skip it before the countdown and the throttle. A PR-only hook is not
         // checked, so a broken one still fails visibly ("Hook failed").
         guard t.subject.covers(.issues) else { return true }
-        let context = PromptTarget(anchor: event.pr, members: [event.pr], wholeStack: false).context
+        let context = PromptTarget(anchor: pr, members: [pr], wholeStack: false).context
         return (try? PromptEngine.renderBody(t, context: context)) != nil
     }
 
@@ -277,6 +442,10 @@ enum PRHookEngine {
         private(set) var launches: [Date] = []
 
         static func key(_ hook: String, _ event: HookEvent) -> String { "\(hook)|\(event.trigger.rawValue)|\(event.pr.nodeId)" }
+        /// The check's name is part of the key, so two checks failing on one PR launch separately.
+        static func key(_ hook: String, _ event: CheckHookEvent) -> String {
+            "\(hook)|check:\(event.trigger.rawValue):\(event.check.lowercased())|\(event.pr.nodeId)"
+        }
         static func key(_ hook: String, _ event: IssueHookEvent) -> String {
             "\(hook)|issue:\(event.trigger.rawValue)|\(event.issue.nodeId)"
         }
@@ -297,13 +466,14 @@ extension PRHookEngine {
     /// The commented-out frontmatter a New Hook starts with: the activation lines, then every
     /// option and trigger, so the file explains itself without the README. Lines start with `#`,
     /// which the frontmatter parser skips.
-    static var starterFrontmatter: String { starterFrontmatter(issues: false) }
+    static var starterFrontmatter: String { starterFrontmatter(issues: false, checks: false) }
 
     /// `issues` (flag `issue-hooks`) adds the issue triggers and how `for:` / `role:` apply to them.
-    static func starterFrontmatter(issues: Bool) -> String {
+    static func starterFrontmatter(issues: Bool, checks: Bool = false) -> String {
         let all = HookTrigger.allCases.map { ($0.rawValue, $0.summary) }
         let issueTriggers = IssueHookTrigger.allCases.map { ($0.rawValue, $0.summary) }
-        let width = (all + (issues ? issueTriggers : [])).map(\.0.count).max() ?? 0
+        let checkTriggers = CheckHookTrigger.allCases.map { ($0.rawValue, $0.summary) }
+        let width = (all + (issues ? issueTriggers : []) + (checks ? checkTriggers : [])).map(\.0.count).max() ?? 0
         func lines(_ list: [(String, String)]) -> [String] {
             list.map { "#   \($0.0.padding(toLength: width, withPad: " ", startingAt: 0))  \($0.1)" }
         }
@@ -315,13 +485,19 @@ extension PRHookEngine {
             "#   On issues, role: authored = you opened it, any = anyone; reviewing never matches,",
             "#   and an issue hook with `when:` never fires.",
         ] : []
+        let checkBlock = checks ? [
+            "#",
+            "# Check triggers: also set `check:` to ONE check name (a GitHub Actions job or commit status),",
+            "# case-insensitive, `*` matches any run of characters. A name with commas is fine here.",
+            "# check: build (ubuntu, 20)",
+        ] + lines(checkTriggers) : []
         return ([
             "# Uncomment `on:` (and narrow `scope:`) to activate:",
             "# on: ci-failed",
             "# scope: owner/repo",
             "#",
             "# on:    one or more triggers, comma-separated",
-        ] + lines(all) + issueBlock + [
+        ] + lines(all) + issueBlock + checkBlock + [
             "# scope: owner/repo, owner/*, or * (default: every repo)",
             "# role:  authored (default) | reviewing | any",
             "# when:  optional state guard, e.g. !conflict (see README.txt)",
@@ -519,6 +695,126 @@ enum IssueHookChecks {
         for t in IssueHookTrigger.allCases { assert(starter.contains("#   \(t.rawValue) "), "starter lists \(t.rawValue)") }
         assert(!PRHookEngine.starterFrontmatter.contains("new-issue"), "flag off: no issue triggers in the starter")
         assert(starter.split(separator: "\n").allSatisfy { $0.hasPrefix("#") }, "issue starter is all comments")
+    }
+}
+
+/// Self-checks for hooks on one named CI check. Each section prints a `CHECK HOOK <name> OK` line
+/// once its assertions hold; the sealed checks in `.agent/feat/check-hooks/checks.yaml` read them.
+enum CheckHookChecks {
+    static func run() {
+        func pr(_ id: String = "n1", checks: [CheckResult] = []) -> PRSnapshot {
+            PRSnapshot(
+                nodeId: id, number: 1, title: "t", htmlUrl: "u", repoFullName: "o/r", isDraft: false, state: "open",
+                reviewDecision: nil, ciStatus: .pending, reviewState: .none, commentCount: 0, updatedAt: "",
+                author: "me", requestedReviewers: [], mergeable: true, checkResults: checks)
+        }
+        func c(_ name: String, _ state: CheckState) -> CheckResult { CheckResult(name: name, state: state) }
+        func events(_ a: PRSnapshot, _ b: PRSnapshot) -> [CheckHookEvent] {
+            PRHookEngine.checkEvents(previous: [a.nodeId: a], next: [b])
+        }
+        func hook(on: String = "check-failed", check: String = "X") -> PromptTemplate {
+            var t = PromptTemplate(fileName: "h.md", name: "h", harness: "claude", checkout: false, body: "Fix {{pr.url}}")
+            t.on = on; t.hookCheck = check
+            return t
+        }
+
+        // AC-1: the named check failing matches; another failing check does not.
+        let failedX = events(pr(checks: [c("X", .passed), c("Y", .passed)]), pr(checks: [c("X", .failed), c("Y", .passed)]))
+        assert(failedX.map(\.trigger) == [.checkFailed] && failedX.map(\.check) == ["X"], "X failing is one check-failed event")
+        assert(PRHookEngine.matches(hook(), checkEvent: failedX[0], myLogin: "me"), "the hook for X matches X failing")
+        let failedY = events(pr(checks: [c("X", .passed), c("Y", .passed)]), pr(checks: [c("X", .passed), c("Y", .failed)]))
+        assert(!PRHookEngine.matches(hook(), checkEvent: failedY[0], myLogin: "me"), "Y failing does not match a hook for X")
+        assert(events(pr(checks: [c("X", .failed)]), pr(checks: [c("X", .failed)])).isEmpty, "still failing fires nothing")
+        assert(events(pr(checks: [c("X", .other)]), pr(checks: [c("X", .failed)])).count == 1, "running → failed fires")
+        print("CHECK HOOK named-failed OK")
+
+        // AC-2: passing is symmetric.
+        let passedX = events(pr(checks: [c("X", .failed)]), pr(checks: [c("X", .passed)]))
+        assert(passedX.map(\.trigger) == [.checkPassed], "failed → passed is check-passed")
+        assert(PRHookEngine.matches(hook(on: "check-passed"), checkEvent: passedX[0], myLogin: "me"), "check-passed hook matches")
+        assert(!PRHookEngine.matches(hook(on: "check-failed"), checkEvent: passedX[0], myLogin: "me"), "check-failed hook ignores a pass")
+        assert(events(pr(checks: [c("X", .passed)]), pr(checks: [c("X", .passed)])).isEmpty, "steady pass fires nothing")
+        print("CHECK HOOK named-passed OK")
+
+        // AC-3: `check:` parses, serializes, and matches names with commas, colons and spaces.
+        let raw = PromptEngine.serialize(hook(check: "build (ubuntu, 20): unit"))
+        let back = PromptEngine.parse(fileName: "h.md", text: raw)
+        assert(back?.hookCheck == "build (ubuntu, 20): unit", "check: survives a round trip with , : and spaces")
+        assert(back?.on == "check-failed", "on: survives alongside check:")
+        assert(CheckContexts.matches(pattern: "Build (Ubuntu, 20)", name: "build (ubuntu, 20)"), "case-insensitive")
+        assert(!CheckContexts.matches(pattern: "build", name: "build (ubuntu, 20)"), "exact, not a prefix")
+        assert(CheckContexts.matches(pattern: "build*", name: "build (ubuntu, 20)"), "* wildcard")
+        assert(CheckContexts.matches(pattern: "*unit", name: "ci / unit"), "leading wildcard")
+        assert(!CheckContexts.matches(pattern: "", name: "x"), "empty pattern matches nothing")
+        assert(PRHookEngine.checkHookMissingName(hook(check: "")) && !PRHookEngine.isCheckHook(hook(check: "")),
+               "a check trigger with no check: is flagged and never a hook")
+        print("CHECK HOOK check-field OK")
+
+        // AC-4: a check missing from the previous snapshot never fires.
+        assert(events(pr(), pr(checks: [c("X", .failed)])).isEmpty, "previous snapshot had no checks (upgrade, flag was off)")
+        assert(events(pr(checks: [c("Y", .passed)]), pr(checks: [c("X", .failed)])).isEmpty, "X absent before")
+        assert(PRHookEngine.checkEvents(previous: [:], next: [pr(checks: [c("X", .failed)])]).isEmpty, "first poll is a baseline")
+        assert(PRHookEngine.checkEvents(previous: ["n1": pr(checks: [c("X", .passed)])], next: [pr("n2", checks: [c("X", .failed)])]).isEmpty,
+               "a PR new to the baseline fires nothing")
+        assert(events(pr(checks: [c("X", .passed)]), pr()).isEmpty, "a poll fetched without checks fires nothing")
+        let old = pr(checks: [c("X", .passed)])
+        let data = try! JSONEncoder().encode(old)
+        var json = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+        json.removeValue(forKey: "checkResults")
+        let decoded = try! JSONDecoder().decode(PRSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        assert(decoded.checkResults.isEmpty, "a snapshot persisted before this field decodes with no checks")
+        // A push: failing again on the new head fires; a new check that already failed fires; no head info stays silent.
+        func at(_ oid: String, _ checks: [CheckResult]) -> PRSnapshot { var p = pr(checks: checks); p.headOid = oid; return p }
+        assert(events(at("a", [c("X", .failed)]), at("b", [c("X", .failed)])).map(\.trigger) == [.checkFailed], "failed again after a push")
+        assert(events(at("a", [c("Y", .passed)]), at("b", [c("X", .failed)])).count == 1, "a check that is new on the new head fires")
+        assert(events(at("a", [c("X", .failed)]), at("a", [c("X", .failed)])).isEmpty, "same head, still failing: nothing")
+        assert(events(at("", [c("X", .failed)]), at("b", [c("X", .failed)])).isEmpty, "previous had no head: nothing")
+        assert(events(at("a", []), at("b", [c("X", .failed)])).isEmpty, "previous had no checks: nothing")
+        assert(events(at("b", []), at("b", [c("X", .failed)])).map(\.check) == ["X"], "same head, rollup was empty: a late check fires")
+        assert(events(at("b", [c("V", .other)]), at("b", [c("V", .passed), c("X", .failed)])).filter { $0.trigger == .checkFailed }.count == 1,
+               "same head, a check that appears later fires")
+        assert(CheckContexts.commitSelection(enabled: false).isEmpty, "flag off: no oid in the query")
+        print("CHECK HOOK absent-previous OK")
+
+        // AC-5: with the flag off, check triggers are unknown and nothing is fetched.
+        assert(PRHookEngine.unknownTriggers(hook(), issues: false, checks: false) == ["check-failed"], "flag off: unknown trigger")
+        assert(PRHookEngine.unknownTriggers(hook(), issues: false, checks: true).isEmpty, "flag on: known trigger")
+        assert(!PRHookEngine.starterFrontmatter.contains("check-failed"), "flag off: starter does not list check triggers")
+        assert(PRHookEngine.starterFrontmatter(issues: false, checks: true).contains("#   check-failed "), "flag on: starter lists them")
+        assert(PRHookEngine.starterFrontmatter(issues: false, checks: true).split(separator: "\n").allSatisfy { $0.hasPrefix("#") },
+               "check starter is all comments")
+        assert(!HookTrigger.allCases.contains { $0.rawValue.hasPrefix("check-") }, "rollup triggers are unchanged")
+        assert(!FeatureFlagRegistry.checkHooksEnabled, "check-hooks ships off")
+        assert(!CheckContexts.wanted(flagOn: false, templates: [hook()]), "flag off: nothing wanted")
+        print("CHECK HOOK flag-off OK")
+
+        // AC-6: the selection is only in the query while wanted, and it is bounded.
+        assert(CheckContexts.selection(enabled: false).isEmpty, "flag off: the query text is unchanged")
+        let selection = CheckContexts.selection(enabled: true)
+        assert(selection.contains("contexts(first: 50)") && selection.contains("CheckRun") && selection.contains("StatusContext"),
+               "flag on: bounded contexts with check runs and statuses")
+        assert(CheckContexts.wanted(flagOn: true, templates: [hook()]), "flag on + a check hook: wanted")
+        assert(!CheckContexts.wanted(flagOn: true, templates: []), "flag on, no hooks: not wanted")
+        var plain = hook(); plain.on = "ci-failed"
+        assert(!CheckContexts.wanted(flagOn: true, templates: [plain, hook(check: "")]), "no hook names a check: not wanted")
+        assert(CheckContexts.state(checkRunConclusion: "TIMED_OUT") == .failed && CheckContexts.state(checkRunConclusion: "CANCELLED") == .other
+               && CheckContexts.state(checkRunConclusion: nil) == .other && CheckContexts.state(checkRunConclusion: "SUCCESS") == .passed,
+               "check run conclusions")
+        assert(CheckContexts.state(statusContext: "ERROR") == .failed && CheckContexts.state(statusContext: "PENDING") == .other,
+               "status context states")
+        assert(CheckContexts.merged([c("X", .failed), c("X", .passed), c("Y", .passed)]) == [c("X", .failed), c("Y", .passed)],
+               "a re-run name collapses to one result, failure winning")
+        print("CHECK HOOK query-gated OK")
+
+        // AC-7: the throttle keys two checks apart, and one check once per cooldown.
+        let both = events(pr(checks: [c("X", .passed), c("Y", .passed)]), pr(checks: [c("X", .failed), c("Y", .failed)]))
+        assert(both.count == 2, "two checks failing yield two events")
+        var throttle = PRHookEngine.Throttle()
+        let now = Date()
+        assert(both.allSatisfy { throttle.admit(key: PRHookEngine.Throttle.key("h", $0), now: now) }, "each check launches once")
+        assert(!throttle.admit(key: PRHookEngine.Throttle.key("h", both[0]), now: now.addingTimeInterval(60)), "the same check is throttled")
+        assert(PRHookEngine.Throttle.key("h", both[0]) != PRHookEngine.Throttle.key("h", both[1]), "keys differ per check")
+        print("CHECK HOOK throttle-per-check OK")
     }
 }
 #endif

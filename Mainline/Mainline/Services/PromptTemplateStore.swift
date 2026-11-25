@@ -245,7 +245,8 @@ final class PromptTemplateStore: ObservableObject {
         // Inert until activated: a live `on:` with no scope would run on every repo at once.
         let text = PromptEngine.serialize(t).replacingOccurrences(
             of: "checkout: false\n",
-            with: "checkout: false\n" + PRHookEngine.starterFrontmatter(issues: FeatureFlagRegistry.issueHooksEnabled))
+            with: "checkout: false\n" + PRHookEngine.starterFrontmatter(
+                issues: FeatureFlagRegistry.issueHooksEnabled, checks: FeatureFlagRegistry.checkHooksEnabled))
         try? FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
         try? text.write(to: promptsDirectory.appendingPathComponent(t.fileName), atomically: true, encoding: .utf8)
         reload()

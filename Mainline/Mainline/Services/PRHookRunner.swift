@@ -19,6 +19,29 @@ extension PRManager {
         }
     }
 
+    /// Check hooks (flag `check-hooks`): templates with `on: check-failed` / `check-passed` and a `check:`.
+    /// One launch per hook per check per PR, throttled per check name.
+    func handleCheckHookEvents(_ events: [CheckHookEvent]) async {
+        guard !events.isEmpty, FeatureFlagRegistry.checkHooksEnabled, !settings.hooksPaused,
+              RateLimitMonitor.shared.active == nil else { return }
+        let hooks = promptStore.templates.filter(PRHookEngine.isCheckHook)
+        guard !hooks.isEmpty else { return }
+        let me = settings.githubUsername
+        let launches = events.flatMap { event in
+            hooks.filter { PRHookEngine.matches($0, checkEvent: event, myLogin: me) }.map { (hook: $0, event: event) }
+        }
+        guard !launches.isEmpty, await canCountDown() else { return }
+        for (hook, event) in launches {
+            guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else { continue }
+            let pr = event.pr
+            startCountdown(title: hook.name, body: "\(event.trigger.rawValue) \(event.check) on #\(pr.number) \(pr.title)",
+                           url: pr.htmlUrl) { [weak self] id in
+                self?.launchHook(hook, pr: pr, id: id,
+                                 label: "\(hook.name) · \(pr.repoFullName)#\(pr.number)")
+            }
+        }
+    }
+
     /// Issue hooks: templates whose `for:` covers issues, behind flag `issue-hooks`.
     func handleIssueHookEvents(_ events: [IssueHookEvent]) async {
         guard FeatureFlagRegistry.issueHooksEnabled, !settings.hooksPaused, RateLimitMonitor.shared.active == nil else { return }
@@ -62,7 +85,7 @@ extension PRManager {
     private func schedule(_ hook: PromptTemplate, for event: HookEvent) {
         let pr = event.pr
         startCountdown(title: hook.name, body: "\(event.trigger.rawValue) on #\(pr.number) \(pr.title)", url: pr.htmlUrl) { [weak self] id in
-            self?.launchHook(hook, event: event, id: id, label: "\(hook.name) · \(pr.repoFullName)#\(pr.number)")
+            self?.launchHook(hook, pr: pr, id: id, label: "\(hook.name) · \(pr.repoFullName)#\(pr.number)")
         }
     }
 
@@ -81,22 +104,22 @@ extension PRManager {
         }
     }
 
-    private func launchHook(_ hook: PromptTemplate, event: HookEvent, id: String, label: String) {
+    private func launchHook(_ hook: PromptTemplate, pr: PRSnapshot, id: String, label: String) {
         guard !settings.hooksPaused else { return }
         let config = promptStore.config
         let template = PromptEngine.effective(hook, config: config)
         do {
             if let error = PromptEngine.blockingErrors(template, config: config).first { throw error }
-            let target = PromptTarget(anchor: event.pr, members: [event.pr], wholeStack: false)
+            let target = PromptTarget(anchor: pr, members: [pr], wholeStack: false)
             let context = target.context
             let prompt = try PromptEngine.renderBody(template, context: context)
             let summary = try PromptLauncher.run(
                 prompt: prompt, harnessKey: template.harness, checkout: false,   // never: parallel hooks would switch branches in one clone
-                pr: event.pr, context: context, config: config, terminal: settings.promptTerminal)
+                pr: pr, context: context, config: config, terminal: settings.promptTerminal)
             TelemetryService.shared.recordTriageInteraction("run_hook")
-            notifications.postHook(id: id, title: "Hook started: \(hook.name)", body: summary, url: event.pr.htmlUrl, cancellable: false)
+            notifications.postHook(id: id, title: "Hook started: \(hook.name)", body: summary, url: pr.htmlUrl, cancellable: false)
         } catch {
-            notifications.postHook(id: id, title: "Hook failed: \(label)", body: error.localizedDescription, url: event.pr.htmlUrl, cancellable: false)
+            notifications.postHook(id: id, title: "Hook failed: \(label)", body: error.localizedDescription, url: pr.htmlUrl, cancellable: false)
         }
     }
 

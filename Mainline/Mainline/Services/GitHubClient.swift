@@ -320,11 +320,51 @@ private struct GraphQLCommitNode: Decodable {
 }
 
 private struct GraphQLCommit: Decodable {
+    let oid: String?
     let statusCheckRollup: GraphQLRollup?
 }
 
 private struct GraphQLRollup: Decodable {
     let state: String  // SUCCESS | FAILURE | ERROR | PENDING | EXPECTED
+    /// Only present while per-check data is requested (`CheckContexts.selection`).
+    let contexts: GraphQLCheckContexts?
+}
+
+private struct GraphQLCheckContexts: Decodable {
+    let nodes: [GraphQLCheckContext?]?
+}
+
+/// A `CheckRun` (name + conclusion) or a legacy `StatusContext` (context + state); the other
+/// subtype's fields are absent.
+private struct GraphQLCheckContext: Decodable {
+    let typename: String?
+    let name: String?
+    let conclusion: String?
+    let context: String?
+    let state: String?
+
+    enum CodingKeys: String, CodingKey {
+        case typename = "__typename"
+        case name, conclusion, context, state
+    }
+
+    var result: CheckResult? {
+        if typename == "CheckRun", let name { return CheckResult(name: name, state: CheckContexts.state(checkRunConclusion: conclusion)) }
+        if typename == "StatusContext", let context { return CheckResult(name: context, state: CheckContexts.state(statusContext: state)) }
+        return nil
+    }
+}
+
+/// Whether requests carry the per-check selection. Set once per poll by `PRPoller` from the
+/// `check-hooks` flag and the hook templates; read from background request builders, hence the lock.
+enum CheckContextsGate {
+    private static let lock = NSLock()
+    private static var on = false
+
+    static var enabled: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return on }
+        set { lock.lock(); defer { lock.unlock() }; on = newValue }
+    }
 }
 
 // MARK: - GitHubClient
@@ -940,6 +980,11 @@ final class GitHubClient {
             PRSnapshot.loginsMatch($0, myLogin)
         } ?? false
 
+        let mergeQueueState: String? = node.mergeQueueEntry?.state ?? (node.isInMergeQueue == true ? "QUEUED" : nil)
+        let commit = node.commits?.nodes.first?.commit
+        let headOid: String = CheckContextsGate.enabled ? (commit?.oid ?? "") : ""
+        let checkResults: [CheckResult] = CheckContexts.merged(
+            commit?.statusCheckRollup?.contexts?.nodes?.compactMap { $0?.result } ?? [])
         return PRSnapshot(
             nodeId:             nodeId,
             number:             number,
@@ -975,11 +1020,13 @@ final class GitHubClient {
             rebaseMergeAllowed: node.repository?.rebaseMergeAllowed ?? true,
             labels:             labels,
             authorIsBot:        authorIsBot,
-            mergeQueueState:    node.mergeQueueEntry?.state ?? (node.isInMergeQueue == true ? "QUEUED" : nil),
+            mergeQueueState:    mergeQueueState,
             mergeQueuePosition: node.mergeQueueEntry?.position,
             viewerHasApproved:  viewerHasApproved,
             hasApproval:        hasApproval,
-            viewerIsCommitter:  viewerIsCommitter
+            viewerIsCommitter:  viewerIsCommitter,
+            checkResults:       checkResults,
+            headOid:            headOid
         )
     }
 
@@ -1001,7 +1048,7 @@ final class GitHubClient {
     /// single-PR fetch, so both decode into the SAME `GraphQLNode` /
     /// `makeSnapshot` path. Keep this the single source of PR fields — a field
     /// added here is available to both queries at once.
-    private static let prNodeFields = """
+    private static var prNodeFields: String { """
         id
         number
         title
@@ -1044,12 +1091,13 @@ final class GitHubClient {
         commits(last: 1) {
           nodes {
             commit {
-              statusCheckRollup { state }
+              \(CheckContexts.commitSelection(enabled: CheckContextsGate.enabled))statusCheckRollup { state\(CheckContexts.selection(enabled: CheckContextsGate.enabled)) }
             }
           }
         }
         \(commitAuthorsField)
     """
+    }
 
     /// The sampled commit authors behind `viewerIsCommitter`. Shared by
     /// `prNodeFields` and the light committed-PR candidate search, so the two can
@@ -1060,7 +1108,7 @@ final class GitHubClient {
         }
     """
 
-    private static let searchQueryDocument = """
+    private static var searchQueryDocument: String { """
     query($q: String!, $first: Int!) {
       rateLimit { cost }
       search(query: $q, type: ISSUE, first: $first) {
@@ -1072,12 +1120,13 @@ final class GitHubClient {
       }
     }
     """
+    }
 
     /// Fetches ONE PR directly by owner/repo/number — used by search when a pasted
     /// PR URL points at a PR that isn't in the current tab's local set, so the
     /// scope-independent base list can't contain it. Reuses `prNodeFields`, so the
     /// result decodes through the exact same `GraphQLNode` → `makeSnapshot` path.
-    private static let singlePRQueryDocument = """
+    private static var singlePRQueryDocument: String { """
     query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
@@ -1086,12 +1135,13 @@ final class GitHubClient {
       }
     }
     """
+    }
 
     /// Fetches ONE PR by its GraphQL node id — used to keep a PINNED PR visible even
     /// when it has dropped out of the current tab's live query results. Reuses
     /// `prNodeFields`, so the node decodes through the same `GraphQLNode` →
     /// `makeSnapshot` path as everything else.
-    private static let prByNodeIdQueryDocument = """
+    private static var prByNodeIdQueryDocument: String { """
     query($id: ID!) {
       rateLimit { cost }
       node(id: $id) {
@@ -1101,6 +1151,7 @@ final class GitHubClient {
       }
     }
     """
+    }
 
     /// Step 1 of `searchCommittedPRs`: the bot-wide search, selecting ONLY what
     /// `viewerIsCommitter` needs. The full `prNodeFields` page over every PR a bot
@@ -1124,7 +1175,7 @@ final class GitHubClient {
 
     /// Step 2 of `searchCommittedPRs`: the full field selection, for the viewer's
     /// PRs only.
-    private static let prNodesQueryDocument = """
+    private static var prNodesQueryDocument: String { """
     query($ids: [ID!]!) {
       rateLimit { cost }
       nodes(ids: $ids) {
@@ -1134,6 +1185,7 @@ final class GitHubClient {
       }
     }
     """
+    }
 
     /// Just the lifecycle state of a set of PRs — see `fetchPRStates`.
     private static let prStatesQueryDocument = """
