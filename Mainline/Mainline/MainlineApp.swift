@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         RateLimitChecks.run()
         PollPacingChecks.run()
         PRListExportChecks.run()
+        FinishedQuery.runSelfChecks()
         PromptTemplateChecks.run()
         PRHookChecks.run()
         IssueHookChecks.run()

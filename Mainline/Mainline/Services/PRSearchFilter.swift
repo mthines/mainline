@@ -153,3 +153,40 @@ enum PRSearchFilter {
     }
     #endif
 }
+
+/// Pure builder for the deck's Merged / Closed lists. One query per way a PR can be
+/// "yours": you opened it, you reviewed it (GitHub clears the review request once you
+/// review, so `review-requested` alone misses it), or it was still requested of you.
+enum FinishedQuery {
+    /// Rows per query, and the cap on the merged list.
+    static let perQuery = 25
+    static let limit = 50
+
+    static func queries(for state: PRStateFilter) -> [String] {
+        let stateTerms: String
+        switch state {
+        case .open:   return []
+        case .merged: stateTerms = "is:pr is:merged"
+        case .closed: stateTerms = "is:pr is:closed is:unmerged"
+        }
+        return [
+            "\(stateTerms) author:@me sort:updated-desc",
+            "\(stateTerms) reviewed-by:@me -author:@me sort:updated-desc",
+            "\(stateTerms) review-requested:@me sort:updated-desc",
+        ]
+    }
+
+    #if DEBUG
+    static func runSelfChecks() {
+        assert(queries(for: .open).isEmpty)
+        let merged = queries(for: .merged)
+        assert(merged.count == 3)
+        assert(merged.allSatisfy { $0.contains("is:merged") && !$0.contains("is:unmerged") })
+        assert(merged.contains { $0.contains("reviewed-by:@me") && $0.contains("-author:@me") })
+        let closed = queries(for: .closed)
+        assert(closed.allSatisfy { $0.contains("is:closed") && $0.contains("is:unmerged") })
+        assert(closed.contains { $0.contains("review-requested:@me") })
+        print("FINISHED QUERY OK")
+    }
+    #endif
+}

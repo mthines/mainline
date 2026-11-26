@@ -641,7 +641,8 @@ final class GitHubClient {
         token: String,
         tab: ReviewTab,
         first: Int,
-        etagPrefix: String
+        etagPrefix: String,
+        sendETag: Bool = true
     ) async throws -> (snapshots: [PRSnapshot], etag: String?) {
         guard let url = URL(string: "https://api.github.com/graphql") else {
             throw GitHubAPIError.unknown(0)
@@ -665,7 +666,9 @@ final class GitHubClient {
         // (and the open vs. done fetches) never collide, and so a 304 earned by the
         // degraded retry page can't suppress the next full-size fetch.
         let etagKey = "\(etagPrefix).\(tab.rawValue).\(first).\(query)"
-        if let storedEtag = settings.etag(for: etagKey) {
+        // On-demand callers keep no copy of the last result, so a 304 would leave them
+        // with nothing to show — they pass `sendETag: false` and always get a body.
+        if sendETag, let storedEtag = settings.etag(for: etagKey) {
             request.setValue(storedEtag, forHTTPHeaderField: "If-None-Match")
         }
 
@@ -861,6 +864,34 @@ final class GitHubClient {
     func searchDonePRs(tab: ReviewTab, token: String) async throws -> (snapshots: [PRSnapshot], etag: String?) {
         let query = "\(Self.doneQualifier(for: tab)) is:pr is:closed sort:updated-desc"
         return try await runSearch(query: query, token: token, tab: tab, first: 30, etagPrefix: "graphql.done")
+    }
+
+    /// On-demand Merged / Closed lists for the deck's state menu. Runs one search per
+    /// `FinishedQuery` role qualifier (authored, reviewed, still-requested), dedupes by
+    /// nodeId and returns newest-first, capped at `FinishedQuery.limit`. DISPLAY-ONLY like
+    /// `searchDonePRs`: callers keep it out of `PRStateStore` / diff / notifications. A failed
+    /// query throws, so a partial list is never shown as if complete.
+    func searchFinishedPRs(state: PRStateFilter, token: String) async throws -> [PRSnapshot] {
+        // The queries are independent, so run them concurrently: each is a heavy search
+        // and sequentially they made the list take tens of seconds to appear.
+        let results: [[PRSnapshot]] = try await withThrowingTaskGroup(of: [PRSnapshot].self) { group in
+            for query in FinishedQuery.queries(for: state) {
+                group.addTask {
+                    try await self.runSearch(
+                        query: query, token: token, tab: .inbox, first: FinishedQuery.perQuery,
+                        etagPrefix: "graphql.finished"
+                    ).snapshots
+                }
+            }
+            var out: [[PRSnapshot]] = []
+            for try await r in group { out.append(r) }
+            return out
+        }
+        var seen = Set<String>()
+        var all: [PRSnapshot] = []
+        for pr in results.joined() where seen.insert(pr.nodeId).inserted { all.append(pr) }
+        all.sort { $0.updatedAt > $1.updatedAt }
+        return Array(all.prefix(FinishedQuery.limit))
     }
 
     /// The user-scoped qualifier for a tab's Done query. Mirrors the open-fetch

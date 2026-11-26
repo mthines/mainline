@@ -67,8 +67,19 @@ final class PRManager: ObservableObject {
     /// kept ENTIRELY separate from `prs` (which is the open, diff-engine-backed
     /// set): they never pass through `PRStateStore` / `PRDiffEngine` /
     /// notifications, never affect the badge / needs-attention counts, and never
-    /// fire a "new PR" banner. Rendered only in the collapsed "Done" section.
+    /// fire a "new PR" banner. No longer rendered as a deck section (Merged / Closed come
+    /// from `finishedPRs`); still feeds merged/closed hooks and auto-unpin-on-merge.
     @Published var donePRs: [PRSnapshot] = []
+
+    /// Merged / Closed PRs for the deck's state menu (`settings.prStateFilter`), fetched ON
+    /// DEMAND by `refreshFinished()` — never from the poll loop, so the GraphQL budget is
+    /// untouched while the filter stays Open. Display-only like `donePRs`.
+    @Published var finishedPRs: [PRSnapshot] = []
+    @Published var finishedLoading = false
+    @Published var finishedError: String?
+    /// The state `finishedPRs` was fetched for, and when (stale / wrong-state guards).
+    private var finishedState: PRStateFilter?
+    private var finishedFetchedAt: Date?
 
     @Published var statusMessage: String = "Starting…"
     /// The GitHub rate limit being waited out (nil = none). Drives the header banner.
@@ -945,22 +956,56 @@ final class PRManager: ObservableObject {
         return tabScopeFilteredPRs.filter { snoozed.contains($0.nodeId) }
     }
 
-    /// The DISPLAY-ONLY "Done" set (recently merged/closed) for the current tab +
-    /// scope — the membership of the collapsed "Done" section. Filters `donePRs`
-    /// (never `prs`) by the selected tab and scope only: the drafts filter and the
-    /// For-me Direct/Team sub-filter don't apply to completed PRs (a closed PR is
-    /// not a draft; review-request source is moot once merged/closed). Snooze does
-    /// not apply either. Not sorted here — the view sorts by `updatedAt` desc.
-    var doneViewPRs: [PRSnapshot] {
-        // Tab.
-        let tabFiltered = donePRs.filter { $0.tabs.contains(settings.selectedTab) }
-        // Scope.
-        guard let scope = scopeStore.selectedScope else { return tabFiltered }
-        return tabFiltered.filter { pr in
+    /// The Merged / Closed list for the current scope — what the deck shows while
+    /// `settings.prStateFilter` is not Open. Same on every tab (the state menu behaves
+    /// identically on Inbox, For me and Created), so only the scope chip filters it; the
+    /// drafts toggle and the For-me sub-filter do not apply to finished PRs.
+    var finishedViewPRs: [PRSnapshot] {
+        guard settings.prStateFilter != .open, finishedState == settings.prStateFilter else { return [] }
+        guard let scope = scopeStore.selectedScope else { return finishedPRs }
+        return finishedPRs.filter { pr in
             switch scope {
             case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
             case .repo(let r): return pr.repoFullName == r
             }
+        }
+    }
+
+    /// Fetches the Merged / Closed list for the current filter. No-op for Open. Skips when
+    /// the list for this state is younger than `PollPacing.secondaryInterval` unless
+    /// `force`. A rate-limited or failed fetch keeps any previous list and sets
+    /// `finishedError`.
+    func refreshFinished(force: Bool = false) async {
+        let state = settings.prStateFilter
+        guard state != .open else { return }
+        if !force, finishedState == state, let at = finishedFetchedAt,
+           Date().timeIntervalSince(at) < PollPacing.secondaryInterval { return }
+        guard !finishedLoading, let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
+        finishedLoading = true
+        defer { finishedLoading = false }
+        do {
+            let list = try await client.searchFinishedPRs(state: state, token: token)
+            // The user may have switched state while this was in flight.
+            guard settings.prStateFilter == state else {
+                // The user switched state mid-flight and that call bailed on `finishedLoading`;
+                // load the state they are actually looking at.
+                finishedLoading = false
+                await refreshFinished(force: force)
+                return
+            }
+            finishedPRs = list
+            finishedState = state
+            finishedFetchedAt = Date()
+            finishedError = nil
+        } catch {
+            // Same staleness check as the success path: a failure for a state the user has
+            // already left must not become the new state's error, and the new state still loads.
+            guard settings.prStateFilter == state else {
+                finishedLoading = false
+                await refreshFinished(force: force)
+                return
+            }
+            finishedError = "Couldn't load \(state.label.lowercased()) PRs"
         }
     }
 
@@ -1389,6 +1434,7 @@ final class PRManager: ObservableObject {
             return
         }
         await poller.pollOnce(token: token, forceDone: forceDone)
+        if forceDone { await refreshFinished(force: true) }
     }
 
     func stop() {

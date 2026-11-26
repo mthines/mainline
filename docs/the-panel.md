@@ -40,7 +40,6 @@ The group tells you whether the ball is in your court.
 | **Waiting**         | CI is still running, or it's not approved, or it's approved but not yet mergeable. | Wait — the ball is elsewhere. |
 | **Draft**           | It's a draft, not ready for review.                                       | Nothing yet.                        |
 | **Snoozed**         | You postponed it and it hasn't woken.                                     | It steps aside until the timer ends. |
-| **Done**            | It recently merged or closed.                                             | Reference only.                     |
 
 The same explanation lives in the app under **Settings** → **Help**.
 

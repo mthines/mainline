@@ -248,6 +248,10 @@ struct TriageDeckView: View {
     /// Search bar is open (even with an empty query, when the grouped deck is still
     /// shown and `searchMode` is false). Drives focus-hiding and the Up-to-field handoff.
     var searchActive: Bool = false
+    /// Non-nil while the state menu is on Merged / Closed: `prs` is then the finished list
+    /// (already search-filtered) and the deck renders it flat, newest first, with no
+    /// grouping, pinning, Postponed or Muted. Rows are display-only (click opens).
+    var finishedMode: PRStateFilter? = nil
     @ObservedObject var manager: PRManager
     @ObservedObject var settings: MainlineSettings
 
@@ -279,7 +283,9 @@ struct TriageDeckView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if searchMode {
+            if let state = finishedMode {
+                finishedList(state)
+            } else if searchMode {
                 // Flat search-results list — grouping is suspended so a single query
                 // shows every match together (pinned first), across all groups.
                 if prs.isEmpty {
@@ -629,14 +635,6 @@ struct TriageDeckView: View {
             result.append((.postponed, postponed))
         }
 
-        // Done is the LOWEST-priority section — appended LAST, after Postponed.
-        // Sourced from the display-only `doneViewPRs` (merged/closed for the
-        // current tab + scope), sorted most-recently-updated first. Collapsed by
-        // default (see `expansionBinding`).
-        let done = manager.doneViewPRs.sorted { $0.updatedAt > $1.updatedAt }
-        if !done.isEmpty {
-            result.append((.done, done))
-        }
         return result
     }
 
@@ -902,6 +900,55 @@ struct TriageDeckView: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(sections, id: \.group) { section in
                 sectionView(group: section.group, prs: section.prs, expansion: expansionBinding(for: section.group))
+            }
+        }
+    }
+
+    // MARK: - Merged / Closed list
+
+    /// The state menu's Merged / Closed view: one flat newest-first list of `doneRow`s,
+    /// with loading / error / empty states. Same on every tab.
+    @ViewBuilder
+    private func finishedList(_ state: PRStateFilter) -> some View {
+        let rows = prs.sorted { $0.updatedAt > $1.updatedAt }
+        if rows.isEmpty {
+            HStack {
+                Spacer()
+                VStack(spacing: 6) {
+                    if manager.finishedLoading {
+                        ProgressView().controlSize(.small)
+                        Text("Loading \(state.label.lowercased()) PRs…")
+                    } else if let err = manager.finishedError {
+                        Image(systemName: "exclamationmark.triangle").font(.title2)
+                        Text(err)
+                    } else {
+                        Image(systemName: state == .merged ? "arrow.triangle.merge" : "xmark.circle")
+                            .font(.title2)
+                        Text(searchActive && !manager.searchQuery.isEmpty ? "No matching PRs" : "No \(state.label.lowercased()) PRs found")
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 20)
+                Spacer()
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Text(state.label)
+                        .font(.caption).fontWeight(.bold)
+                    Text("\(rows.count)")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
+                    Spacer()
+                }
+                .padding(.horizontal, RowMetrics.horizontalPadding)
+                .padding(.top, 12).padding(.bottom, 4)
+                ForEach(rows, id: \.nodeId) { pr in
+                    doneRow(pr: pr)
+                    Divider().padding(.leading, metrics.dividerInset())
+                }
             }
         }
     }
@@ -1708,6 +1755,7 @@ struct TriageDeckView: View {
             Button { handleTriageAction(.copyLink, on: pr) } label: {
                 Label("Copy Link", systemImage: "link")
             }
+            .menuShortcut(.copyLink, settings)
             if !pr.headRefName.isEmpty {
                 Button { handleTriageAction(.copyBranch, on: pr) } label: {
                     Label("Copy Branch Name", systemImage: "doc.on.doc")
@@ -2078,6 +2126,8 @@ struct TriageDeckView: View {
     private var focusedPR: PRSnapshot? {
         // Focus is on an Inbox issue row: no PR is focused, so every PR verb no-ops.
         guard selectedIssueIndex == nil else { return nil }
+        // Merged / Closed rows are display-only: no keyboard stops, so no PR verb may act.
+        guard finishedMode == nil else { return nil }
         let ordered = orderedPRs
         guard selectedIndex < ordered.count else { return nil }
         return ordered[selectedIndex]
@@ -2117,7 +2167,7 @@ struct TriageDeckView: View {
                 if shortcutMatches(.markSeen, event: event) { manager.markIssueSeen(issue); return nil }
                 if shortcutMatches(.dismiss, event: event) { store.archive(issue); return nil }
                 if shortcutMatches(.toggleMute, event: event) { store.toggleMute(issue.nodeId); return nil }
-                if shortcutMatches(.copyBranch, event: event) { IssueRowView.copyLink(issue); return nil }
+                if shortcutMatches(.copyLink, event: event) { IssueRowView.copyLink(issue); return nil }
                 if shortcutMatches(.runPrompt, event: event), hoveredGroup.group == nil, FeatureFlagRegistry.issuePromptsEnabled {
                     manager.promptPickerTarget = PromptTarget(issues: [issue])
                     return nil
@@ -2291,7 +2341,11 @@ struct TriageDeckView: View {
             return nil
         }
 
-        // Copy the focused PR's head branch name to the clipboard.
+        // Copy the focused PR's link (C) or head branch name (⇧C) to the clipboard.
+        if shortcutMatches(.copyLink, event: event) {
+            if let pr = focusedPR { copyLink(pr) }
+            return nil
+        }
         if shortcutMatches(.copyBranch, event: event) {
             if let pr = focusedPR { copyBranch(pr) }
             return nil

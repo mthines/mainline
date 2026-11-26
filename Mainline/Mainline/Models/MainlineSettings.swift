@@ -28,6 +28,21 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
 
 // MARK: - ForMeReviewFilter
 
+/// Which lifecycle state the deck lists. `open` is the live triage deck; `merged` /
+/// `closed` (closed WITHOUT merging) are on-demand, display-only lists fetched when
+/// chosen (`PRManager.refreshFinished`) and never enter the diff baseline.
+enum PRStateFilter: String, CaseIterable, Identifiable {
+    case open, merged, closed
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .open:   return "Open"
+        case .merged: return "Merged"
+        case .closed: return "Closed"
+        }
+    }
+}
+
 /// Sub-filter for the "For me" tab: narrow the visible PRs by how the review
 /// was requested. Default `.all` shows both direct and team requests.
 enum ForMeReviewFilter: String, CaseIterable, Identifiable {
@@ -64,6 +79,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case multiSelectToggle
     case toggleDrafts
     case toggleMute
+    case copyLink
     case copyBranch
     case togglePin
     case search
@@ -88,6 +104,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "Toggle Multi-Select"
         case .toggleDrafts:     return "Toggle Drafts"
         case .toggleMute:       return "Mute / Move Up (Inbox)"
+        case .copyLink:         return "Copy Link"
         case .copyBranch:       return "Copy Branch Name"
         case .togglePin:        return "Pin / Unpin"
         case .search:           return "Find / Search"
@@ -112,7 +129,8 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "v"
         case .toggleDrafts:     return "d"
         case .toggleMute:       return "q"   // "quiet" — left-hand key (see left-hand default policy)
-        case .copyBranch:       return "c"   // "copy" — left-hand key (see left-hand default policy)
+        case .copyLink:         return "c"   // "copy" — left-hand key (see left-hand default policy)
+        case .copyBranch:       return "c"   // ⇧C (see `InAppShortcutBindings.defaults`)
         case .togglePin:        return "p"   // "pin" — mnemonic (right-hand exception, like M/N)
         case .search:           return "f"   // "find" — mnemonic (freed by moving Mark Ready to "t")
         case .runPrompt:        return "a"   // "agent" — left-hand key (see left-hand default policy)
@@ -136,6 +154,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "checkmark.circle"
         case .toggleDrafts:     return "pencil.circle"
         case .toggleMute:       return "arrow.down.circle"
+        case .copyLink:         return "link"
         case .copyBranch:       return "doc.on.doc"
         case .togglePin:        return "pin"
         case .search:           return "magnifyingglass"
@@ -188,7 +207,7 @@ enum KeyHints {
             add(.dismiss, focus.issueArchived ? "restore" : "archive")
             add(.toggleMute, "mute")
             if issuePromptsEnabled { add(.runPrompt, "agent") }
-            add(.copyBranch, "copy link")
+            add(.copyLink, "copy link")
         case .pr:
             add(.peek, "peek")
             out.append(KeyHint(glyph: "↵", label: "open"))
@@ -309,6 +328,7 @@ struct InAppShortcutBindings: Equatable {
     var multiSelectToggle: ShortcutBinding
     var toggleDrafts:    ShortcutBinding
     var toggleMute:      ShortcutBinding
+    var copyLink:        ShortcutBinding
     var copyBranch:      ShortcutBinding
     var togglePin:       ShortcutBinding
     var search:          ShortcutBinding
@@ -333,7 +353,8 @@ struct InAppShortcutBindings: Equatable {
             multiSelectToggle: ShortcutBinding(key: "v"),
             toggleDrafts:    ShortcutBinding(key: "d"),
             toggleMute:      ShortcutBinding(key: "q"),
-            copyBranch:      ShortcutBinding(key: "c"),
+            copyLink:        ShortcutBinding(key: "c"),
+            copyBranch:      ShortcutBinding(key: "c", modifiers: NSEvent.ModifierFlags.shift.rawValue),
             togglePin:       ShortcutBinding(key: "p"),
             search:          ShortcutBinding(key: "f"),
             runPrompt:       ShortcutBinding(key: "a"),
@@ -358,6 +379,7 @@ struct InAppShortcutBindings: Equatable {
         case .multiSelectToggle: return multiSelectToggle
         case .toggleDrafts:      return toggleDrafts
         case .toggleMute:        return toggleMute
+        case .copyLink:          return copyLink
         case .copyBranch:        return copyBranch
         case .togglePin:         return togglePin
         case .search:            return search
@@ -383,6 +405,7 @@ struct InAppShortcutBindings: Equatable {
         case .multiSelectToggle: multiSelectToggle = binding
         case .toggleDrafts:      toggleDrafts    = binding
         case .toggleMute:        toggleMute      = binding
+        case .copyLink:          copyLink        = binding
         case .copyBranch:        copyBranch      = binding
         case .togglePin:         togglePin       = binding
         case .search:            search          = binding
@@ -434,7 +457,7 @@ extension InAppShortcutBindings: Codable {
     enum CodingKeys: String, CodingKey {
         case navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview,
              snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
-             toggleMute, copyBranch, togglePin, search, runPrompt, addComment, undo
+             toggleMute, copyLink, copyBranch, togglePin, search, runPrompt, addComment, undo
     }
 
     /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
@@ -476,6 +499,16 @@ extension InAppShortcutBindings: Codable {
         toggleDrafts    = try decodeBinding(.toggleDrafts,    default: d.toggleDrafts)
         toggleMute      = try decodeBinding(.toggleMute,      default: d.toggleMute)
         copyBranch      = try decodeBinding(.copyBranch,      default: d.copyBranch)
+
+        // `copyLink` is new (C copies the link; the branch name moved to ⇧C). On upgrade
+        // the stored JSON has no `.copyLink` key and `copyBranch` is still the old bare
+        // "c", which would clash with copyLink's "c" default — relocate copyBranch to ⇧C.
+        // A copyBranch the user deliberately rebound is left alone. copyLink itself is
+        // decoded last (below), once every other binding is known, so its clash check
+        // sees them all.
+        if !container.contains(.copyLink), copyBranch == ShortcutBinding(key: "c") {
+            copyBranch = d.copyBranch
+        }
 
         // Search + pin migration. `search` and `togglePin` were introduced together;
         // `search`'s default key is "f", which was `markReady`'s default before this
@@ -527,6 +560,16 @@ extension InAppShortcutBindings: Codable {
             // Absent → factory default ⌘Z.
             undo = d.undo
         }
+
+        // `copyLink` (see above): absent + default "c" already taken → unbound rather than clashing.
+        if container.contains(.copyLink) {
+            copyLink = try decodeBinding(.copyLink, default: d.copyLink)
+        } else {
+            let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch,
+                         togglePin, search, runPrompt, addComment, undo].contains(d.copyLink)
+            copyLink = taken ? ShortcutBinding(key: "") : d.copyLink
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -544,6 +587,7 @@ extension InAppShortcutBindings: Codable {
         try container.encode(multiSelectToggle, forKey: .multiSelectToggle)
         try container.encode(toggleDrafts,     forKey: .toggleDrafts)
         try container.encode(toggleMute,       forKey: .toggleMute)
+        try container.encode(copyLink,         forKey: .copyLink)
         try container.encode(copyBranch,       forKey: .copyBranch)
         try container.encode(togglePin,        forKey: .togglePin)
         try container.encode(search,           forKey: .search)
@@ -759,6 +803,7 @@ final class MainlineSettings: ObservableObject {
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
         static let showDrafts           = "showDrafts"
         static let splitDrafts          = "splitDrafts"
+        static let prStateFilter        = "prStateFilter"
         static let unpinOnMerge         = "unpinOnMerge"
         static let pinsIgnoreOrgFilter  = "pinsIgnoreOrgFilter"
         static let forMeReviewFilter    = "forMeReviewFilter"
@@ -1081,6 +1126,11 @@ final class MainlineSettings: ObservableObject {
     /// and the "Needs a Human" bucket. Default OFF for a calmer view.
     @Published var showDrafts: Bool {
         didSet { defaults.set(showDrafts, forKey: Keys.showDrafts) }
+    }
+
+    /// Which PR lifecycle state the deck lists (Open / Merged / Closed). Sticky.
+    @Published var prStateFilter: PRStateFilter {
+        didSet { defaults.set(prStateFilter.rawValue, forKey: Keys.prStateFilter) }
     }
 
     /// Whether shown draft PRs get their own "Draft" section. Default OFF — drafts
@@ -1767,6 +1817,8 @@ final class MainlineSettings: ObservableObject {
         showDrafts = defaults.object(forKey: Keys.showDrafts) == nil
             ? true
             : defaults.bool(forKey: Keys.showDrafts)
+        // PR state filter — default Open (a load, so no didSet-in-init write needed)
+        prStateFilter = defaults.string(forKey: Keys.prStateFilter).flatMap(PRStateFilter.init(rawValue:)) ?? .open
         // Split drafts into their own section — default OFF (mixed inline)
         splitDrafts = defaults.bool(forKey: Keys.splitDrafts)
         // Auto-unpin merged PRs — default ON

@@ -254,7 +254,7 @@ struct IssueRowView: View {
         }
         Divider()
         Button("Copy link") { Self.copyLink(issue) }
-            .menuShortcut(.copyBranch, settings)
+            .menuShortcut(.copyLink, settings)
         if FeatureFlagRegistry.issuePromptsEnabled {
             Divider()
             PromptSubmenu(manager: manager, myLogin: settings.githubUsername,
@@ -422,7 +422,7 @@ struct IssuesView: View {
             return nil
         }
         if match(.toggleMute) { store.toggleMute(issue.nodeId); return nil }
-        if match(.copyBranch) { IssueRowView.copyLink(issue); return nil }
+        if match(.copyLink) { IssueRowView.copyLink(issue); return nil }
         return event
     }
 
