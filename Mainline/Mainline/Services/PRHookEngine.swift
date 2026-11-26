@@ -276,7 +276,7 @@ enum PRHookEngine {
 
     /// A hook on a named check: PR subject, a check trigger, and the `check:` it watches.
     static func isCheckHook(_ t: PromptTemplate) -> Bool {
-        t.subject.covers(.prs) && !parseCheckTriggers(t.on).triggers.isEmpty
+        t.hookEnabled && t.subject.covers(.prs) && !parseCheckTriggers(t.on).triggers.isEmpty
             && !t.hookCheck.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
@@ -286,10 +286,10 @@ enum PRHookEngine {
             && t.hookCheck.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    static func isHook(_ t: PromptTemplate) -> Bool { t.subject.covers(.prs) && !parseTriggers(t.on).triggers.isEmpty }
+    static func isHook(_ t: PromptTemplate) -> Bool { t.hookEnabled && t.subject.covers(.prs) && !parseTriggers(t.on).triggers.isEmpty }
 
     static func isIssueHook(_ t: PromptTemplate) -> Bool {
-        t.subject.covers(.issues) && !parseIssueTriggers(t.on).triggers.isEmpty
+        t.hookEnabled && t.subject.covers(.issues) && !parseIssueTriggers(t.on).triggers.isEmpty
     }
 
     /// The `on:` words that are a trigger for none of the subjects the template's `for:` covers.
@@ -348,7 +348,7 @@ enum PRHookEngine {
     /// content; `reviewing` never matches an issue. `when:` guards are PR-only, so an issue
     /// hook that has one never fires rather than firing more often than written.
     static func matches(_ t: PromptTemplate, issueEvent event: IssueHookEvent, myLogin: String) -> Bool {
-        guard t.subject.covers(.issues), parseIssueTriggers(t.on).triggers.contains(event.trigger) else { return false }
+        guard t.hookEnabled, t.subject.covers(.issues), parseIssueTriggers(t.on).triggers.contains(event.trigger) else { return false }
         let scopes = CommentEngine.parseScope(t.hookScope)
         guard scopes.isEmpty || scopes.contains(where: { CommentEngine.patternMatches($0, repo: event.issue.repoFullName) })
         else { return false }
@@ -396,14 +396,14 @@ enum PRHookEngine {
 
     /// Whether `template` fires for `event`: trigger, repo scope, role, then the `when:` guard.
     static func matches(_ t: PromptTemplate, event: HookEvent, myLogin: String) -> Bool {
-        guard parseTriggers(t.on).triggers.contains(event.trigger) else { return false }
+        guard t.hookEnabled, parseTriggers(t.on).triggers.contains(event.trigger) else { return false }
         return passesFilters(t, pr: event.pr, myLogin: myLogin)
     }
 
     /// Whether `template` fires for a check event: a check trigger, the named check, then the same
     /// scope / role / `when:` filters as every PR hook.
     static func matches(_ t: PromptTemplate, checkEvent event: CheckHookEvent, myLogin: String) -> Bool {
-        guard t.subject.covers(.prs), parseCheckTriggers(t.on).triggers.contains(event.trigger),
+        guard t.hookEnabled, t.subject.covers(.prs), parseCheckTriggers(t.on).triggers.contains(event.trigger),
               CheckContexts.matches(pattern: t.hookCheck, name: event.check) else { return false }
         return passesFilters(t, pr: event.pr, myLogin: myLogin)
     }
@@ -502,6 +502,167 @@ extension PRHookEngine {
             "# role:  authored (default) | reviewing | any",
             "# when:  optional state guard, e.g. !conflict (see README.txt)",
         ]).joined(separator: "\n") + "\n"
+    }
+}
+
+// MARK: - Hook editor (pure helpers behind the Settings sheet)
+
+/// One row of the sheet's When group: a thing (CI, a check, …) and the outcomes you can tick for it.
+struct HookTriggerRow: Equatable {
+    struct Outcome: Equatable { let label: String; let raw: String }
+    let title: String
+    let detail: String?
+    let outcomes: [Outcome]
+    /// The row needs a `check:` name once any of its outcomes is ticked.
+    let needsCheckName: Bool
+}
+
+extension PRHookEngine {
+    /// Rows for PR hooks. `checks` (flag `check-hooks`) adds the "A specific check" row.
+    static func prTriggerRows(checks: Bool) -> [HookTriggerRow] {
+        func o(_ label: String, _ raw: String) -> HookTriggerRow.Outcome { .init(label: label, raw: raw) }
+        var rows = [HookTriggerRow(title: "CI", detail: "all checks together", outcomes: [o("Fails", "ci-failed"), o("Passes", "ci-passed")], needsCheckName: false)]
+        if checks {
+            rows.append(HookTriggerRow(title: "A specific check", detail: "by name",
+                                       outcomes: [o("Fails", "check-failed"), o("Passes", "check-passed")], needsCheckName: true))
+        }
+        rows += [
+            HookTriggerRow(title: "Comments and reviews", detail: nil, outcomes: [
+                o("New comment", "new-comment"), o("Review requested", "review-requested"),
+                o("Approved", "approved"), o("Changes requested", "changes-requested")], needsCheckName: false),
+            HookTriggerRow(title: "Merge conflict", detail: nil, outcomes: [o("Appears", "conflict")], needsCheckName: false),
+            HookTriggerRow(title: "PR state", detail: nil, outcomes: [
+                o("Ready for review", "ready-for-review"), o("Ready to merge", "ready-to-merge"),
+                o("Merged", "merged"), o("Closed", "closed")], needsCheckName: false),
+        ]
+        return rows
+    }
+
+    /// Rows for issue hooks (flag `issue-hooks`).
+    static var issueTriggerRows: [HookTriggerRow] {
+        func o(_ label: String, _ raw: String) -> HookTriggerRow.Outcome { .init(label: label, raw: raw) }
+        return [
+            HookTriggerRow(title: "New issue", detail: nil, outcomes: [o("Opened", "new-issue")], needsCheckName: false),
+            HookTriggerRow(title: "Assignment", detail: nil, outcomes: [o("Assigned to you", "assigned")], needsCheckName: false),
+            HookTriggerRow(title: "Conversation", detail: nil, outcomes: [o("Mentioned", "mentioned"), o("New comment", "new-comment")], needsCheckName: false),
+            HookTriggerRow(title: "State", detail: nil, outcomes: [o("Closed", "closed")], needsCheckName: false),
+        ]
+    }
+
+    /// Every real trigger word, PR then check then issue, no repeats: the fixed order `on:` is written in.
+    static var canonicalTriggerOrder: [String] {
+        var seen = Set<String>()
+        let all = HookTrigger.allCases.map(\.rawValue) + CheckHookTrigger.allCases.map(\.rawValue) + IssueHookTrigger.allCases.map(\.rawValue)
+        return all.filter { seen.insert($0).inserted }
+    }
+
+    /// The inverse of `parseTriggers`: ticked trigger words → the `on:` value, in canonical order. Words
+    /// in `existing` that are no trigger at all (a typo, a future trigger) are kept at the end, so
+    /// editing in Settings never silently deletes what it cannot show.
+    static func composeTriggers(_ ticked: Set<String>, keeping existing: String = "") -> String {
+        let known = Set(canonicalTriggerOrder)
+        let order = canonicalTriggerOrder.filter { ticked.contains($0) }
+        let kept = existing.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty && !known.contains($0) }
+        var seen = Set<String>()
+        return (order + kept).filter { seen.insert($0).inserted }.joined(separator: ", ")
+    }
+
+    /// The trigger words a template's `on:` holds, known or not.
+    static func tickedTriggers(_ on: String) -> Set<String> {
+        Set(on.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty })
+    }
+
+    /// Whether Settings lists the template as a hook: it has a trigger, or it is switched off (an off hook
+    /// stays visible even before it has a trigger).
+    static func isListedHook(_ t: PromptTemplate) -> Bool {
+        !t.on.trimmingCharacters(in: .whitespaces).isEmpty || !t.hookEnabled
+    }
+
+    private static func phrase(_ raw: String, check: String) -> String {
+        let name = check.trimmingCharacters(in: .whitespaces)
+        let checkText = name.isEmpty ? "a check" : "check “\(name)”"
+        switch raw {
+        case "ci-failed": return "CI fails"
+        case "ci-passed": return "CI passes"
+        case "check-failed": return "\(checkText) fails"
+        case "check-passed": return "\(checkText) passes"
+        case "new-comment": return "a new comment arrives"
+        case "review-requested": return "a review is requested"
+        case "approved": return "it is approved"
+        case "changes-requested": return "changes are requested"
+        case "conflict": return "a merge conflict appears"
+        case "ready-for-review": return "a draft is marked ready"
+        case "ready-to-merge": return "it is ready to merge"
+        case "merged": return "it merges"
+        case "closed": return "it closes"
+        case "new-issue": return "a new issue opens"
+        case "assigned": return "an issue is assigned to you"
+        case "mentioned": return "you are mentioned"
+        default: return raw
+        }
+    }
+
+    /// The one-line sentence a hook row shows, built from its fields: "When CI fails or it merges on your PRs · All repos".
+    static func describe(_ t: PromptTemplate) -> String {
+        let words = canonicalTriggerOrder.filter { tickedTriggers(t.on).contains($0) }
+        guard !words.isEmpty else { return "No triggers yet" }
+        let when = words.map { phrase($0, check: t.hookCheck) }.joined(separator: " or ")
+        let issues = t.subject == .issues
+        let who: String
+        switch HookRole.parse(t.hookRole) {
+        case .authored: who = issues ? "your issues" : "your PRs"
+        case .reviewing: who = "PRs you review"
+        case .any: who = issues ? "any issue" : "any PR"
+        }
+        let scope = t.hookScope.trimmingCharacters(in: .whitespaces)
+        return "When \(when) on \(who) · \(scope.isEmpty ? "All repos" : scope)"
+    }
+
+    /// A message for a repo pattern that cannot match anything (`owner/repo`, `owner/*` or `*`), else nil.
+    static func scopeProblem(_ text: String) -> String? {
+        for pattern in CommentEngine.parseScope(text) where pattern != "*" {
+            let parts = pattern.split(separator: "/", omittingEmptySubsequences: false)
+            let ok = parts.count == 2 && !parts[0].isEmpty && !parts[1].isEmpty && !pattern.contains(" ") && !parts[0].contains("*")
+                && (parts[1] == "*" || !parts[1].contains("*"))
+            if !ok { return "“\(pattern)” isn't a repo pattern: use owner/repo, owner/* or *." }
+        }
+        return nil
+    }
+
+    /// Everything wrong with a hook as written: unknown trigger words, a check trigger without a name,
+    /// a bad repo pattern, an unknown `when:` state. Empty = fine.
+    static func problems(_ t: PromptTemplate, issues: Bool, checks: Bool) -> [String] {
+        var out: [String] = []
+        let unknown = unknownTriggers(t, issues: issues, checks: checks)
+        if !unknown.isEmpty { out.append("Unknown trigger: \(unknown.joined(separator: ", ")).") }
+        if checks, checkHookMissingName(t) { out.append("Name the check, or use * for any check.") }
+        if let message = scopeProblem(t.hookScope) { out.append(message) }
+        let guardWords = PromptState.parse(t.when).unknown
+        if !guardWords.isEmpty {
+            out.append("“\(guardWords.joined(separator: ", "))” isn't a state. Try: "
+                       + PromptState.tokens.prefix(4).map(\.name).joined(separator: ", ") + ".")
+        }
+        return out
+    }
+
+    /// The amber line on the sheet: what Save arms, with the countdown and the throttle in numbers.
+    static func consentLine(_ t: PromptTemplate, harnessLabel: String, countdownSeconds: Int) -> String {
+        guard t.hookEnabled else { return "This hook is off. Nothing runs until you switch it on in the list." }
+        guard !tickedTriggers(t.on).isEmpty else { return "Pick at least one trigger to arm this hook." }
+        let start = countdownSeconds == 0 ? "starts immediately" : "shows a \(countdownSeconds) s banner, then starts"
+        let minutes = Int(Throttle().cooldown / 60)
+        return "\(describe(t)): \(start) \(harnessLabel). At most once per PR every \(minutes) min."
+    }
+
+    /// A new hook as the sheet opens it: off, your own PRs, every repo not yet chosen, no trigger ticked.
+    static func newHook(existingFiles: Set<String>, harness: String) -> PromptTemplate {
+        var t = PromptTemplate(
+            fileName: PromptEngine.fileName(forName: "New hook", existing: existingFiles), name: "New hook",
+            harness: harness, checkout: false,
+            body: "In a new git worktree of {{pr.branch}}, investigate the failing checks on {{pr.url}} and push a fix.")
+        t.hookEnabled = false
+        return t
     }
 }
 
@@ -815,6 +976,146 @@ enum CheckHookChecks {
         assert(!throttle.admit(key: PRHookEngine.Throttle.key("h", both[0]), now: now.addingTimeInterval(60)), "the same check is throttled")
         assert(PRHookEngine.Throttle.key("h", both[0]) != PRHookEngine.Throttle.key("h", both[1]), "keys differ per check")
         print("CHECK HOOK throttle-per-check OK")
+    }
+}
+/// Self-checks for the Settings hook editor's pure helpers (frontmatter patching, `enabled:`,
+/// trigger rows, sentences, validation). Each prints one `HOOK EDITOR <name> OK` line.
+enum HookEditorChecks {
+    static func run() {
+        func hook(on: String = "ci-failed", enabled: Bool = true) -> PromptTemplate {
+            var t = PromptTemplate(fileName: "h.md", name: "H", harness: "claude", checkout: false, body: "Fix {{pr.url}}")
+            t.on = on; t.hookEnabled = enabled
+            return t
+        }
+
+        // AC-1: comments, unknown keys and their order survive; only owned keys change.
+        let file = """
+        ---
+        # my note: keep me
+        name: H
+        x-note: keep
+        harness: claude
+        checkout: false
+        # on: approved
+        on: ci-failed
+        # trailing note
+        ---
+        Fix {{pr.url}}
+        """
+        var changed = PromptEngine.parse(fileName: "h.md", text: file)!
+        changed.on = "ci-failed, merged"; changed.hookScope = "dash0hq/*"; changed.name = "Renamed"
+        let patched = PromptEngine.patch(existing: file, with: changed)
+        let patchedLines = patched.components(separatedBy: "\n")
+        assert(patchedLines.contains("# my note: keep me") && patchedLines.contains("# on: approved") && patchedLines.contains("# trailing note"),
+               "comments survive a save")
+        assert(patchedLines.contains("x-note: keep"), "an unknown key survives a save")
+        let order = ["# my note: keep me", "name: Renamed", "x-note: keep", "harness: claude", "# on: approved", "on: ci-failed, merged"]
+        let positions = order.map { patchedLines.firstIndex(of: $0) ?? -1 }
+        assert(!positions.contains(-1) && positions == positions.sorted(), "line order is unchanged")
+        let reparsed = PromptEngine.parse(fileName: "h.md", text: patched)!
+        assert(reparsed.name == "Renamed" && reparsed.on == "ci-failed, merged" && reparsed.hookScope == "dash0hq/*" && reparsed.body == "Fix {{pr.url}}",
+               "the patched file parses back to the edit")
+        print("HOOK EDITOR patch-preserves OK")
+
+        // AC-1: a missing key lands before the closing ---, an emptied key goes, only owned lines change.
+        let two = "---\nname: A\n# c\nfoo: bar\n---\nbody\n"
+        let added = PromptEngine.patchFrontmatter(two, set: ["scope": "o/r"])
+        assert(added == "---\nname: A\n# c\nfoo: bar\nscope: o/r\n---\nbody\n", "a missing key is added before the closing ---")
+        let removed = PromptEngine.patchFrontmatter(added, set: [:], remove: ["scope"])
+        assert(removed == two, "removing the key restores the file")
+        assert(PromptEngine.patchFrontmatter(two, set: ["name": "A"]) == two, "an unchanged value keeps its line")
+        assert(PromptEngine.patchFrontmatter(two, set: ["foo": ""]) == "---\nname: A\n# c\n---\nbody\n", "an empty value removes the key")
+        let bare = PromptEngine.patchFrontmatter("just text\n", set: ["name": "N"])
+        assert(bare == "---\nname: N\n---\njust text\n", "a file with no frontmatter gains one")
+        print("HOOK EDITOR patch-edits OK")
+        assert(PromptEngine.patch(existing: patched, with: reparsed) == patched, "patching twice with the same values changes nothing")
+        print("HOOK EDITOR patch-idempotent OK")
+
+        // AC-2: enabled round-trips; absent = on and writes no key.
+        let off = PromptEngine.parse(fileName: "o.md", text: "---\nname: O\non: merged\nenabled: false\n---\nx")!
+        assert(!off.hookEnabled && off.on == "merged", "enabled: false parses as off and keeps the triggers")
+        assert(PromptEngine.serialize(off).contains("enabled: false\n"), "an off hook serializes its key")
+        assert(!PromptEngine.parse(fileName: "o.md", text: PromptEngine.serialize(off))!.hookEnabled, "off survives a round trip")
+        let onHook = PromptEngine.parse(fileName: "o.md", text: "---\nname: O\non: merged\n---\nx")!
+        assert(onHook.hookEnabled && !PromptEngine.serialize(onHook).contains("enabled"), "absent key = on, and none is written")
+        assert(PromptEngine.parse(fileName: "o.md", text: "---\nname: O\nenabled: no\n---\nx")!.hookEnabled == false, "no / 0 / off also mean off")
+        let turnedOn = PromptEngine.patch(existing: PromptEngine.serialize(off), with: onHook)
+        assert(!turnedOn.contains("enabled"), "switching a hook on removes the key")
+        print("HOOK EDITOR enabled-roundtrip OK")
+
+        // AC-3: an off hook never matches, and is still listed.
+        let pr = PRSnapshot(
+            nodeId: "n1", number: 1, title: "t", htmlUrl: "u", repoFullName: "o/r", isDraft: false, state: "open",
+            reviewDecision: nil, ciStatus: .failure, reviewState: .none, commentCount: 0, updatedAt: "",
+            author: "me", requestedReviewers: [], mergeable: true)
+        let issue = IssueSnapshot(nodeId: "i1", number: 1, title: "t", url: "u", repoFullName: "o/r", author: "me",
+                                  createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0))
+        func offSample(_ on: String, check: String = "") -> PromptTemplate { var t = hook(on: on, enabled: false); t.hookCheck = check; t.subject = .both; return t }
+        func onSample(_ on: String, check: String = "") -> PromptTemplate { var t = offSample(on, check: check); t.hookEnabled = true; return t }
+        let prEvent = HookEvent(trigger: .ciFailed, pr: pr)
+        let checkEvent = CheckHookEvent(trigger: .checkFailed, pr: pr, check: "lint")
+        let issueEvent = IssueHookEvent(trigger: .assigned, issue: issue)
+        assert(PRHookEngine.matches(onSample("ci-failed"), event: prEvent, myLogin: "me"), "the on hook matches")
+        assert(!PRHookEngine.matches(offSample("ci-failed"), event: prEvent, myLogin: "me"), "an off hook skips PR events")
+        assert(PRHookEngine.matches(onSample("check-failed", check: "lint"), checkEvent: checkEvent, myLogin: "me"), "the on check hook matches")
+        assert(!PRHookEngine.matches(offSample("check-failed", check: "lint"), checkEvent: checkEvent, myLogin: "me"), "an off hook skips check events")
+        var issueOn = onSample("assigned"); issueOn.subject = .issues; var issueOff = issueOn; issueOff.hookEnabled = false
+        issueOn.body = "{{issue.url}}"; issueOff.body = "{{issue.url}}"
+        assert(PRHookEngine.matches(issueOn, issueEvent: issueEvent, myLogin: "me"), "the on issue hook matches")
+        assert(!PRHookEngine.matches(issueOff, issueEvent: issueEvent, myLogin: "me"), "an off hook skips issue events")
+        assert(!PRHookEngine.isHook(offSample("ci-failed")) && !PRHookEngine.isCheckHook(offSample("check-failed", check: "x"))
+               && !PRHookEngine.isIssueHook(issueOff), "an off hook is no live hook, so no query wants its data")
+        assert(PRHookEngine.isListedHook(offSample("ci-failed")) && PRHookEngine.isListedHook(offSample("")), "an off hook stays listed")
+        assert(!PRHookEngine.isListedHook(hook(on: "", enabled: true)), "a plain template is not listed")
+        print("HOOK EDITOR disabled-silent OK")
+
+        // AC-4: ticked triggers parse back exactly, in a fixed order, and the rows cover every real trigger.
+        let ticked: Set<String> = ["merged", "ci-failed", "check-passed", "assigned", "approved"]
+        let on = PRHookEngine.composeTriggers(ticked)
+        assert(on == "approved, ci-failed, merged, check-passed, assigned", "canonical order: \(on)")
+        let back = hook(on: on)
+        assert(Set(PRHookEngine.parseTriggers(on).triggers.map(\.rawValue)) == ["approved", "ci-failed", "merged"], "PR triggers parse back")
+        assert(PRHookEngine.parseCheckTriggers(back.on).triggers.map(\.rawValue) == ["check-passed"], "check triggers parse back")
+        assert(PRHookEngine.parseIssueTriggers(back.on).triggers.map(\.rawValue) == ["assigned"], "issue triggers parse back")
+        assert(PRHookEngine.tickedTriggers(on) == ticked, "ticked set round-trips")
+        assert(PRHookEngine.composeTriggers(["ci-failed"], keeping: "ci-failed, nope, merged") == "ci-failed, nope", "unknown words are kept")
+        assert(PRHookEngine.composeTriggers([]) == "", "nothing ticked = empty")
+        let rowWords = (PRHookEngine.prTriggerRows(checks: true) + PRHookEngine.issueTriggerRows).flatMap { $0.outcomes.map(\.raw) }
+        let known = Set(PRHookEngine.canonicalTriggerOrder)
+        assert(rowWords.allSatisfy(known.contains), "every row outcome is a real trigger")
+        assert(known.isSubset(of: Set(rowWords)), "every real trigger has a row outcome")
+        assert(!PRHookEngine.prTriggerRows(checks: false).flatMap { $0.outcomes.map(\.raw) }.contains("check-failed"), "no check row while the flag is off")
+        print("HOOK EDITOR triggers-compose OK")
+
+        // AC-5: the sentence, the validation messages and the consent line.
+        var h = hook(on: "check-failed, merged"); h.hookCheck = "lint"
+        assert(PRHookEngine.describe(h) == "When it merges or check “lint” fails on your PRs · All repos", PRHookEngine.describe(h))
+        h.hookScope = "dash0hq/*"; h.hookRole = "reviewing"
+        assert(PRHookEngine.describe(h) == "When it merges or check “lint” fails on PRs you review · dash0hq/*", PRHookEngine.describe(h))
+        assert(PRHookEngine.describe(hook(on: "")) == "No triggers yet", "no triggers")
+        assert(PRHookEngine.problems(hook(on: "ci-failed"), issues: false, checks: true).isEmpty, "a fine hook has no problems")
+        assert(PRHookEngine.problems(hook(on: "ci-faild"), issues: false, checks: true).first?.contains("ci-faild") == true, "unknown trigger")
+        var noName = hook(on: "check-failed"); noName.hookCheck = ""
+        assert(PRHookEngine.problems(noName, issues: false, checks: true).contains("Name the check, or use * for any check."), "empty check name")
+        var badScope = hook(); badScope.hookScope = "dash0hq"
+        assert(PRHookEngine.problems(badScope, issues: false, checks: true).first?.contains("dash0hq") == true, "bad repo pattern")
+        assert(PRHookEngine.scopeProblem("a/b, c/*, *") == nil && PRHookEngine.scopeProblem("a/b/c") != nil && PRHookEngine.scopeProblem("*/x") != nil, "scope patterns")
+        var guarded = hook(); guarded.when = "dirty"
+        assert(PRHookEngine.problems(guarded, issues: false, checks: true).first?.contains("dirty") == true, "unknown when state")
+        let consent = PRHookEngine.consentLine(hook(), harnessLabel: "Claude Code", countdownSeconds: 10)
+        assert(consent.contains("10 s") && consent.contains("30 min") && consent.contains("Claude Code") && consent.contains("CI fails"), consent)
+        assert(PRHookEngine.consentLine(hook(), harnessLabel: "X", countdownSeconds: 0).contains("immediately"), "no countdown")
+        assert(PRHookEngine.consentLine(hook(enabled: false), harnessLabel: "X", countdownSeconds: 10).contains("is off"), "off hook says it is off")
+        print("HOOK EDITOR summary-validate OK")
+
+        // AC-6: New Hook starts off, authored, every repo not chosen yet, nothing ticked, and is listed.
+        let fresh = PRHookEngine.newHook(existingFiles: ["new-hook.md"], harness: "claude")
+        assert(!fresh.hookEnabled && fresh.on.isEmpty && fresh.hookRole.isEmpty && fresh.hookScope.isEmpty, "safe defaults")
+        assert(fresh.fileName == "new-hook-2.md" && PRHookEngine.isListedHook(fresh), "unique file name, and the list shows it")
+        assert(HookRole.parse(fresh.hookRole) == .authored, "role defaults to your own PRs")
+        let saved = PromptEngine.parse(fileName: fresh.fileName, text: PromptEngine.serialize(fresh))!
+        assert(!saved.hookEnabled && PRHookEngine.isListedHook(saved), "the saved file is still off and listed")
+        print("HOOK EDITOR new-hook-off OK")
     }
 }
 #endif

@@ -56,6 +56,9 @@ struct PromptTemplate: Identifiable, Equatable {
     var hookCheck: String = ""
     /// Whether it runs on PRs, issues or both (`for:`). Default PRs.
     var subject: PromptSubject = .prs
+    /// `enabled: false` switches a hook off without removing its triggers: it stays in Settings, never
+    /// fires. Absent = on, so every existing hook keeps working.
+    var hookEnabled: Bool = true
 
     var id: String { fileName }
 
@@ -605,7 +608,8 @@ enum PromptEngine {
             hookScope: meta["scope"] ?? "",
             hookRole: meta["role"] ?? "",
             hookCheck: meta["check"] ?? "",
-            subject: PromptSubject.parse(meta["for"])
+            subject: PromptSubject.parse(meta["for"]),
+            hookEnabled: !["false", "no", "0", "off"].contains((meta["enabled"] ?? "").lowercased())
         )
     }
 
@@ -630,22 +634,82 @@ enum PromptEngine {
         return (clean(shared), bodies.mapValues(clean).filter { !$0.value.isEmpty })
     }
 
-    static func serialize(_ t: PromptTemplate) -> String {
+    /// The text after the frontmatter: the shared prompt, then one `--- harness: key` section per
+    /// harness that has its own wording.
+    private static func bodyBlock(_ t: PromptTemplate) -> String {
         // Sections follow the order of `harnessKeys`; keys not in it keep a stable (sorted) order.
         let sectionKeys = t.harnessKeys + t.harnessBodies.keys.sorted().filter { !t.harnessKeys.contains($0) }
         let sections = sectionKeys.compactMap { key -> String? in
             guard let text = t.harnessBodies[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
             return "\n\(sectionMarker) \(key)\n\(text)\n"
         }.joined()
+        return "\(t.body)\n\(sections)"
+    }
+
+    static func serialize(_ t: PromptTemplate) -> String {
         return """
         ---
         name: \(t.name)
         harness: \(t.harnessKeys.joined(separator: ", "))
         checkout: \(t.checkout ? "true" : "false")
-        \(t.subject == .prs ? "" : "for: \(t.subject.rawValue)\n")\(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")\(t.hookCheck.isEmpty ? "" : "check: \(t.hookCheck)\n")---
-        \(t.body)
-        \(sections)
+        \(t.subject == .prs ? "" : "for: \(t.subject.rawValue)\n")\(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")\(t.hookCheck.isEmpty ? "" : "check: \(t.hookCheck)\n")\(t.hookEnabled ? "" : "enabled: false\n")---
+        \(bodyBlock(t))
         """
+    }
+
+    // MARK: Patching an existing file
+
+    /// The frontmatter keys Settings edits. Every other key and every `#` comment in a file is left alone.
+    static let ownedKeys = ["name", "harness", "checkout", "for", "when", "priority", "on", "scope", "role", "check", "enabled"]
+
+    /// Sets (`set`) or drops (`remove`) frontmatter keys in `text` line by line, so comments, blank lines,
+    /// unknown keys and their order survive. A key already present keeps its line when the value is
+    /// unchanged; a key not present is added just before the closing `---`; an empty value removes.
+    /// A file with no frontmatter gains one. The body is returned untouched.
+    static func patchFrontmatter(_ text: String, set: [String: String], remove: Set<String> = []) -> String {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        var lines = normalized.components(separatedBy: "\n")
+        let canonical = ownedKeys.filter { set[$0] != nil } + set.keys.filter { !ownedKeys.contains($0) }.sorted()
+        func line(_ key: String) -> String { "\(key): \(set[key] ?? "")" }
+        guard normalized.hasPrefix("---\n"), let end = lines.indices.dropFirst().first(where: { lines[$0].hasPrefix("---") }) else {
+            let header = canonical.filter { !(set[$0] ?? "").isEmpty }.map(line)
+            return (["---"] + header + ["---"]).joined(separator: "\n") + "\n" + normalized
+        }
+        var seen = Set<String>()
+        var out: [String] = [lines[0]]
+        for i in 1..<end {
+            let raw = lines[i]
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.hasPrefix("#"), let colon = trimmed.firstIndex(of: ":") else { out.append(raw); continue }
+            let key = trimmed[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            if remove.contains(key) || (set[key]?.isEmpty ?? false) { continue }
+            guard let value = set[key] else { out.append(raw); continue }
+            let current = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            seen.insert(key)
+            out.append(current == value ? raw : line(key))
+        }
+        for key in canonical where !seen.contains(key) && !(set[key] ?? "").isEmpty && !remove.contains(key) { out.append(line(key)) }
+        out.append(contentsOf: lines[end...])
+        lines = out
+        return lines.joined(separator: "\n")
+    }
+
+    /// `existing` rewritten with the values of `t`: the owned keys and the prompt change, nothing else does.
+    static func patch(existing: String, with t: PromptTemplate) -> String {
+        var set: [String: String] = [
+            "name": t.name, "harness": t.harnessKeys.joined(separator: ", "), "checkout": t.checkout ? "true" : "false",
+        ]
+        var drop = Set<String>()
+        func opt(_ key: String, _ value: String) { if value.isEmpty { drop.insert(key) } else { set[key] = value } }
+        opt("for", t.subject == .prs ? "" : t.subject.rawValue)
+        opt("when", t.when); opt("on", t.on); opt("scope", t.hookScope); opt("role", t.hookRole); opt("check", t.hookCheck)
+        opt("priority", t.priority == 0 ? "" : String(t.priority))
+        opt("enabled", t.hookEnabled ? "" : "false")
+        let headerPatched = patchFrontmatter(existing, set: set, remove: drop)
+        // Replace everything after the closing `---` with the template's prompt.
+        let lines = headerPatched.components(separatedBy: "\n")
+        guard let end = lines.indices.dropFirst().first(where: { lines[$0].hasPrefix("---") }) else { return headerPatched }
+        return lines[...end].joined(separator: "\n") + "\n" + bodyBlock(t)
     }
 
     /// `Review PR!` → `review-pr.md`, de-duplicated against `existing`.
