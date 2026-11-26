@@ -96,6 +96,20 @@ struct HookEditorSheet: View {
         }
     }
 
+    /// Changing the subject drops the known trigger words its rows no longer offer, so none is left ticked
+    /// with no row to untick it. Unknown words stay, so the sheet still reports them.
+    private var subjectBinding: Binding<PromptSubject> {
+        Binding(
+            get: { draft.subject },
+            set: { new in
+                draft.subject = new
+                let offered = Set(rows.flatMap { $0.outcomes.map(\.raw) })
+                let known = Set(PRHookEngine.canonicalTriggerOrder)
+                let keep = PRHookEngine.tickedTriggers(draft.on).filter { offered.contains($0) || !known.contains($0) }
+                draft.on = PRHookEngine.composeTriggers(keep.filter { known.contains($0) }, keeping: draft.on.split(separator: ",").map(String.init).filter { w in !known.contains(w.trimmingCharacters(in: .whitespaces).lowercased()) }.joined(separator: ","))
+            })
+    }
+
     private var ticked: Set<String> { PRHookEngine.tickedTriggers(draft.on) }
 
     private func binding(for raw: String) -> Binding<Bool> {
@@ -114,7 +128,7 @@ struct HookEditorSheet: View {
                 Text("When").font(.headline)
                 Spacer()
                 if issueHooks {
-                    Picker("About", selection: $draft.subject) {
+                    Picker("About", selection: subjectBinding) {
                         Text("Pull requests").tag(PromptSubject.prs)
                         Text("Issues").tag(PromptSubject.issues)
                         if draft.subject == .both { Text("Both").tag(PromptSubject.both) }

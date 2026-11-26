@@ -317,10 +317,11 @@ struct PromptsSettingsView: View {
         let named = checkWords.isEmpty || h.hookCheck.isEmpty ? "" : " “\(h.hookCheck)”"
         let triggers = (prWords + checkWords.map { $0 + named } + issueWords.filter { !prWords.contains($0) }).joined(separator: ", ")
         guard !triggers.isEmpty else { return "inactive: no trigger it can fire on" }
+        let off = h.hookEnabled ? "" : "off · "
         let role = HookRole.parse(h.hookRole).rawValue
         let scope = h.hookScope.isEmpty ? "all repos" : h.hookScope
         let things = issueWords.isEmpty ? "PRs" : prWords.isEmpty ? "issues" : "PRs and issues"
-        return "on \(triggers) · \(role) \(things) · \(scope)"
+        return "\(off)on \(triggers) · \(role) \(things) · \(scope)"
     }
 
     // MARK: Editor
