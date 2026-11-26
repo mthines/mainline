@@ -1,0 +1,6 @@
+# .agents/aw/merge.yml — atelier. Committed; no secrets. Field reference: the atelier skill's SKILL.md.
+version: 1
+# Why this repo has no merge queue and no required checks on main. Preflight shows this on every run and
+# `/atelier setup` prints it as DECIDED, so nobody proposes a queue again. Revisit if the repo moves to an
+# organization or a GH_PAT secret is added (see .agents/aw/notes.md).
+protection: "user-owned repo, so GitHub offers no merge queue; a required-checks rule on main would block the release job's own push (GITHUB_TOKEN, no GH_PAT; the Actions app cannot bypass a user-owned ruleset)"
