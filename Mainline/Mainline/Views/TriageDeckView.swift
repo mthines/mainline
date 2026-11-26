@@ -924,7 +924,7 @@ struct TriageDeckView: View {
                     } else {
                         Image(systemName: state == .merged ? "arrow.triangle.merge" : "xmark.circle")
                             .font(.title2)
-                        Text(searchMode ? "No matching PRs" : "No \(state.label.lowercased()) PRs found")
+                        Text(searchActive && !manager.searchQuery.isEmpty ? "No matching PRs" : "No \(state.label.lowercased()) PRs found")
                     }
                 }
                 .font(.callout)

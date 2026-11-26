@@ -738,12 +738,25 @@ struct MenuBarView: View {
         let state = settings.prStateFilter
         let draftsHidden = state == .open && !settings.showDrafts
         return Menu {
-            Picker("Show", selection: $settings.prStateFilter) {
+            Picker("Show", selection: Binding(
+                get: { settings.prStateFilter },
+                set: { newValue in
+                    guard newValue != settings.prStateFilter else { return }
+                    settings.prStateFilter = newValue
+                    TelemetryService.shared.recordTriageInteraction("pr_state_\(newValue.rawValue)")
+                }
+            )) {
                 ForEach(PRStateFilter.allCases) { Text($0.label).tag($0) }
             }
             .pickerStyle(.inline)
             Divider()
-            Toggle("Show drafts", isOn: $settings.showDrafts)
+            Toggle("Show drafts", isOn: Binding(
+                get: { settings.showDrafts },
+                set: { newValue in
+                    settings.showDrafts = newValue
+                    TelemetryService.shared.recordTriageInteraction("toggle_drafts")
+                }
+            ))
                 .disabled(state != .open)
         } label: {
             HStack(spacing: 3) {

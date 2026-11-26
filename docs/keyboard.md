@@ -81,7 +81,7 @@ The menu carries every action for that PR, in this order:
 1. **GitHub write actions** — approve, merge, request changes, and mark ready for review (drafts) or convert to draft (open, non-draft PRs).
 2. **Triage** — later (every snooze duration), mark seen, dismiss, and mute (Inbox only).
 3. **View and open** — view details, open, open on GitHub (only when Linear is your open target), open preview (when one was detected), and pin / unpin.
-4. **Copy** — copy link (the GitHub URL) and copy branch name.
+4. **Copy** — copy link (the GitHub URL, `C`) and copy branch name (`⇧C`).
 5. **Run Prompt** — starts an agent session from a template (on a stacked PR: on the whole stack or just that PR). Press it while the pointer is over a stack header or a section/role header to run on every PR in that group.
 6. **Comment** — posts a canned comment (scoped to the PR's repo) or opens the picker for a typed one. Disabled while write actions are off.
 7. **Close PR**, set apart at the bottom. A closed PR that is still on screen — because it is pinned — shows **Reopen PR** instead.
@@ -89,7 +89,7 @@ The menu carries every action for that PR, in this order:
 The "open" item follows your open target, so it reads **Open in Linear** when Linear is configured.
 
 Postponed rows have the same menu, with **Resume** in place of **Later**.
-Rows in **Done** have a shorter menu: open, open on GitHub, copy link, copy branch name, and — for a PR closed without merging — reopen.
+Rows in the **Merged** and **Closed** lists have a shorter menu: open, open on GitHub, copy link, copy branch name, and — for a PR closed without merging — reopen.
 
 ## Copying a section
 

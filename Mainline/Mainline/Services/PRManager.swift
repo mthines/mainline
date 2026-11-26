@@ -997,8 +997,14 @@ final class PRManager: ObservableObject {
             finishedState = state
             finishedFetchedAt = Date()
             finishedError = nil
-            TelemetryService.shared.recordTriageInteraction("pr_state_\(state.rawValue)")
         } catch {
+            // Same staleness check as the success path: a failure for a state the user has
+            // already left must not become the new state's error, and the new state still loads.
+            guard settings.prStateFilter == state else {
+                finishedLoading = false
+                await refreshFinished(force: force)
+                return
+            }
             finishedError = "Couldn't load \(state.label.lowercased()) PRs"
         }
     }
