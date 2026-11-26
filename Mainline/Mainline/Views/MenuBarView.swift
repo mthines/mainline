@@ -338,13 +338,6 @@ struct MenuBarView: View {
 
     // MARK: - Derived data
 
-    /// PRs belonging to the currently selected tab, filtered by scope, drafts, and
-    /// the For-me Direct/Team sub-filter. This is the single source of truth for
-    /// the visible list, the sections, and every count derived below. Delegates to
-    /// `manager.currentViewPRs` — the SAME computation the menu-bar badge reads — so
-    /// the list and the badge can never diverge; this view only adds the display
-    /// sort. The browse deck's "Needs attention" group (`ActionGroup.needsAttention`)
-    /// is the single "needs attention" concept; there is no separate top bucket.
     /// The Merged / Closed list, narrowed by the search query while search is typing.
     private var finishedRows: [PRSnapshot] {
         let rows = manager.finishedViewPRs
@@ -352,6 +345,13 @@ struct MenuBarView: View {
         return rows.filter { PRSearchFilter.matches($0, query: manager.searchQuery) }
     }
 
+    /// PRs belonging to the currently selected tab, filtered by scope, drafts, and
+    /// the For-me Direct/Team sub-filter. This is the single source of truth for
+    /// the visible list, the sections, and every count derived below. Delegates to
+    /// `manager.currentViewPRs` — the SAME computation the menu-bar badge reads — so
+    /// the list and the badge can never diverge; this view only adds the display
+    /// sort. The browse deck's "Needs attention" group (`ActionGroup.needsAttention`)
+    /// is the single "needs attention" concept; there is no separate top bucket.
     private var visiblePRs: [PRSnapshot] {
         manager.currentViewPRs.sorted(by: PRSnapshot.triageOrder)
     }

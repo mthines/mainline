@@ -641,7 +641,8 @@ final class GitHubClient {
         token: String,
         tab: ReviewTab,
         first: Int,
-        etagPrefix: String
+        etagPrefix: String,
+        sendETag: Bool = true
     ) async throws -> (snapshots: [PRSnapshot], etag: String?) {
         guard let url = URL(string: "https://api.github.com/graphql") else {
             throw GitHubAPIError.unknown(0)
@@ -665,7 +666,9 @@ final class GitHubClient {
         // (and the open vs. done fetches) never collide, and so a 304 earned by the
         // degraded retry page can't suppress the next full-size fetch.
         let etagKey = "\(etagPrefix).\(tab.rawValue).\(first).\(query)"
-        if let storedEtag = settings.etag(for: etagKey) {
+        // On-demand callers keep no copy of the last result, so a 304 would leave them
+        // with nothing to show — they pass `sendETag: false` and always get a body.
+        if sendETag, let storedEtag = settings.etag(for: etagKey) {
             request.setValue(storedEtag, forHTTPHeaderField: "If-None-Match")
         }
 
@@ -874,7 +877,7 @@ final class GitHubClient {
         for query in FinishedQuery.queries(for: state) {
             let (snapshots, _) = try await runSearch(
                 query: query, token: token, tab: .inbox, first: FinishedQuery.perQuery,
-                etagPrefix: "graphql.finished"
+                etagPrefix: "graphql.finished", sendETag: false
             )
             for pr in snapshots where seen.insert(pr.nodeId).inserted { all.append(pr) }
         }

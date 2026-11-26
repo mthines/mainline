@@ -2126,6 +2126,8 @@ struct TriageDeckView: View {
     private var focusedPR: PRSnapshot? {
         // Focus is on an Inbox issue row: no PR is focused, so every PR verb no-ops.
         guard selectedIssueIndex == nil else { return nil }
+        // Merged / Closed rows are display-only: no keyboard stops, so no PR verb may act.
+        guard finishedMode == nil else { return nil }
         let ordered = orderedPRs
         guard selectedIndex < ordered.count else { return nil }
         return ordered[selectedIndex]

@@ -28,8 +28,6 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
 
 // MARK: - ForMeReviewFilter
 
-/// Sub-filter for the "For me" tab: narrow the visible PRs by how the review
-/// was requested. Default `.all` shows both direct and team requests.
 /// Which lifecycle state the deck lists. `open` is the live triage deck; `merged` /
 /// `closed` (closed WITHOUT merging) are on-demand, display-only lists fetched when
 /// chosen (`PRManager.refreshFinished`) and never enter the diff baseline.
@@ -45,6 +43,8 @@ enum PRStateFilter: String, CaseIterable, Identifiable {
     }
 }
 
+/// Sub-filter for the "For me" tab: narrow the visible PRs by how the review
+/// was requested. Default `.all` shows both direct and team requests.
 enum ForMeReviewFilter: String, CaseIterable, Identifiable {
     case all
     case direct
@@ -503,15 +503,11 @@ extension InAppShortcutBindings: Codable {
         // `copyLink` is new (C copies the link; the branch name moved to ⇧C). On upgrade
         // the stored JSON has no `.copyLink` key and `copyBranch` is still the old bare
         // "c", which would clash with copyLink's "c" default — relocate copyBranch to ⇧C.
-        // A copyBranch the user deliberately rebound is left alone; if "c" is then taken
-        // by something else, copyLink stays unbound rather than clashing.
-        if container.contains(.copyLink) {
-            copyLink = try decodeBinding(.copyLink, default: d.copyLink)
-        } else {
-            if copyBranch == ShortcutBinding(key: "c") { copyBranch = d.copyBranch }
-            let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
-                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch].contains(d.copyLink)
-            copyLink = taken ? ShortcutBinding(key: "") : d.copyLink
+        // A copyBranch the user deliberately rebound is left alone. copyLink itself is
+        // decoded last (below), once every other binding is known, so its clash check
+        // sees them all.
+        if !container.contains(.copyLink), copyBranch == ShortcutBinding(key: "c") {
+            copyBranch = d.copyBranch
         }
 
         // Search + pin migration. `search` and `togglePin` were introduced together;
@@ -538,7 +534,7 @@ extension InAppShortcutBindings: Codable {
             runPrompt = try decodeBinding(.runPrompt, default: d.runPrompt)
         } else {
             let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
-                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyLink, copyBranch,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch,
                          togglePin, search].contains(d.runPrompt)
             runPrompt = taken ? ShortcutBinding(key: "") : d.runPrompt
         }
@@ -548,7 +544,7 @@ extension InAppShortcutBindings: Codable {
             addComment = try decodeBinding(.addComment, default: d.addComment)
         } else {
             let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
-                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyLink, copyBranch,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch,
                          togglePin, search, runPrompt].contains(d.addComment)
             addComment = taken ? ShortcutBinding(key: "") : d.addComment
         }
@@ -563,6 +559,16 @@ extension InAppShortcutBindings: Codable {
         } else {
             // Absent → factory default ⌘Z.
             undo = d.undo
+        }
+
+        // `copyLink` (see above): absent + default "c" already taken → unbound rather than clashing.
+        if container.contains(.copyLink) {
+            copyLink = try decodeBinding(.copyLink, default: d.copyLink)
+        } else {
+            let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch,
+                         togglePin, search, runPrompt, addComment, undo].contains(d.copyLink)
+            copyLink = taken ? ShortcutBinding(key: "") : d.copyLink
         }
     }
 

@@ -67,7 +67,8 @@ final class PRManager: ObservableObject {
     /// kept ENTIRELY separate from `prs` (which is the open, diff-engine-backed
     /// set): they never pass through `PRStateStore` / `PRDiffEngine` /
     /// notifications, never affect the badge / needs-attention counts, and never
-    /// fire a "new PR" banner. Rendered only in the collapsed "Done" section.
+    /// fire a "new PR" banner. No longer rendered as a deck section (Merged / Closed come
+    /// from `finishedPRs`); still feeds merged/closed hooks and auto-unpin-on-merge.
     @Published var donePRs: [PRSnapshot] = []
 
     /// Merged / Closed PRs for the deck's state menu (`settings.prStateFilter`), fetched ON
@@ -985,7 +986,13 @@ final class PRManager: ObservableObject {
         do {
             let list = try await client.searchFinishedPRs(state: state, token: token)
             // The user may have switched state while this was in flight.
-            guard settings.prStateFilter == state else { return }
+            guard settings.prStateFilter == state else {
+                // The user switched state mid-flight and that call bailed on `finishedLoading`;
+                // load the state they are actually looking at.
+                finishedLoading = false
+                await refreshFinished(force: force)
+                return
+            }
             finishedPRs = list
             finishedState = state
             finishedFetchedAt = Date()
