@@ -103,10 +103,7 @@ struct HookEditorSheet: View {
             get: { draft.subject },
             set: { new in
                 draft.subject = new
-                let offered = Set(rows.flatMap { $0.outcomes.map(\.raw) })
-                let known = Set(PRHookEngine.canonicalTriggerOrder)
-                let keep = PRHookEngine.tickedTriggers(draft.on).filter { offered.contains($0) || !known.contains($0) }
-                draft.on = PRHookEngine.composeTriggers(keep.filter { known.contains($0) }, keeping: draft.on.split(separator: ",").map(String.init).filter { w in !known.contains(w.trimmingCharacters(in: .whitespaces).lowercased()) }.joined(separator: ","))
+                draft.on = PRHookEngine.pruneTriggers(draft.on, offered: Set(rows.flatMap { $0.outcomes.map(\.raw) }))
             })
     }
 

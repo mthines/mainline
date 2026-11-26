@@ -568,6 +568,11 @@ extension PRHookEngine {
         return (order + kept).filter { seen.insert($0).inserted }.joined(separator: ", ")
     }
 
+    /// Drops the known trigger words a subject's rows do not offer; unknown words stay so they are still reported.
+    static func pruneTriggers(_ on: String, offered: Set<String>) -> String {
+        composeTriggers(tickedTriggers(on).intersection(offered), keeping: on)
+    }
+
     /// The trigger words a template's `on:` holds, known or not.
     static func tickedTriggers(_ on: String) -> Set<String> {
         Set(on.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty })
@@ -1085,6 +1090,8 @@ enum HookEditorChecks {
         assert(rowWords.allSatisfy(known.contains), "every row outcome is a real trigger")
         assert(known.isSubset(of: Set(rowWords)), "every real trigger has a row outcome")
         assert(!PRHookEngine.prTriggerRows(checks: false).flatMap { $0.outcomes.map(\.raw) }.contains("check-failed"), "no check row while the flag is off")
+        let issueOffered = Set(PRHookEngine.issueTriggerRows.flatMap { $0.outcomes.map(\.raw) })
+        assert(PRHookEngine.pruneTriggers("ci-failed, mentioned, ci-faild", offered: issueOffered) == "mentioned, ci-faild", "subject switch prunes known words only")
         print("HOOK EDITOR triggers-compose OK")
 
         // AC-5: the sentence, the validation messages and the consent line.
