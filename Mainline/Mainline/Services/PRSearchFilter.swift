@@ -159,7 +159,7 @@ enum PRSearchFilter {
 /// review, so `review-requested` alone misses it), or it was still requested of you.
 enum FinishedQuery {
     /// Rows per query, and the cap on the merged list.
-    static let perQuery = 40
+    static let perQuery = 25
     static let limit = 50
 
     static func queries(for state: PRStateFilter) -> [String] {

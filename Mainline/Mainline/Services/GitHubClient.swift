@@ -872,15 +872,24 @@ final class GitHubClient {
     /// `searchDonePRs`: callers keep it out of `PRStateStore` / diff / notifications. A failed
     /// query throws, so a partial list is never shown as if complete.
     func searchFinishedPRs(state: PRStateFilter, token: String) async throws -> [PRSnapshot] {
+        // The queries are independent, so run them concurrently: each is a heavy search
+        // and sequentially they made the list take tens of seconds to appear.
+        let results: [[PRSnapshot]] = try await withThrowingTaskGroup(of: [PRSnapshot].self) { group in
+            for query in FinishedQuery.queries(for: state) {
+                group.addTask {
+                    try await self.runSearch(
+                        query: query, token: token, tab: .inbox, first: FinishedQuery.perQuery,
+                        etagPrefix: "graphql.finished"
+                    ).snapshots
+                }
+            }
+            var out: [[PRSnapshot]] = []
+            for try await r in group { out.append(r) }
+            return out
+        }
         var seen = Set<String>()
         var all: [PRSnapshot] = []
-        for query in FinishedQuery.queries(for: state) {
-            let (snapshots, _) = try await runSearch(
-                query: query, token: token, tab: .inbox, first: FinishedQuery.perQuery,
-                etagPrefix: "graphql.finished", sendETag: false
-            )
-            for pr in snapshots where seen.insert(pr.nodeId).inserted { all.append(pr) }
-        }
+        for pr in results.joined() where seen.insert(pr.nodeId).inserted { all.append(pr) }
         all.sort { $0.updatedAt > $1.updatedAt }
         return Array(all.prefix(FinishedQuery.limit))
     }
