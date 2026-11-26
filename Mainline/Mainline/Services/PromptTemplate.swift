@@ -281,6 +281,8 @@ struct PromptTarget: Equatable {
     func runsCheckout(_ templateWantsCheckout: Bool) -> Bool { templateWantsCheckout && !isIssue }
     /// How many items the prompt covers.
     var count: Int { isIssue ? issues.count : prs.count }
+    /// Bounded telemetry vocabulary: a section is a group, a merge-ordered chain is a stack.
+    var telemetryScope: String { isGroup ? "group" : isStack ? "stack" : "single" }
 
     var context: PromptContext {
         if isIssue {
@@ -517,6 +519,26 @@ enum PromptState {
 }
 
 // MARK: - Engine (pure)
+
+/// Bounded telemetry vocabulary for a failed launch — never the message, which names harnesses.
+extension PromptError {
+    var telemetryType: String {
+        switch self {
+        case .missingPromptPlaceholder: return "missing_prompt_placeholder"
+        case .unknownHarness: return "unknown_harness"
+        case .unknownPlaceholder: return "unknown_placeholder"
+        case .harnessHasNoTarget: return "harness_has_no_target"
+        case .placeholderInQuotes: return "placeholder_in_quotes"
+        case .harnessDisabled: return "harness_disabled"
+        case .unknownStateToken: return "unknown_state_token"
+        case .repoUrlMissingPrompt: return "repo_url_missing_prompt"
+        }
+    }
+
+    static func telemetryType(of error: Error) -> String {
+        (error as? PromptError)?.telemetryType ?? "launch_error"
+    }
+}
 
 enum PromptError: Error, Equatable, LocalizedError {
     case missingPromptPlaceholder(harness: String)
@@ -1236,6 +1258,9 @@ enum PromptTemplateChecks {
             "pr.repo": "o/r", "pr.owner": "o", "pr.branch": "feat/x", "pr.base": "main", "pr.author": "me",
         ])
         let cfg = PromptConfig.default
+        // Telemetry vocabulary stays bounded: a PromptError maps to a fixed slug, anything else to one fallback.
+        assert(PromptError.telemetryType(of: PromptError.unknownHarness("secret-harness")) == "unknown_harness", "telemetry error slug")
+        assert(PromptError.telemetryType(of: CommentError.empty) == "launch_error", "telemetry error fallback")
         let tpl0 = PromptTemplate(fileName: "q.md", name: "q", harness: "claude", checkout: false, body: "x")
 
         // Parse: frontmatter, comments, fallback name.

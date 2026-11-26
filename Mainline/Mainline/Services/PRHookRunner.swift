@@ -4,17 +4,21 @@ import Foundation
 /// cancellable countdown. A hook is a prompt template with `on:` (see `PRHookEngine`).
 extension PRManager {
     func handleHookEvents(_ events: [HookEvent]) async {
-        guard !settings.hooksPaused, RateLimitMonitor.shared.active == nil else { return }
+        guard !events.isEmpty, !isHookGateClosed(events.count, subject: "pr") else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isHook)
-        guard !hooks.isEmpty else { return }
+        guard !hooks.isEmpty else { recordHookSkip("pr", reason: "no_hooks", count: events.count); return }
         let muted = settings.notifMutedNodeIds   // postponed PRs fire nothing
         let me = settings.githubUsername
         let launches = events.filter { !muted.contains($0.pr.nodeId) }.flatMap { event in
             hooks.filter { PRHookEngine.matches($0, event: event, myLogin: me) }.map { (hook: $0, event: event) }
         }
-        guard !launches.isEmpty, await canCountDown() else { return }
+        recordHookMatching("pr", events: events.map { $0.trigger.rawValue }, launches: launches.map { $0.event.trigger.rawValue })
+        guard !launches.isEmpty, await canCountDown(subject: "pr", count: launches.count) else { return }
         for (hook, event) in launches {
-            guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else { continue }
+            guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
+                TelemetryService.shared.recordHookDecision(subject: "pr", trigger: event.trigger.rawValue, decision: "throttled")
+                continue
+            }
             schedule(hook, for: event)
         }
     }
@@ -22,21 +26,26 @@ extension PRManager {
     /// Check hooks (flag `check-hooks`): templates with `on: check-failed` / `check-passed` and a `check:`.
     /// One launch per hook per check per PR, throttled per check name.
     func handleCheckHookEvents(_ events: [CheckHookEvent]) async {
-        guard !events.isEmpty, FeatureFlagRegistry.checkHooksEnabled, !settings.hooksPaused,
-              RateLimitMonitor.shared.active == nil else { return }
+        guard !events.isEmpty else { return }
+        guard FeatureFlagRegistry.checkHooksEnabled else { recordHookSkip("check", reason: "flag_off", count: events.count); return }
+        guard !isHookGateClosed(events.count, subject: "check") else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isCheckHook)
-        guard !hooks.isEmpty else { return }
+        guard !hooks.isEmpty else { recordHookSkip("check", reason: "no_hooks", count: events.count); return }
         let me = settings.githubUsername
         let launches = events.flatMap { event in
             hooks.filter { PRHookEngine.matches($0, checkEvent: event, myLogin: me) }.map { (hook: $0, event: event) }
         }
-        guard !launches.isEmpty, await canCountDown() else { return }
+        recordHookMatching("check", events: events.map { $0.trigger.rawValue }, launches: launches.map { $0.event.trigger.rawValue })
+        guard !launches.isEmpty, await canCountDown(subject: "check", count: launches.count) else { return }
         for (hook, event) in launches {
-            guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else { continue }
+            guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
+                TelemetryService.shared.recordHookDecision(subject: "check", trigger: event.trigger.rawValue, decision: "throttled")
+                continue
+            }
             let pr = event.pr
             startCountdown(title: hook.name, body: "\(event.trigger.rawValue) \(event.check) on #\(pr.number) \(pr.title)",
                            url: pr.htmlUrl) { [weak self] id in
-                self?.launchHook(hook, pr: pr, id: id,
+                self?.launchHook(hook, pr: pr, id: id, subject: "check",
                                  label: "\(hook.name) · \(pr.repoFullName)#\(pr.number)")
             }
         }
@@ -44,16 +53,22 @@ extension PRManager {
 
     /// Issue hooks: templates whose `for:` covers issues, behind flag `issue-hooks`.
     func handleIssueHookEvents(_ events: [IssueHookEvent]) async {
-        guard FeatureFlagRegistry.issueHooksEnabled, !settings.hooksPaused, RateLimitMonitor.shared.active == nil else { return }
+        guard !events.isEmpty else { return }
+        guard FeatureFlagRegistry.issueHooksEnabled else { recordHookSkip("issue", reason: "flag_off", count: events.count); return }
+        guard !isHookGateClosed(events.count, subject: "issue") else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isIssueHook)
-        guard !hooks.isEmpty else { return }
+        guard !hooks.isEmpty else { recordHookSkip("issue", reason: "no_hooks", count: events.count); return }
         let muted = Set(settings.mutedIssueIds)
         let me = settings.githubUsername
         let launches = PRHookEngine.issueLaunches(hooks, events: events.filter { !muted.contains($0.issue.nodeId) },
                                                   myLogin: me)
-        guard !launches.isEmpty, await canCountDown() else { return }
+        recordHookMatching("issue", events: events.map { $0.trigger.rawValue }, launches: launches.map { $0.event.trigger.rawValue })
+        guard !launches.isEmpty, await canCountDown(subject: "issue", count: launches.count) else { return }
         for (hook, event) in launches {
-            guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else { continue }
+            guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
+                TelemetryService.shared.recordHookDecision(subject: "issue", trigger: event.trigger.rawValue, decision: "throttled")
+                continue
+            }
             let issue = event.issue
             startCountdown(title: hook.name, body: "\(event.trigger.rawValue) on #\(issue.number) \(issue.title)",
                            url: issue.url) { [weak self] id in
@@ -65,10 +80,12 @@ extension PRManager {
     /// The countdown's only Cancel button is on the macOS notification. With banners off a hook
     /// would start an agent nobody can stop, so hold it (and say why) rather than launch blind.
     /// Re-reads the state: the user may have turned banners off since launch.
-    private func canCountDown() async -> Bool {
+    private func canCountDown(subject: String, count: Int) async -> Bool {
         guard settings.hookCountdownSeconds > 0 else { return true }
         await refreshNotificationAuthorization()
         guard notificationAuthorization.canDeliverBanners else {
+            TelemetryService.shared.recordHookDecision(subject: subject, trigger: nil, decision: "held",
+                                                       reason: "notifications_off", count: count)
             showInfoToast("Hook skipped: notifications are off, so it couldn't be cancelled. Enable them, or set the countdown to 0.",
                           symbol: "bell.slash", seconds: 8)
             return false
@@ -76,8 +93,31 @@ extension PRManager {
         return true
     }
 
+    /// True (after counting it) when hooks are paused or the API is rate limited, so a user asking
+    /// "why did nothing happen" can see how many events were dropped and why.
+    private func isHookGateClosed(_ count: Int, subject: String) -> Bool {
+        if settings.hooksPaused { recordHookSkip(subject, reason: "paused", count: count); return true }
+        if RateLimitMonitor.shared.active != nil { recordHookSkip(subject, reason: "rate_limited", count: count); return true }
+        return false
+    }
+
+    private func recordHookSkip(_ subject: String, reason: String, count: Int) {
+        TelemetryService.shared.recordHookDecision(subject: subject, trigger: nil, decision: "skipped", reason: reason, count: count)
+    }
+
+    /// `matched` per launch and `no_match` per event no hook claimed (trigger values are fixed enums).
+    private func recordHookMatching(_ subject: String, events: [String], launches: [String]) {
+        let telemetry = TelemetryService.shared
+        for trigger in launches { telemetry.recordHookDecision(subject: subject, trigger: trigger, decision: "matched") }
+        let claimed = Set(launches)
+        for trigger in events where !claimed.contains(trigger) {
+            telemetry.recordHookDecision(subject: subject, trigger: trigger, decision: "no_match")
+        }
+    }
+
     func cancelHook(id: String) {
         guard let task = pendingHooks.removeValue(forKey: id) else { return }
+        TelemetryService.shared.recordHookDecision(subject: nil, trigger: nil, decision: "cancelled")
         task.cancel()
         showInfoToast("Hook cancelled", symbol: "xmark.circle", seconds: 3)
     }
@@ -85,7 +125,7 @@ extension PRManager {
     private func schedule(_ hook: PromptTemplate, for event: HookEvent) {
         let pr = event.pr
         startCountdown(title: hook.name, body: "\(event.trigger.rawValue) on #\(pr.number) \(pr.title)", url: pr.htmlUrl) { [weak self] id in
-            self?.launchHook(hook, pr: pr, id: id, label: "\(hook.name) · \(pr.repoFullName)#\(pr.number)")
+            self?.launchHook(hook, pr: pr, id: id, subject: "pr", label: "\(hook.name) · \(pr.repoFullName)#\(pr.number)")
         }
     }
 
@@ -104,8 +144,8 @@ extension PRManager {
         }
     }
 
-    private func launchHook(_ hook: PromptTemplate, pr: PRSnapshot, id: String, label: String) {
-        guard !settings.hooksPaused else { return }
+    private func launchHook(_ hook: PromptTemplate, pr: PRSnapshot, id: String, subject: String, label: String) {
+        guard !settings.hooksPaused else { recordHookSkip(subject, reason: "paused", count: 1); return }
         let config = promptStore.config
         let template = PromptEngine.effective(hook, config: config)
         do {
@@ -117,14 +157,18 @@ extension PRManager {
                 prompt: prompt, harnessKey: template.harness, checkout: false,   // never: parallel hooks would switch branches in one clone
                 pr: pr, context: context, config: config, terminal: settings.promptTerminal)
             TelemetryService.shared.recordTriageInteraction("run_hook")
+            TelemetryService.shared.recordAgentRun(origin: "hook", subject: subject, result: "success")
             notifications.postHook(id: id, title: "Hook started: \(hook.name)", body: summary, url: pr.htmlUrl, cancellable: false)
         } catch {
+            TelemetryService.shared.recordAgentRun(origin: "hook", subject: subject, result: "failure",
+                                                   errorType: PromptError.telemetryType(of: error))
             notifications.postHook(id: id, title: "Hook failed: \(label)", body: error.localizedDescription, url: pr.htmlUrl, cancellable: false)
         }
     }
 
     private func launchIssueHook(_ hook: PromptTemplate, event: IssueHookEvent, id: String, label: String) {
-        guard !settings.hooksPaused, FeatureFlagRegistry.issueHooksEnabled else { return }
+        guard !settings.hooksPaused else { recordHookSkip("issue", reason: "paused", count: 1); return }
+        guard FeatureFlagRegistry.issueHooksEnabled else { recordHookSkip("issue", reason: "flag_off", count: 1); return }
         let config = promptStore.config
         let template = PromptEngine.effective(hook, config: config)
         let issue = event.issue
@@ -137,8 +181,11 @@ extension PRManager {
                 prompt: prompt, harnessKey: template.harness, checkout: false,   // an issue has no branch to check out
                 repo: issue.repoFullName, context: context, config: config, terminal: settings.promptTerminal)
             TelemetryService.shared.recordTriageInteraction("run_hook_issue")
+            TelemetryService.shared.recordAgentRun(origin: "hook", subject: "issue", result: "success")
             notifications.postHook(id: id, title: "Hook started: \(hook.name)", body: summary, url: issue.url, cancellable: false)
         } catch {
+            TelemetryService.shared.recordAgentRun(origin: "hook", subject: "issue", result: "failure",
+                                                   errorType: PromptError.telemetryType(of: error))
             notifications.postHook(id: id, title: "Hook failed: \(label)", body: error.localizedDescription, url: issue.url, cancellable: false)
         }
     }

@@ -186,9 +186,14 @@ final class PRManager: ObservableObject {
             TelemetryService.shared.recordTriageInteraction(
                 target.isIssue ? "run_prompt_template_issue"
                     : target.isStack ? "run_prompt_template_stack" : "run_prompt_template")
+            TelemetryService.shared.recordAgentRun(origin: "prompt_template", subject: target.isIssue ? "issue" : "pr",
+                                                   scope: target.telemetryScope, result: "success")
             showInfoToast(summary + (target.isStack ? " · \(target.count) \(target.isIssue ? "issues" : "PRs")" : ""),
                           symbol: "terminal", seconds: 4)
         } catch {
+            TelemetryService.shared.recordAgentRun(origin: "prompt_template", subject: target.isIssue ? "issue" : "pr",
+                                                   scope: target.telemetryScope, result: "failure",
+                                                   errorType: PromptError.telemetryType(of: error))
             showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
         }
     }
@@ -210,9 +215,14 @@ final class PRManager: ObservableObject {
             TelemetryService.shared.recordTriageInteraction(
                 target.isIssue ? "run_custom_prompt_issue"
                     : target.isStack ? "run_custom_prompt_stack" : "run_custom_prompt")
+            TelemetryService.shared.recordAgentRun(origin: "prompt_custom", subject: target.isIssue ? "issue" : "pr",
+                                                   scope: target.telemetryScope, result: "success")
             showInfoToast(summary + (target.isStack ? " · \(target.count) \(target.isIssue ? "issues" : "PRs")" : ""),
                           symbol: "terminal", seconds: 4)
         } catch {
+            TelemetryService.shared.recordAgentRun(origin: "prompt_custom", subject: target.isIssue ? "issue" : "pr",
+                                                   scope: target.telemetryScope, result: "failure",
+                                                   errorType: PromptError.telemetryType(of: error))
             showInfoToast(error.localizedDescription, symbol: "exclamationmark.triangle", seconds: 8)
         }
     }
@@ -229,12 +239,15 @@ final class PRManager: ObservableObject {
     /// Posts `body` as a comment on `pr`. `label` names the template for the toast (nil for
     /// free-typed text). Gated by `settings.writeActionsEnabled`; failures surface as a toast.
     func postComment(_ body: String, label: String?, on pr: PRSnapshot) {
+        let source = label == nil ? "typed" : "template"
         guard settings.writeActionsEnabled else {
+            TelemetryService.shared.recordCommentPost(source: source, result: "writes_off")
             showInfoToast(CommentError.writeActionsOff.localizedDescription, symbol: "exclamationmark.triangle", seconds: 6)
             return
         }
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
+            TelemetryService.shared.recordCommentPost(source: source, result: "empty")
             showInfoToast(CommentError.empty.localizedDescription, symbol: "exclamationmark.triangle", seconds: 6)
             return
         }
@@ -247,6 +260,7 @@ final class PRManager: ObservableObject {
                 TelemetryService.shared.recordWriteAction(
                     "comment", mergeMethod: nil, result: "success",
                     duration: Date().timeIntervalSince(start), failureCategory: nil)
+                TelemetryService.shared.recordCommentPost(source: source, result: "success")
                 showInfoToast("Commented on #\(pr.number)" + (label.map { " · \($0)" } ?? ""),
                               symbol: "text.bubble", seconds: 4)
                 await triggerSingleRefresh()
@@ -254,6 +268,7 @@ final class PRManager: ObservableObject {
                 TelemetryService.shared.recordWriteAction(
                     "comment", mergeMethod: nil, result: "failure",
                     duration: Date().timeIntervalSince(start), failureCategory: "api_error")
+                TelemetryService.shared.recordCommentPost(source: source, result: "failure")
                 showInfoToast("Comment failed: \(error.localizedDescription)", symbol: "exclamationmark.triangle", seconds: 8)
             }
         }

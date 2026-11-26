@@ -99,6 +99,9 @@ final class TelemetryService {
     private var tokenInvalidCounter: LongCounterSdk?
     private var settingChangedCounter: LongCounterSdk?
     private var attentionPolicyChangedCounter: LongCounterSdk?
+    private var agentRunsCounter: LongCounterSdk?
+    private var hookDecisionsCounter: LongCounterSdk?
+    private var commentPostsCounter: LongCounterSdk?
 
     // MARK: - Providers (kept alive for shutdown)
 
@@ -311,6 +314,24 @@ final class TelemetryService {
         attentionPolicyChangedCounter = meter
             .counterBuilder(name: "mainline.attention_policy.changed")
             .setDescription("Attention-policy changes by event type and chosen level")
+            .setUnit("1")
+            .build()
+
+        agentRunsCounter = meter
+            .counterBuilder(name: "mainline.agent.runs")
+            .setDescription("Agent launches from prompt templates, typed prompts and hooks, by origin, subject, scope and result")
+            .setUnit("1")
+            .build()
+
+        hookDecisionsCounter = meter
+            .counterBuilder(name: "mainline.hook.decisions")
+            .setDescription("What happened to a hook event: matched, no_match, throttled, held, skipped or cancelled")
+            .setUnit("1")
+            .build()
+
+        commentPostsCounter = meter
+            .counterBuilder(name: "mainline.comment.posts")
+            .setDescription("Canned or typed PR comments by source and result")
             .setUnit("1")
             .build()
 
@@ -670,6 +691,57 @@ final class TelemetryService {
 
         triageInteractionsCounter?.add(value: 1, attribute: [
             "interaction.type": .string(interaction),
+        ])
+    }
+
+    // MARK: - Agent runs, hooks and comments
+    //
+    // Privacy: every attribute below is a fixed vocabulary. Template names, harness keys, check
+    // names, repos, titles and comment text are user or repo data and never go in.
+
+    /// One attempt to start an agent session.
+    /// - origin: "prompt_template" | "prompt_custom" | "hook"
+    /// - subject: "pr" | "issue" | "check"
+    /// - scope: "single" | "stack" | "group"
+    /// - result: "success" | "failure"
+    /// - errorType: `PromptError.telemetryType` (only on failure)
+    func recordAgentRun(origin: String, subject: String, scope: String = "single",
+                        result: String, errorType: String? = nil) {
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+        var attrs: [String: AttributeValue] = [
+            "agent.origin": .string(origin),
+            "agent.subject": .string(subject),
+            "agent.scope": .string(scope),
+            "agent.result": .string(result),
+        ]
+        if let errorType { attrs["error.type"] = .string(errorType) }
+        agentRunsCounter?.add(value: 1, attribute: attrs)
+        if result == "failure" { emitLog(severity: .warn, body: "Agent run failed", attributes: attrs) }
+    }
+
+    /// What became of hook events. `decision`: "matched" | "no_match" | "throttled" | "held" |
+    /// "skipped" | "cancelled". `reason` (held / skipped only): "paused" | "rate_limited" |
+    /// "flag_off" | "no_hooks" | "notifications_off". `trigger` is a trigger's raw value, or nil
+    /// when the decision covers a whole batch of events.
+    func recordHookDecision(subject: String?, trigger: String?, decision: String,
+                            reason: String? = nil, count: Int = 1) {
+        guard count > 0, MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+        var attrs: [String: AttributeValue] = ["hook.decision": .string(decision)]
+        if let subject { attrs["hook.subject"] = .string(subject) }
+        if let trigger { attrs["hook.trigger"] = .string(trigger) }
+        if let reason { attrs["hook.reason"] = .string(reason) }
+        hookDecisionsCounter?.add(value: count, attribute: attrs)
+    }
+
+    /// `source`: "template" | "typed". `result`: "success" | "failure" | "writes_off" | "empty".
+    func recordCommentPost(source: String, result: String) {
+        guard MainlineSettings.shared.telemetryEnabled else { return }
+        ensureSetup()
+        commentPostsCounter?.add(value: 1, attribute: [
+            "comment.source": .string(source),
+            "comment.result": .string(result),
         ])
     }
 
