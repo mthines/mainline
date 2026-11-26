@@ -681,7 +681,7 @@ struct SettingsView: View {
                     TelemetryService.shared.recordTriageInteraction("toggle_drafts")
                 }
             ))
-            Label("When off, drafts are hidden from the list, sections, counts, and the Needs-a-Human bucket. Toggle in the panel with the Drafts chip or ⌘D.",
+            Label("When off, drafts are hidden from the list, sections, counts, and the Needs-a-Human bucket. Toggle in the panel from the Open / Merged / Closed chip menu.",
                   systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -30,6 +30,21 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
 
 /// Sub-filter for the "For me" tab: narrow the visible PRs by how the review
 /// was requested. Default `.all` shows both direct and team requests.
+/// Which lifecycle state the deck lists. `open` is the live triage deck; `merged` /
+/// `closed` (closed WITHOUT merging) are on-demand, display-only lists fetched when
+/// chosen (`PRManager.refreshFinished`) and never enter the diff baseline.
+enum PRStateFilter: String, CaseIterable, Identifiable {
+    case open, merged, closed
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .open:   return "Open"
+        case .merged: return "Merged"
+        case .closed: return "Closed"
+        }
+    }
+}
+
 enum ForMeReviewFilter: String, CaseIterable, Identifiable {
     case all
     case direct
@@ -759,6 +774,7 @@ final class MainlineSettings: ObservableObject {
         static let includeConflictsInNeedsHuman = "includeConflictsInNeedsHuman"
         static let showDrafts           = "showDrafts"
         static let splitDrafts          = "splitDrafts"
+        static let prStateFilter        = "prStateFilter"
         static let unpinOnMerge         = "unpinOnMerge"
         static let pinsIgnoreOrgFilter  = "pinsIgnoreOrgFilter"
         static let forMeReviewFilter    = "forMeReviewFilter"
@@ -1081,6 +1097,11 @@ final class MainlineSettings: ObservableObject {
     /// and the "Needs a Human" bucket. Default OFF for a calmer view.
     @Published var showDrafts: Bool {
         didSet { defaults.set(showDrafts, forKey: Keys.showDrafts) }
+    }
+
+    /// Which PR lifecycle state the deck lists (Open / Merged / Closed). Sticky.
+    @Published var prStateFilter: PRStateFilter {
+        didSet { defaults.set(prStateFilter.rawValue, forKey: Keys.prStateFilter) }
     }
 
     /// Whether shown draft PRs get their own "Draft" section. Default OFF — drafts
@@ -1767,6 +1788,8 @@ final class MainlineSettings: ObservableObject {
         showDrafts = defaults.object(forKey: Keys.showDrafts) == nil
             ? true
             : defaults.bool(forKey: Keys.showDrafts)
+        // PR state filter — default Open (a load, so no didSet-in-init write needed)
+        prStateFilter = defaults.string(forKey: Keys.prStateFilter).flatMap(PRStateFilter.init(rawValue:)) ?? .open
         // Split drafts into their own section — default OFF (mixed inline)
         splitDrafts = defaults.bool(forKey: Keys.splitDrafts)
         // Auto-unpin merged PRs — default ON

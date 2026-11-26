@@ -863,6 +863,25 @@ final class GitHubClient {
         return try await runSearch(query: query, token: token, tab: tab, first: 30, etagPrefix: "graphql.done")
     }
 
+    /// On-demand Merged / Closed lists for the deck's state menu. Runs one search per
+    /// `FinishedQuery` role qualifier (authored, reviewed, still-requested), dedupes by
+    /// nodeId and returns newest-first, capped at `FinishedQuery.limit`. DISPLAY-ONLY like
+    /// `searchDonePRs`: callers keep it out of `PRStateStore` / diff / notifications. A failed
+    /// query throws, so a partial list is never shown as if complete.
+    func searchFinishedPRs(state: PRStateFilter, token: String) async throws -> [PRSnapshot] {
+        var seen = Set<String>()
+        var all: [PRSnapshot] = []
+        for query in FinishedQuery.queries(for: state) {
+            let (snapshots, _) = try await runSearch(
+                query: query, token: token, tab: .inbox, first: FinishedQuery.perQuery,
+                etagPrefix: "graphql.finished"
+            )
+            for pr in snapshots where seen.insert(pr.nodeId).inserted { all.append(pr) }
+        }
+        all.sort { $0.updatedAt > $1.updatedAt }
+        return Array(all.prefix(FinishedQuery.limit))
+    }
+
     /// The user-scoped qualifier for a tab's Done query. Mirrors the open-fetch
     /// queries: `author:@me` for the Created tab, `review-requested:@me` for For me.
     private static func doneQualifier(for tab: ReviewTab) -> String {

@@ -351,6 +351,10 @@ one unit) and **postpone/resume** (`S` / Later) parks/wakes all members together
 whole-stack change in a single `pushUndo`. The expanded stack header's hover copy button
 (and its "Copy PR List" right-click item) copies all members, bottom → top, via `copyPRList`.
 
+### PR state menu (Open / Merged / Closed)
+
+The filter-row chip (was "Drafts") is a menu: **Open / Merged / Closed** (`settings.prStateFilter`, `PRStateFilter`, sticky) plus a "Show drafts" toggle (Open only; the old ⌘D shortcut is gone). It behaves the same on Inbox, For me and Created. Merged / Closed are fetched ON DEMAND by `PRManager.refreshFinished()` (filter change, panel open, manual Refresh; skipped while the list is younger than `PollPacing.secondaryInterval`) through `GitHubClient.searchFinishedPRs`, which runs one search per pure `FinishedQuery.queries(for:)` entry (authored / `reviewed-by:@me -author:@me` / `review-requested:@me`; closed = `is:closed is:unmerged`), dedupes, newest first, capped at 50. Never from the poll loop, never in `PRStateStore` / diff / notifications. `PRManager.finishedViewPRs` filters by the scope chip only; `TriageDeckView(finishedMode:)` renders them as one flat list of display-only `doneRow`s (click opens; no keyboard stops, pinning, stacks or Muted); `F` search filters the list. The collapsed "Done" section is removed from the deck; the poll's `donePRs` fetch stays because merged/closed hooks and auto-unpin-on-merge read it. `FinishedQuery.runSelfChecks()` #if DEBUG.
+
 ### Pinning & in-app search
 
 **Pinning.** A pinned PR is surfaced in a dedicated **Pinned** subsection at the TOP of the

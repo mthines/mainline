@@ -133,7 +133,11 @@ struct MenuBarView: View {
             guard abs(v - measuredBodyHeight) > 1 else { return }
             DispatchQueue.main.async { measuredBodyHeight = v }
         }
+        // Merged / Closed load on demand: when the state changes, and on open while one is
+        // selected (refreshFinished skips a fresh list). The Issues tab has no states.
+        .onChange(of: settings.prStateFilter) { _ in Task { await manager.refreshFinished() } }
         .onAppear {
+            Task { await manager.refreshFinished() }
             manager.setPanelVisible(true)
             manager.snoozeStore.clearExpired()
             // Delay slightly so user can glance at unread indicators before they clear
@@ -180,10 +184,6 @@ struct MenuBarView: View {
                     .opacity(0)
                 Button("") { cycleScopeForward() }
                     .keyboardShortcut(KeyEquivalent("]"), modifiers: [])
-                    .frame(width: 0, height: 0)
-                    .opacity(0)
-                Button("") { settings.showDrafts.toggle() }
-                    .keyboardShortcut(KeyEquivalent("d"), modifiers: [.command])
                     .frame(width: 0, height: 0)
                     .opacity(0)
             }
@@ -345,6 +345,13 @@ struct MenuBarView: View {
     /// the list and the badge can never diverge; this view only adds the display
     /// sort. The browse deck's "Needs attention" group (`ActionGroup.needsAttention`)
     /// is the single "needs attention" concept; there is no separate top bucket.
+    /// The Merged / Closed list, narrowed by the search query while search is typing.
+    private var finishedRows: [PRSnapshot] {
+        let rows = manager.finishedViewPRs
+        guard searchFiltering else { return rows }
+        return rows.filter { PRSearchFilter.matches($0, query: manager.searchQuery) }
+    }
+
     private var visiblePRs: [PRSnapshot] {
         manager.currentViewPRs.sorted(by: PRSnapshot.triageOrder)
     }
@@ -603,7 +610,9 @@ struct MenuBarView: View {
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(badgeTint(for: badge))
                 .font(.caption)
-            Text(manager.badgeExplanation)
+            Text(settings.prStateFilter == .open || settings.selectedTab == .issues
+                 ? manager.badgeExplanation
+                 : "\(manager.finishedViewPRs.count) \(settings.prStateFilter.label.lowercased()) PRs")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -713,7 +722,7 @@ struct MenuBarView: View {
                     if settings.selectedTab != .issues { Divider().frame(height: 16) }
                 }
                 // Issues have no drafts, so the toggle would do nothing there.
-                if settings.selectedTab != .issues { draftsChip }
+                if settings.selectedTab != .issues { stateChip }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -721,29 +730,38 @@ struct MenuBarView: View {
         .frame(height: 36)
     }
 
-    /// Compact toggle to include/exclude draft PRs. Mirrors ⌘D shortcut below.
-    private var draftsChip: some View {
-        Button {
-            settings.showDrafts.toggle()
-            TelemetryService.shared.recordTriageInteraction("toggle_drafts")
+    /// State menu: Open / Merged / Closed, plus the drafts toggle (Open only). Replaces the
+    /// old Drafts button; Merged / Closed fetch on demand (`PRManager.refreshFinished`).
+    private var stateChip: some View {
+        let state = settings.prStateFilter
+        let draftsHidden = state == .open && !settings.showDrafts
+        return Menu {
+            Picker("Show", selection: $settings.prStateFilter) {
+                ForEach(PRStateFilter.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            Toggle("Show drafts", isOn: $settings.showDrafts)
+                .disabled(state != .open)
         } label: {
             HStack(spacing: 3) {
-                Image(systemName: settings.showDrafts ? "eye" : "eye.slash")
-                    .font(.caption2)
-                Text("Drafts")
+                if draftsHidden { Image(systemName: "eye.slash").font(.caption2) }
+                Text(state.label)
                     .font(.caption)
-                    .fontWeight(settings.showDrafts ? .semibold : .regular)
+                    .fontWeight(state == .open && !draftsHidden ? .regular : .semibold)
             }
-            .foregroundStyle(settings.showDrafts ? .primary : .secondary)
+            .foregroundStyle(state == .open && !draftsHidden ? .secondary : .primary)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background(
-                settings.showDrafts ? AnyShapeStyle(.blue.opacity(0.15)) : AnyShapeStyle(.quaternary),
+                state == .open && !draftsHidden ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.blue.opacity(0.15)),
                 in: Capsule()
             )
         }
-        .buttonStyle(.plain)
-        .help(settings.showDrafts ? "Hide draft PRs (⌘D)" : "Show draft PRs (⌘D)")
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.visible)
+        .fixedSize()
+        .help("Show open, merged or closed PRs, and draft PRs")
     }
 
     private func scopeChip(label: String, scope: PRScope?) -> some View {
@@ -892,7 +910,7 @@ struct MenuBarView: View {
         // empty short-circuit.
         let isEmpty = !manager.hasToken || (settings.selectedTab == .issues
             ? manager.issueStore.issues.isEmpty
-            : (!manager.searchActive && (
+            : (!manager.searchActive && settings.prStateFilter == .open && (
                 settings.selectedTab == .inbox
                     ? manager.inboxActivePRs.isEmpty && manager.inboxMutedPRs.isEmpty && !hasInboxIssues
                     : manager.prs.isEmpty
@@ -928,12 +946,13 @@ struct MenuBarView: View {
             // "Needs attention" group (`ActionGroup.needsAttention`) is the single
             // "needs attention" concept — there is no separate top bucket.
             TriageDeckView(
-                prs: searchFiltering ? searchResults : visiblePRs,
+                prs: settings.prStateFilter != .open ? finishedRows : (searchFiltering ? searchResults : visiblePRs),
                 mutedPRs: (settings.selectedTab == .inbox && !searchFiltering) ? manager.inboxMutedPRs : [],
-                inboxMode: settings.selectedTab == .inbox && !searchFiltering,
-                searchMode: searchFiltering,
+                inboxMode: settings.selectedTab == .inbox && !searchFiltering && settings.prStateFilter == .open,
+                searchMode: searchFiltering && settings.prStateFilter == .open,
                 searchFieldFocused: searchFieldFocused,
                 searchActive: manager.searchActive,
+                finishedMode: settings.prStateFilter == .open ? nil : settings.prStateFilter,
                 manager: manager,
                 settings: settings
             )
