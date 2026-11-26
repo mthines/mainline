@@ -4,13 +4,12 @@ import Foundation
 /// cancellable countdown. A hook is a prompt template with `on:` (see `PRHookEngine`).
 extension PRManager {
     func handleHookEvents(_ events: [HookEvent]) async {
-        guard !events.isEmpty, !isHookGateClosed(events.count, subject: "pr") else { return }
+        guard !events.isEmpty else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isHook)
-        guard !hooks.isEmpty else { return }
+        guard !hooks.isEmpty, !isHookGateClosed(events.count, subject: "pr") else { return }   // no hooks: nothing to count
         let muted = settings.notifMutedNodeIds   // postponed PRs fire nothing
         let me = settings.githubUsername
         let live = events.filter { !muted.contains($0.pr.nodeId) }
-        recordHookSkip("pr", reason: "muted", count: events.count - live.count)
         let launches = live.flatMap { event in
             hooks.filter { PRHookEngine.matches($0, event: event, myLogin: me) }.map { (hook: $0, event: event) }
         }
@@ -31,9 +30,8 @@ extension PRManager {
     func handleCheckHookEvents(_ events: [CheckHookEvent]) async {
         guard !events.isEmpty else { return }
         guard FeatureFlagRegistry.checkHooksEnabled else { recordHookSkip("check", reason: "flag_off", count: events.count); return }
-        guard !isHookGateClosed(events.count, subject: "check") else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isCheckHook)
-        guard !hooks.isEmpty else { return }
+        guard !hooks.isEmpty, !isHookGateClosed(events.count, subject: "check") else { return }
         let me = settings.githubUsername
         let launches = events.flatMap { event in
             hooks.filter { PRHookEngine.matches($0, checkEvent: event, myLogin: me) }.map { (hook: $0, event: event) }
@@ -59,9 +57,8 @@ extension PRManager {
     func handleIssueHookEvents(_ events: [IssueHookEvent]) async {
         guard !events.isEmpty else { return }
         guard FeatureFlagRegistry.issueHooksEnabled else { recordHookSkip("issue", reason: "flag_off", count: events.count); return }
-        guard !isHookGateClosed(events.count, subject: "issue") else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isIssueHook)
-        guard !hooks.isEmpty else { return }
+        guard !hooks.isEmpty, !isHookGateClosed(events.count, subject: "issue") else { return }
         let muted = Set(settings.mutedIssueIds)
         let me = settings.githubUsername
         let live = events.filter { !muted.contains($0.issue.nodeId) }
