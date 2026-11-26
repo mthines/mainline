@@ -170,8 +170,16 @@ final class PromptTemplateStore: ObservableObject {
 
     func save(_ template: PromptTemplate) {
         try? FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
-        try? PromptEngine.serialize(template).write(
-            to: promptsDirectory.appendingPathComponent(template.fileName), atomically: true, encoding: .utf8)
+        let url = promptsDirectory.appendingPathComponent(template.fileName)
+        // An existing file is PATCHED, not regenerated: hand-written `#` comments and keys this app does
+        // not edit survive a save from Settings. A new file is written whole.
+        let text: String
+        if let existing = try? String(contentsOf: url, encoding: .utf8) {
+            text = PromptEngine.patch(existing: existing, with: template)
+        } else {
+            text = PromptEngine.serialize(template)
+        }
+        try? text.write(to: url, atomically: true, encoding: .utf8)
         reload()
     }
 

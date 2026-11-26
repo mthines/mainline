@@ -58,6 +58,7 @@
 		PC000000000000000000A902 /* PromptTemplateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A902 /* PromptTemplateStore.swift */; };
 		PC000000000000000000A903 /* PromptPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A903 /* PromptPickerView.swift */; };
 		PC000000000000000000A904 /* PromptsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A904 /* PromptsSettingsView.swift */; };
+		PC000000000000000000A9F1 /* HookEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF000000000000000000A9F1 /* HookEditorSheet.swift */; };
 		PX000000000000000000000B1 /* PRListExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = PX000000000000000000000A1 /* PRListExport.swift */; };
 		PC0000000000000000FF0001 /* FeatureFlagSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0001 /* FeatureFlagSchema.swift */; };
 		PC0000000000000000FF0002 /* FeatureFlagRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = PF0000000000000000FF0002 /* FeatureFlagRegistry.swift */; };
@@ -125,6 +126,7 @@
 		PF000000000000000000A902 /* PromptTemplateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTemplateStore.swift; sourceTree = "<group>"; };
 		PF000000000000000000A903 /* PromptPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptPickerView.swift; sourceTree = "<group>"; };
 		PF000000000000000000A904 /* PromptsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptsSettingsView.swift; sourceTree = "<group>"; };
+		PF000000000000000000A9F1 /* HookEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HookEditorSheet.swift; sourceTree = "<group>"; };
 		PX000000000000000000000A1 /* PRListExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRListExport.swift; sourceTree = "<group>"; };
 		PF0000000000000000FF0001 /* FeatureFlagSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagSchema.swift; sourceTree = "<group>"; };
 		PF0000000000000000FF0002 /* FeatureFlagRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagRegistry.swift; sourceTree = "<group>"; };
@@ -251,6 +253,7 @@
 				PF0000000000000000000B03 /* CommentPickerView.swift */,
 				PF0000000000000000000B04 /* CommentsSettingsView.swift */,
 				PF000000000000000000A904 /* PromptsSettingsView.swift */,
+				PF000000000000000000A9F1 /* HookEditorSheet.swift */,
 				PF000000000000000000A903 /* PromptPickerView.swift */,
 				OT00000000000000000000A2 /* TelemetryOptInBanner.swift */,
 				OT00000000000000000000A3 /* TelemetryDetailsSheet.swift */,
@@ -393,6 +396,7 @@
 				PS000000000000000000000B1 /* PRSearchFilter.swift in Sources */,
 				PX000000000000000000000B1 /* PRListExport.swift in Sources */,
 				PC000000000000000000A904 /* PromptsSettingsView.swift in Sources */,
+				PC000000000000000000A9F1 /* HookEditorSheet.swift in Sources */,
 				PC000000000000000000A903 /* PromptPickerView.swift in Sources */,
 				PC0000000000000000000B01 /* CommentTemplate.swift in Sources */,
 				PC0000000000000000000B02 /* CommentTemplateStore.swift in Sources */,

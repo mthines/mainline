@@ -11,6 +11,17 @@ struct PromptsSettingsView: View {
     @State private var editingFile: String?
     @State private var draft: PromptTemplate?
     @State private var isNew = false
+    /// The hook-editor sheet (flag `hook-editor`): the template being edited and where it was opened from.
+    @State private var sheet: SheetTarget?
+
+    private struct SheetTarget: Identifiable {
+        let template: PromptTemplate
+        let isNew: Bool
+        let isHookMode: Bool
+        var id: String { template.fileName + (isNew ? "#new" : "") }
+    }
+
+    private var hookEditor: Bool { FeatureFlagRegistry.hookEditorEnabled }
 
     var body: some View {
         Section("How it works") {
@@ -42,7 +53,7 @@ struct PromptsSettingsView: View {
                 templateRow(template)
             }
             HStack {
-                Button { startEditing(store.newTemplate(), isNew: true) } label: {
+                Button { openEditor(store.newTemplate(), isNew: true, hookMode: false) } label: {
                     Label("New Template", systemImage: "plus")
                 }
                 Spacer()
@@ -115,7 +126,7 @@ struct PromptsSettingsView: View {
                     .foregroundStyle(problem == nil ? Color.secondary : Color.orange)
             }
             Spacer()
-            Button("Edit") { startEditing(template, isNew: false) }
+            Button("Edit") { openEditor(template, isNew: false, hookMode: false) }
         }
     }
 
@@ -154,9 +165,82 @@ struct PromptsSettingsView: View {
 
     // MARK: Hooks
 
-    private var hooks: [PromptTemplate] { store.templates.filter { !$0.on.trimmingCharacters(in: .whitespaces).isEmpty } }
+    private var hooks: [PromptTemplate] {
+        hookEditor ? store.templates.filter(PRHookEngine.isListedHook)
+                   : store.templates.filter { !$0.on.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
 
     @ViewBuilder private var hooksSection: some View {
+        if hookEditor { editableHooksSection } else { classicHooksSection }
+    }
+
+    /// Flag `hook-editor`: a switch and a sentence per hook, an Edit… sheet, no read-only trigger captions.
+    private var editableHooksSection: some View {
+        Section("Hooks") {
+            Text("Hooks start an agent without you asking. A notification counts down before each launch; cancel it there (with notifications off, hooks are held unless the countdown is 0).")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Pause all hooks", isOn: $settings.hooksPaused)
+            Stepper(value: $settings.hookCountdownSeconds, in: 0...120, step: 5) {
+                Text(settings.hookCountdownSeconds == 0
+                     ? "Start immediately (no countdown)"
+                     : "Wait \(settings.hookCountdownSeconds)s before starting")
+            }
+            if hooks.isEmpty { Text("No hooks yet.").foregroundStyle(.secondary) }
+            ForEach(hooks) { hook in
+                let unknown = PRHookEngine.unknownTriggers(hook, issues: issueHooks, checks: checkHooks)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Toggle("\(hook.name) enabled", isOn: Binding(
+                        get: { hook.hookEnabled },
+                        set: { on in var t = hook; t.hookEnabled = on; store.save(t) }))
+                        .labelsHidden()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hook.name).foregroundStyle(hook.hookEnabled ? Color.primary : Color.secondary)
+                        Text((hook.hookEnabled ? "" : "Off · ") + PRHookEngine.describe(hook))
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            chip(store.config.harnesses[hook.harness]?.label ?? hook.harness)
+                            if hook.hookScope.trimmingCharacters(in: .whitespaces).isEmpty { chip("all repos", warn: true) }
+                        }
+                        if !unknown.isEmpty {
+                            Label("Can't run: unknown trigger \(unknown.joined(separator: ", "))", systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                        if checkHooks, PRHookEngine.checkHookMissingName(hook) {
+                            Label("A check trigger needs the check's name, or it never fires", systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                    }
+                    Spacer()
+                    Button(unknown.isEmpty ? "Edit…" : "Fix…") { openEditor(hook, isNew: false, hookMode: true) }
+                }
+            }
+            HStack {
+                Button {
+                    let first = store.config.enabledHarnesses.first?.key ?? "claude"
+                    openEditor(PRHookEngine.newHook(existingFiles: Set(store.templates.map(\.fileName)), harness: first),
+                               isNew: true, hookMode: true)
+                } label: { Label("New Hook…", systemImage: "plus") }
+                    .sheet(item: $sheet) { target in
+                        HookEditorSheet(settings: settings, store: store, draft: target.template, isNew: target.isNew,
+                                        isHookMode: target.isHookMode) { sheet = nil }
+                    }
+                Spacer()
+                Button("Open Folder") { store.revealPromptsFolder() }
+            }
+            Text("Hooks are files in \(store.promptsDirectory.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). Edits from either side show up within 2 seconds.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func chip(_ text: String, warn: Bool = false) -> some View {
+        Text(text).font(.caption2)
+            .padding(.horizontal, 7).padding(.vertical, 1)
+            .background(Capsule().fill(warn ? Color.orange.opacity(0.2) : Color.gray.opacity(0.2)))
+            .foregroundStyle(warn ? Color.orange : Color.secondary)
+    }
+
+    @ViewBuilder private var classicHooksSection: some View {
         Section("Hooks") {
             Text("A template with an `on:` line also runs by itself when a PR\(issueHooks ? " (or, with `for: issues`, an issue)" : "") changes state. Each launch is announced by a notification you can cancel (with notifications off, hooks are held unless the countdown is 0). Edit the file to change triggers, repos, role or prompt. New Hook creates an inactive file: uncomment its `on:` line to turn it on.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -233,10 +317,11 @@ struct PromptsSettingsView: View {
         let named = checkWords.isEmpty || h.hookCheck.isEmpty ? "" : " “\(h.hookCheck)”"
         let triggers = (prWords + checkWords.map { $0 + named } + issueWords.filter { !prWords.contains($0) }).joined(separator: ", ")
         guard !triggers.isEmpty else { return "inactive: no trigger it can fire on" }
+        let off = h.hookEnabled ? "" : "off · "
         let role = HookRole.parse(h.hookRole).rawValue
         let scope = h.hookScope.isEmpty ? "all repos" : h.hookScope
         let things = issueWords.isEmpty ? "PRs" : prWords.isEmpty ? "issues" : "PRs and issues"
-        return "on \(triggers) · \(role) \(things) · \(scope)"
+        return "\(off)on \(triggers) · \(role) \(things) · \(scope)"
     }
 
     // MARK: Editor
@@ -341,6 +426,12 @@ struct PromptsSettingsView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
+    }
+
+    /// With the `hook-editor` flag on, templates and hooks edit in one sheet; off, the inline editor below.
+    private func openEditor(_ template: PromptTemplate, isNew: Bool, hookMode: Bool) {
+        if hookEditor { sheet = SheetTarget(template: template, isNew: isNew, isHookMode: hookMode) }
+        else { startEditing(template, isNew: isNew) }
     }
 
     private func startEditing(_ template: PromptTemplate, isNew: Bool) {

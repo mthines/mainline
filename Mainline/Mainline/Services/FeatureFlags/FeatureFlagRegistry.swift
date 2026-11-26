@@ -53,6 +53,16 @@ enum FeatureFlagRegistry {
             owner: "mthines",
             tags: ["hooks", "ci"]
         ),
+        FlagDefinition(
+            key: hookEditorKey,
+            description: "Edit hooks in Settings → Prompts: a sheet for triggers, PR scope, repos and the prompt, plus an on/off switch per hook",
+            type: .boolean,
+            variants: ["off": .bool(false), "on": .bool(true)],
+            defaultVariant: "off",
+            experiment: nil,
+            owner: "mthines",
+            tags: ["hooks", "settings"]
+        ),
     ]
 
     /// Gates running prompt templates on issues.
@@ -82,6 +92,15 @@ enum FeatureFlagRegistry {
     /// whether to request per-check data.
     static var checkHooksEnabled: Bool {
         if case .bool(true)? = FeatureFlagClient.shared.resolveWithoutRecording(checkHooksKey).value { return true }
+        return false
+    }
+
+    /// Gates the Settings hook editor sheet (`hooks` list rows, switch, New Hook). Off = today's Hooks section.
+    static let hookEditorKey = "hook-editor"
+
+    /// Resolved without a telemetry record: Settings reads it on every render.
+    static var hookEditorEnabled: Bool {
+        if case .bool(true)? = FeatureFlagClient.shared.resolveWithoutRecording(hookEditorKey).value { return true }
         return false
     }
 }
