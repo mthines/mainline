@@ -6,3 +6,4 @@ assert(!FeatureFlagRegistry.issueHooksEnabled, "issue-hooks ships off"); print("
 CheckHookChecks.run(); print("CHECK HOOK CHECKS PASS")
 assert(!FeatureFlagRegistry.hookEditorEnabled, "hook-editor ships off"); print("HOOK EDITOR FLAG DEFAULT OFF")
 HookEditorChecks.run(); print("HOOK EDITOR CHECKS PASS")
+PromptTemplateChecks.run(); print("PROMPT TEMPLATE CHECKS PASS")
