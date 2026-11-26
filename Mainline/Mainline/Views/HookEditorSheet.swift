@@ -17,6 +17,7 @@ struct HookEditorSheet: View {
 
     @State private var advancedOpen = false
     @State private var statesOpen = false
+    @State private var roleBeforeAny = "authored"
     @State private var automaticOpen = false
     @State private var confirmDelete = false
 
@@ -273,13 +274,20 @@ struct HookEditorSheet: View {
                     }
                     Toggle("Also start on anyone's work", isOn: Binding(
                         get: { HookRole.parse(draft.hookRole) == .any },
-                        set: { draft.hookRole = $0 ? "any" : "authored" }))
-                    Text("Widens “Which PRs” above to every PR you can see, yours or not. Off is the safe default.")
+                        set: { on in
+                            if on {
+                                if HookRole.parse(draft.hookRole) != .any { roleBeforeAny = HookRole.parse(draft.hookRole).rawValue }
+                                draft.hookRole = "any"
+                            } else {
+                                draft.hookRole = roleBeforeAny
+                            }
+                        }))
+                    Text("Widens “\(draft.subject == .issues ? "Which issues" : "Which PRs")” above to every \(draft.subject == .issues ? "issue" : "PR") you can see, yours or not. Off is the safe default.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 TextField("Only when", text: $draft.when, prompt: Text("e.g. conflict + !draft"))
                     .textFieldStyle(.roundedBorder)
-                Text("`,` = or, `+` = and, `!` = not. Leave empty to start on every matching event.")
+                Text("`,` = or, `+` = and, `!` = not. \(isHook ? "Leave empty to start on every matching event." : "Leave empty and it is never suggested.")")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 ButtonDisclosure(isExpanded: $statesOpen) {
                     VStack(alignment: .leading, spacing: 4) {
