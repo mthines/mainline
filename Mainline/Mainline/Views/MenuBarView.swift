@@ -711,22 +711,24 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var scopeFilter: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                if !manager.availableScopes.isEmpty {
-                    scopeChip(label: "All", scope: nil)
-                    ForEach(manager.availableScopes, id: \.rawValue) { scope in
-                        let count = manager.scopeCounts[scope] ?? 0
-                        scopeChip(label: "\(scope.displayName) \(count)", scope: scope)
+        // Scope chips scroll; the state menu stays pinned to the right edge.
+        HStack(spacing: 6) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    if !manager.availableScopes.isEmpty {
+                        scopeChip(label: "All", scope: nil)
+                        ForEach(manager.availableScopes, id: \.rawValue) { scope in
+                            let count = manager.scopeCounts[scope] ?? 0
+                            scopeChip(label: "\(scope.displayName) \(count)", scope: scope)
+                        }
                     }
-                    if settings.selectedTab != .issues { Divider().frame(height: 16) }
                 }
-                // Issues have no drafts, so the toggle would do nothing there.
-                if settings.selectedTab != .issues { stateChip }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            // Issues have no PR states or drafts, so the menu would do nothing there.
+            if settings.selectedTab != .issues { stateChip }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .frame(height: 36)
     }
 
@@ -749,6 +751,7 @@ struct MenuBarView: View {
                 Text(state.label)
                     .font(.caption)
                     .fontWeight(state == .open && !draftsHidden ? .regular : .semibold)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
             .foregroundStyle(state == .open && !draftsHidden ? .secondary : .primary)
             .padding(.horizontal, 10)
@@ -758,8 +761,9 @@ struct MenuBarView: View {
                 in: Capsule()
             )
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.visible)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
         .help("Show open, merged or closed PRs, and draft PRs")
     }
