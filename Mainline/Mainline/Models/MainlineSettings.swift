@@ -79,6 +79,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
     case multiSelectToggle
     case toggleDrafts
     case toggleMute
+    case copyLink
     case copyBranch
     case togglePin
     case search
@@ -103,6 +104,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "Toggle Multi-Select"
         case .toggleDrafts:     return "Toggle Drafts"
         case .toggleMute:       return "Mute / Move Up (Inbox)"
+        case .copyLink:         return "Copy Link"
         case .copyBranch:       return "Copy Branch Name"
         case .togglePin:        return "Pin / Unpin"
         case .search:           return "Find / Search"
@@ -127,7 +129,8 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "v"
         case .toggleDrafts:     return "d"
         case .toggleMute:       return "q"   // "quiet" — left-hand key (see left-hand default policy)
-        case .copyBranch:       return "c"   // "copy" — left-hand key (see left-hand default policy)
+        case .copyLink:         return "c"   // "copy" — left-hand key (see left-hand default policy)
+        case .copyBranch:       return "c"   // ⇧C (see `InAppShortcutBindings.defaults`)
         case .togglePin:        return "p"   // "pin" — mnemonic (right-hand exception, like M/N)
         case .search:           return "f"   // "find" — mnemonic (freed by moving Mark Ready to "t")
         case .runPrompt:        return "a"   // "agent" — left-hand key (see left-hand default policy)
@@ -151,6 +154,7 @@ enum InAppShortcut: String, CaseIterable, Identifiable, Codable {
         case .multiSelectToggle: return "checkmark.circle"
         case .toggleDrafts:     return "pencil.circle"
         case .toggleMute:       return "arrow.down.circle"
+        case .copyLink:         return "link"
         case .copyBranch:       return "doc.on.doc"
         case .togglePin:        return "pin"
         case .search:           return "magnifyingglass"
@@ -203,7 +207,7 @@ enum KeyHints {
             add(.dismiss, focus.issueArchived ? "restore" : "archive")
             add(.toggleMute, "mute")
             if issuePromptsEnabled { add(.runPrompt, "agent") }
-            add(.copyBranch, "copy link")
+            add(.copyLink, "copy link")
         case .pr:
             add(.peek, "peek")
             out.append(KeyHint(glyph: "↵", label: "open"))
@@ -324,6 +328,7 @@ struct InAppShortcutBindings: Equatable {
     var multiSelectToggle: ShortcutBinding
     var toggleDrafts:    ShortcutBinding
     var toggleMute:      ShortcutBinding
+    var copyLink:        ShortcutBinding
     var copyBranch:      ShortcutBinding
     var togglePin:       ShortcutBinding
     var search:          ShortcutBinding
@@ -348,7 +353,8 @@ struct InAppShortcutBindings: Equatable {
             multiSelectToggle: ShortcutBinding(key: "v"),
             toggleDrafts:    ShortcutBinding(key: "d"),
             toggleMute:      ShortcutBinding(key: "q"),
-            copyBranch:      ShortcutBinding(key: "c"),
+            copyLink:        ShortcutBinding(key: "c"),
+            copyBranch:      ShortcutBinding(key: "c", modifiers: NSEvent.ModifierFlags.shift.rawValue),
             togglePin:       ShortcutBinding(key: "p"),
             search:          ShortcutBinding(key: "f"),
             runPrompt:       ShortcutBinding(key: "a"),
@@ -373,6 +379,7 @@ struct InAppShortcutBindings: Equatable {
         case .multiSelectToggle: return multiSelectToggle
         case .toggleDrafts:      return toggleDrafts
         case .toggleMute:        return toggleMute
+        case .copyLink:          return copyLink
         case .copyBranch:        return copyBranch
         case .togglePin:         return togglePin
         case .search:            return search
@@ -398,6 +405,7 @@ struct InAppShortcutBindings: Equatable {
         case .multiSelectToggle: multiSelectToggle = binding
         case .toggleDrafts:      toggleDrafts    = binding
         case .toggleMute:        toggleMute      = binding
+        case .copyLink:          copyLink        = binding
         case .copyBranch:        copyBranch      = binding
         case .togglePin:         togglePin       = binding
         case .search:            search          = binding
@@ -449,7 +457,7 @@ extension InAppShortcutBindings: Codable {
     enum CodingKeys: String, CodingKey {
         case navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview,
              snooze, markSeen, dismiss, multiSelectToggle, toggleDrafts,
-             toggleMute, copyBranch, togglePin, search, runPrompt, addComment, undo
+             toggleMute, copyLink, copyBranch, togglePin, search, runPrompt, addComment, undo
     }
 
     /// Decode either the new `ShortcutBinding` object shape or the v1.25.0
@@ -492,6 +500,20 @@ extension InAppShortcutBindings: Codable {
         toggleMute      = try decodeBinding(.toggleMute,      default: d.toggleMute)
         copyBranch      = try decodeBinding(.copyBranch,      default: d.copyBranch)
 
+        // `copyLink` is new (C copies the link; the branch name moved to ⇧C). On upgrade
+        // the stored JSON has no `.copyLink` key and `copyBranch` is still the old bare
+        // "c", which would clash with copyLink's "c" default — relocate copyBranch to ⇧C.
+        // A copyBranch the user deliberately rebound is left alone; if "c" is then taken
+        // by something else, copyLink stays unbound rather than clashing.
+        if container.contains(.copyLink) {
+            copyLink = try decodeBinding(.copyLink, default: d.copyLink)
+        } else {
+            if copyBranch == ShortcutBinding(key: "c") { copyBranch = d.copyBranch }
+            let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch].contains(d.copyLink)
+            copyLink = taken ? ShortcutBinding(key: "") : d.copyLink
+        }
+
         // Search + pin migration. `search` and `togglePin` were introduced together;
         // `search`'s default key is "f", which was `markReady`'s default before this
         // version. An existing user's stored JSON has no `.search` key AND still has
@@ -516,7 +538,7 @@ extension InAppShortcutBindings: Codable {
             runPrompt = try decodeBinding(.runPrompt, default: d.runPrompt)
         } else {
             let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
-                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyLink, copyBranch,
                          togglePin, search].contains(d.runPrompt)
             runPrompt = taken ? ShortcutBinding(key: "") : d.runPrompt
         }
@@ -526,7 +548,7 @@ extension InAppShortcutBindings: Codable {
             addComment = try decodeBinding(.addComment, default: d.addComment)
         } else {
             let taken = [navigateDown, navigateUp, peek, merge, markReady, refresh, openPreview, snooze,
-                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyBranch,
+                         markSeen, dismiss, multiSelectToggle, toggleDrafts, toggleMute, copyLink, copyBranch,
                          togglePin, search, runPrompt].contains(d.addComment)
             addComment = taken ? ShortcutBinding(key: "") : d.addComment
         }
@@ -559,6 +581,7 @@ extension InAppShortcutBindings: Codable {
         try container.encode(multiSelectToggle, forKey: .multiSelectToggle)
         try container.encode(toggleDrafts,     forKey: .toggleDrafts)
         try container.encode(toggleMute,       forKey: .toggleMute)
+        try container.encode(copyLink,         forKey: .copyLink)
         try container.encode(copyBranch,       forKey: .copyBranch)
         try container.encode(togglePin,        forKey: .togglePin)
         try container.encode(search,           forKey: .search)

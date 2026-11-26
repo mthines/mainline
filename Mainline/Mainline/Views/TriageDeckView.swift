@@ -1755,6 +1755,7 @@ struct TriageDeckView: View {
             Button { handleTriageAction(.copyLink, on: pr) } label: {
                 Label("Copy Link", systemImage: "link")
             }
+            .menuShortcut(.copyLink, settings)
             if !pr.headRefName.isEmpty {
                 Button { handleTriageAction(.copyBranch, on: pr) } label: {
                     Label("Copy Branch Name", systemImage: "doc.on.doc")
@@ -2164,7 +2165,7 @@ struct TriageDeckView: View {
                 if shortcutMatches(.markSeen, event: event) { manager.markIssueSeen(issue); return nil }
                 if shortcutMatches(.dismiss, event: event) { store.archive(issue); return nil }
                 if shortcutMatches(.toggleMute, event: event) { store.toggleMute(issue.nodeId); return nil }
-                if shortcutMatches(.copyBranch, event: event) { IssueRowView.copyLink(issue); return nil }
+                if shortcutMatches(.copyLink, event: event) { IssueRowView.copyLink(issue); return nil }
                 if shortcutMatches(.runPrompt, event: event), hoveredGroup.group == nil, FeatureFlagRegistry.issuePromptsEnabled {
                     manager.promptPickerTarget = PromptTarget(issues: [issue])
                     return nil
@@ -2338,7 +2339,11 @@ struct TriageDeckView: View {
             return nil
         }
 
-        // Copy the focused PR's head branch name to the clipboard.
+        // Copy the focused PR's link (C) or head branch name (⇧C) to the clipboard.
+        if shortcutMatches(.copyLink, event: event) {
+            if let pr = focusedPR { copyLink(pr) }
+            return nil
+        }
         if shortcutMatches(.copyBranch, event: event) {
             if let pr = focusedPR { copyBranch(pr) }
             return nil
