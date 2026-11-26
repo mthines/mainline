@@ -10,6 +10,7 @@ extension PRManager {
         let muted = settings.notifMutedNodeIds   // postponed PRs fire nothing
         let me = settings.githubUsername
         let live = events.filter { !muted.contains($0.pr.nodeId) }
+        recordHookSkip("pr", reason: "muted", count: events.count - live.count)   // only Done-set events reach here postponed
         let launches = live.flatMap { event in
             hooks.filter { PRHookEngine.matches($0, event: event, myLogin: me) }.map { (hook: $0, event: event) }
         }
