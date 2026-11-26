@@ -15,8 +15,8 @@ struct HookEditorSheet: View {
     let isHookMode: Bool
     let onClose: () -> Void
 
-    @State private var promptOpen = false
     @State private var advancedOpen = false
+    @State private var statesOpen = false
     @State private var automaticOpen = false
     @State private var confirmDelete = false
 
@@ -44,7 +44,7 @@ struct HookEditorSheet: View {
                     if isHookMode {
                         hookGroups
                     } else {
-                        DisclosureGroup(isExpanded: $automaticOpen) {
+                        ButtonDisclosure(isExpanded: $automaticOpen) {
                             hookGroups.padding(.top, 8)
                         } label: {
                             summaryLabel("Run automatically", hasHookConfig ? PRHookEngine.describe(draft) : "Off. Starts only when you run it.")
@@ -221,31 +221,23 @@ struct HookEditorSheet: View {
     private var promptGroup: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Prompt").font(.headline)
-            Text(draft.body.isEmpty ? "No prompt yet" : draft.body)
-                .font(.callout.monospaced()).lineLimit(3).foregroundStyle(.secondary)
-                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.12)))
-            DisclosureGroup("Edit prompt", isExpanded: $promptOpen) {
-                VStack(alignment: .leading, spacing: 6) {
-                    TextEditor(text: $draft.body).font(.body.monospaced()).frame(minHeight: 120)
-                    Menu("Insert placeholder") {
-                        ForEach(placeholders, id: \.self) { name in
-                            Button("{{\(name)}}") { draft.body += (draft.body.isEmpty || draft.body.hasSuffix(" ") ? "" : " ") + "{{\(name)}}" }
-                        }
-                    }
-                    .fixedSize()
-                    ForEach(draft.extraHarnesses, id: \.self) { key in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Prompt for \(store.config.harnesses[key]?.label ?? key) (empty = same as above)")
-                                .font(.caption).foregroundStyle(.secondary)
-                            TextEditor(text: Binding(
-                                get: { draft.harnessBodies[key] ?? "" },
-                                set: { draft.harnessBodies[key] = $0 }))
-                                .font(.body.monospaced()).frame(minHeight: 70)
-                        }
-                    }
+            TextEditor(text: $draft.body).font(.body.monospaced()).frame(minHeight: 120)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+            Menu("Insert placeholder") {
+                ForEach(placeholders, id: \.self) { name in
+                    Button("{{\(name)}}") { draft.body += (draft.body.isEmpty || draft.body.hasSuffix(" ") ? "" : " ") + "{{\(name)}}" }
                 }
-                .padding(.top, 6)
+            }
+            .fixedSize()
+            ForEach(draft.extraHarnesses, id: \.self) { key in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Prompt for \(store.config.harnesses[key]?.label ?? key) (empty = same as above)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: Binding(
+                        get: { draft.harnessBodies[key] ?? "" },
+                        set: { draft.harnessBodies[key] = $0 }))
+                        .font(.body.monospaced()).frame(minHeight: 70)
+                }
             }
         }
     }
@@ -267,7 +259,7 @@ struct HookEditorSheet: View {
     }
 
     private var advancedGroup: some View {
-        DisclosureGroup(isExpanded: $advancedOpen) {
+        ButtonDisclosure(isExpanded: $advancedOpen) {
             VStack(alignment: .leading, spacing: 10) {
                 if isHook {
                     VStack(alignment: .leading, spacing: 2) {
@@ -279,15 +271,36 @@ struct HookEditorSheet: View {
                             Text("Empty means every repo you can see.").font(.caption).foregroundStyle(.orange)
                         }
                     }
-                    Picker("Runs on", selection: roleBinding) {
-                        ForEach(roleOptions, id: \.raw) { Text($0.label).tag($0.raw) }
-                    }
+                    Toggle("Also start on anyone's work", isOn: Binding(
+                        get: { HookRole.parse(draft.hookRole) == .any },
+                        set: { draft.hookRole = $0 ? "any" : "authored" }))
+                    Text("Widens “Which PRs” above to every PR you can see, yours or not. Off is the safe default.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 TextField("Only when", text: $draft.when, prompt: Text("e.g. conflict + !draft"))
                     .textFieldStyle(.roundedBorder)
-                Text("`,` = or, `+` = and, `!` = not. States: "
-                     + PromptState.tokens.map(\.name).joined(separator: ", "))
+                Text("`,` = or, `+` = and, `!` = not. Leave empty to start on every matching event.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                ButtonDisclosure(isExpanded: $statesOpen) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(PromptState.tokens, id: \.name) { token in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(token.name).font(.caption.monospaced()).frame(width: 150, alignment: .leading)
+                                Text(token.meaning).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("These read the PR as GitHub reports it: its checks, reviews and mergeability.")
+                            .font(.caption).foregroundStyle(.secondary).padding(.top, 2)
+                        HStack(spacing: 12) {
+                            Link("Status checks", destination: URL(string: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/about-status-checks")!)
+                            Link("Reviews", destination: URL(string: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/about-pull-request-reviews")!)
+                            Link("Merge conflicts", destination: URL(string: "https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/addressing-merge-conflicts/about-merge-conflicts")!)
+                        }.font(.caption)
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Text("Which states can I use?").font(.caption)
+                }
                 Picker("Harness", selection: Binding(
                     get: { draft.harness },
                     set: { new in
@@ -359,6 +372,34 @@ struct HookEditorSheet: View {
             Button("Cancel") { onClose() }.keyboardShortcut(.cancelAction)
             Button(isNew && isHookMode ? "Add hook" : "Save") { save(); onClose() }
                 .keyboardShortcut(.defaultAction)
+        }
+    }
+}
+
+
+/// A disclosure whose whole header row is a button. SwiftUI's `DisclosureGroup` only reacts to its chevron
+/// on macOS, and inside this sheet's ScrollView it did not open at all.
+private struct ButtonDisclosure<Label: View, Content: View>: View {
+    @Binding var isExpanded: Bool
+    @ViewBuilder var content: () -> Content
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0)).frame(width: 12)
+                    label()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(isExpanded ? "expanded" : "collapsed")
+            if isExpanded { content().padding(.leading, 18) }
         }
     }
 }

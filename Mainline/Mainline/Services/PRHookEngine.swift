@@ -950,7 +950,7 @@ enum CheckHookChecks {
         assert(PRHookEngine.starterFrontmatter(issues: false, checks: true).split(separator: "\n").allSatisfy { $0.hasPrefix("#") },
                "check starter is all comments")
         assert(!HookTrigger.allCases.contains { $0.rawValue.hasPrefix("check-") }, "rollup triggers are unchanged")
-        assert(!FeatureFlagRegistry.checkHooksEnabled, "check-hooks ships off")
+        assert(FeatureFlagRegistry.flags.first { $0.key == FeatureFlagRegistry.checkHooksKey }?.defaultVariant == "off", "check-hooks ships off")
         assert(!CheckContexts.wanted(flagOn: false, templates: [hook()]), "flag off: nothing wanted")
         print("CHECK HOOK flag-off OK")
 
