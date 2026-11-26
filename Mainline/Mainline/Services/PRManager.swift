@@ -71,15 +71,16 @@ final class PRManager: ObservableObject {
     /// from `finishedPRs`); still feeds merged/closed hooks and auto-unpin-on-merge.
     @Published var donePRs: [PRSnapshot] = []
 
-    /// Merged / Closed PRs for the deck's state menu (`settings.prStateFilter`), fetched ON
-    /// DEMAND by `refreshFinished()` — never from the poll loop, so the GraphQL budget is
-    /// untouched while the filter stays Open. Display-only like `donePRs`.
-    @Published var finishedPRs: [PRSnapshot] = []
-    @Published var finishedLoading = false
+    /// Merged / Closed PRs for the deck's state menu, cached PER STATE and fetched ON DEMAND
+    /// by `refreshFinished` — never from the poll loop, so the GraphQL budget is untouched
+    /// while the filter stays Open. Display-only like `donePRs`. Switching states shows the
+    /// cached list at once and revalidates in the background (stale-while-revalidate).
+    @Published private var finishedCache: [PRStateFilter: (prs: [PRSnapshot], at: Date)] = [:]
+    @Published private var finishedLoadingStates: Set<PRStateFilter> = []
     @Published var finishedError: String?
-    /// The state `finishedPRs` was fetched for, and when (stale / wrong-state guards).
-    private var finishedState: PRStateFilter?
-    private var finishedFetchedAt: Date?
+    /// True while the CURRENT state's list is being fetched (the deck shows a spinner only
+    /// when it has nothing cached to show).
+    var finishedLoading: Bool { finishedLoadingStates.contains(settings.prStateFilter) }
 
     @Published var statusMessage: String = "Starting…"
     /// The GitHub rate limit being waited out (nil = none). Drives the header banner.
@@ -961,9 +962,10 @@ final class PRManager: ObservableObject {
     /// identically on Inbox, For me and Created), so only the scope chip filters it; the
     /// drafts toggle and the For-me sub-filter do not apply to finished PRs.
     var finishedViewPRs: [PRSnapshot] {
-        guard settings.prStateFilter != .open, finishedState == settings.prStateFilter else { return [] }
-        guard let scope = scopeStore.selectedScope else { return finishedPRs }
-        return finishedPRs.filter { pr in
+        guard settings.prStateFilter != .open,
+              let cached = finishedCache[settings.prStateFilter]?.prs else { return [] }
+        guard let scope = scopeStore.selectedScope else { return cached }
+        return cached.filter { pr in
             switch scope {
             case .org(let o):  return pr.repoFullName.hasPrefix(o + "/")
             case .repo(let r): return pr.repoFullName == r
@@ -971,41 +973,33 @@ final class PRManager: ObservableObject {
         }
     }
 
-    /// Fetches the Merged / Closed list for the current filter. No-op for Open. Skips when
-    /// the list for this state is younger than `PollPacing.secondaryInterval` unless
-    /// `force`. A rate-limited or failed fetch keeps any previous list and sets
-    /// `finishedError`.
-    func refreshFinished(force: Bool = false) async {
-        let state = settings.prStateFilter
-        guard state != .open else { return }
-        if !force, finishedState == state, let at = finishedFetchedAt,
+    /// Fetches the Merged / Closed list for `state` (default: the current filter) in the
+    /// background. A cached list younger than `PollPacing.secondaryInterval` is left alone
+    /// unless `force`; an older one stays visible while the refresh runs. A failed or
+    /// rate-limited fetch keeps the previous list and sets `finishedError`.
+    func refreshFinished(_ state: PRStateFilter? = nil, force: Bool = false) async {
+        let state = state ?? settings.prStateFilter
+        guard state != .open, !finishedLoadingStates.contains(state) else { return }
+        if !force, let at = finishedCache[state]?.at,
            Date().timeIntervalSince(at) < PollPacing.secondaryInterval { return }
-        guard !finishedLoading, let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
-        finishedLoading = true
-        defer { finishedLoading = false }
+        guard let token = await KeychainHelper.loadToken(), !token.isEmpty else { return }
+        finishedLoadingStates.insert(state)
+        defer { finishedLoadingStates.remove(state) }
         do {
             let list = try await client.searchFinishedPRs(state: state, token: token)
-            // The user may have switched state while this was in flight.
-            guard settings.prStateFilter == state else {
-                // The user switched state mid-flight and that call bailed on `finishedLoading`;
-                // load the state they are actually looking at.
-                finishedLoading = false
-                await refreshFinished(force: force)
-                return
-            }
-            finishedPRs = list
-            finishedState = state
-            finishedFetchedAt = Date()
+            finishedCache[state] = (list, Date())
             finishedError = nil
+            TelemetryService.shared.recordTriageInteraction("pr_state_\(state.rawValue)")
         } catch {
-            // Same staleness check as the success path: a failure for a state the user has
-            // already left must not become the new state's error, and the new state still loads.
-            guard settings.prStateFilter == state else {
-                finishedLoading = false
-                await refreshFinished(force: force)
-                return
-            }
-            finishedError = "Couldn't load \(state.label.lowercased()) PRs"
+            if settings.prStateFilter == state { finishedError = "Couldn't load \(state.label.lowercased()) PRs" }
+        }
+    }
+
+    /// Warms both finished lists (called when the pointer reaches the state menu, a strong
+    /// sign the user is about to open Merged or Closed). Throttled by the cache age.
+    func prefetchFinished() {
+        for state in [PRStateFilter.merged, .closed] {
+            Task { await refreshFinished(state) }
         }
     }
 
@@ -1434,7 +1428,7 @@ final class PRManager: ObservableObject {
             return
         }
         await poller.pollOnce(token: token, forceDone: forceDone)
-        if forceDone { await refreshFinished(force: true) }
+        if forceDone, settings.prStateFilter != .open { await refreshFinished(force: true) }
     }
 
     func stop() {

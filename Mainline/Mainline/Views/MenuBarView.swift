@@ -778,6 +778,8 @@ struct MenuBarView: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+        // Reaching for the menu usually means Merged or Closed is next: warm both lists.
+        .onHover { if $0 { manager.prefetchFinished() } }
         .help("Show open, merged or closed PRs, and draft PRs")
     }
 
