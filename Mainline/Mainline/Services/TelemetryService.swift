@@ -722,7 +722,7 @@ final class TelemetryService {
 
     /// What became of hook events. `decision`: "matched" | "no_match" | "throttled" | "held" |
     /// "skipped" | "cancelled". `reason` (held / skipped only): "paused" | "rate_limited" |
-    /// "flag_off" | "no_hooks" | "notifications_off". `trigger` is a trigger's raw value, or nil
+    /// "flag_off" | "muted" | "notifications_off". `trigger` is a trigger's raw value, or nil
     /// when the decision covers a whole batch of events.
     func recordHookDecision(subject: String?, trigger: String?, decision: String,
                             reason: String? = nil, count: Int = 1) {

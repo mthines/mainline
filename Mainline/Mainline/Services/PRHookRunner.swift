@@ -6,13 +6,16 @@ extension PRManager {
     func handleHookEvents(_ events: [HookEvent]) async {
         guard !events.isEmpty, !isHookGateClosed(events.count, subject: "pr") else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isHook)
-        guard !hooks.isEmpty else { recordHookSkip("pr", reason: "no_hooks", count: events.count); return }
+        guard !hooks.isEmpty else { return }
         let muted = settings.notifMutedNodeIds   // postponed PRs fire nothing
         let me = settings.githubUsername
-        let launches = events.filter { !muted.contains($0.pr.nodeId) }.flatMap { event in
+        let live = events.filter { !muted.contains($0.pr.nodeId) }
+        recordHookSkip("pr", reason: "muted", count: events.count - live.count)
+        let launches = live.flatMap { event in
             hooks.filter { PRHookEngine.matches($0, event: event, myLogin: me) }.map { (hook: $0, event: event) }
         }
-        recordHookMatching("pr", events: events.map { $0.trigger.rawValue }, launches: launches.map { $0.event.trigger.rawValue })
+        recordHookMatching("pr", triggers: live.map { $0.trigger.rawValue },
+                           matched: live.map { event in hooks.contains { PRHookEngine.matches($0, event: event, myLogin: me) } })
         guard !launches.isEmpty, await canCountDown(subject: "pr", count: launches.count) else { return }
         for (hook, event) in launches {
             guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
@@ -30,12 +33,13 @@ extension PRManager {
         guard FeatureFlagRegistry.checkHooksEnabled else { recordHookSkip("check", reason: "flag_off", count: events.count); return }
         guard !isHookGateClosed(events.count, subject: "check") else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isCheckHook)
-        guard !hooks.isEmpty else { recordHookSkip("check", reason: "no_hooks", count: events.count); return }
+        guard !hooks.isEmpty else { return }
         let me = settings.githubUsername
         let launches = events.flatMap { event in
             hooks.filter { PRHookEngine.matches($0, checkEvent: event, myLogin: me) }.map { (hook: $0, event: event) }
         }
-        recordHookMatching("check", events: events.map { $0.trigger.rawValue }, launches: launches.map { $0.event.trigger.rawValue })
+        recordHookMatching("check", triggers: events.map { $0.trigger.rawValue },
+                           matched: events.map { event in hooks.contains { PRHookEngine.matches($0, checkEvent: event, myLogin: me) } })
         guard !launches.isEmpty, await canCountDown(subject: "check", count: launches.count) else { return }
         for (hook, event) in launches {
             guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
@@ -57,12 +61,14 @@ extension PRManager {
         guard FeatureFlagRegistry.issueHooksEnabled else { recordHookSkip("issue", reason: "flag_off", count: events.count); return }
         guard !isHookGateClosed(events.count, subject: "issue") else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isIssueHook)
-        guard !hooks.isEmpty else { recordHookSkip("issue", reason: "no_hooks", count: events.count); return }
+        guard !hooks.isEmpty else { return }
         let muted = Set(settings.mutedIssueIds)
         let me = settings.githubUsername
-        let launches = PRHookEngine.issueLaunches(hooks, events: events.filter { !muted.contains($0.issue.nodeId) },
-                                                  myLogin: me)
-        recordHookMatching("issue", events: events.map { $0.trigger.rawValue }, launches: launches.map { $0.event.trigger.rawValue })
+        let live = events.filter { !muted.contains($0.issue.nodeId) }
+        recordHookSkip("issue", reason: "muted", count: events.count - live.count)
+        let launches = PRHookEngine.issueLaunches(hooks, events: live, myLogin: me)
+        recordHookMatching("issue", triggers: live.map { $0.trigger.rawValue },
+                           matched: live.map { event in hooks.contains { PRHookEngine.matches($0, issueEvent: event, myLogin: me) } })
         guard !launches.isEmpty, await canCountDown(subject: "issue", count: launches.count) else { return }
         for (hook, event) in launches {
             guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
@@ -105,13 +111,12 @@ extension PRManager {
         TelemetryService.shared.recordHookDecision(subject: subject, trigger: nil, decision: "skipped", reason: reason, count: count)
     }
 
-    /// `matched` per launch and `no_match` per event no hook claimed (trigger values are fixed enums).
-    private func recordHookMatching(_ subject: String, events: [String], launches: [String]) {
-        let telemetry = TelemetryService.shared
-        for trigger in launches { telemetry.recordHookDecision(subject: subject, trigger: trigger, decision: "matched") }
-        let claimed = Set(launches)
-        for trigger in events where !claimed.contains(trigger) {
-            telemetry.recordHookDecision(subject: subject, trigger: trigger, decision: "no_match")
+    /// One decision per event: `matched` when some hook claims it, else `no_match`. `triggers[i]`
+    /// and `matched[i]` describe the same event (trigger values are fixed enums).
+    private func recordHookMatching(_ subject: String, triggers: [String], matched: [Bool]) {
+        for (trigger, isMatched) in zip(triggers, matched) {
+            TelemetryService.shared.recordHookDecision(subject: subject, trigger: trigger,
+                                                       decision: isMatched ? "matched" : "no_match")
         }
     }
 
