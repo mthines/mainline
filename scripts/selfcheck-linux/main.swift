@@ -1,4 +1,5 @@
 PRHookChecks.run(); print("PR HOOK CHECKS PASS")
+HookSelfChecks.run(); print("HOOK SELF CHECKS PASS")
 IssueDiffChecks.run(); print("ISSUE DIFF CHECKS PASS")
 IssueHookChecks.run(); print("ISSUE HOOK CHECKS PASS")
 FeatureFlagChecks.run(); print("FEATURE FLAG CHECKS PASS")

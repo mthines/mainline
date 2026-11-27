@@ -36,6 +36,9 @@ enum HookTrigger: String, CaseIterable {
 struct HookEvent: Equatable {
     let trigger: HookTrigger
     let pr: PRSnapshot
+    /// A `new-comment` produced only by the viewer's own comment or review. Such an event is built
+    /// anyway and fires a hook only when the hook sets `self: true` (`matches`).
+    var byViewer = false
 }
 
 /// A change to ONE named CI check on a PR (flag `check-hooks`). Kept apart from `HookTrigger`
@@ -163,6 +166,8 @@ enum IssueHookTrigger: String, CaseIterable {
 struct IssueHookEvent: Equatable {
     let trigger: IssueHookTrigger
     let issue: IssueSnapshot
+    /// Every new human comment behind a `new-comment` is the viewer's own; see `HookEvent.byViewer`.
+    var byViewer = false
 }
 
 /// Whose PRs a hook may fire on. Default `.authored`: an agent must not start by itself on
@@ -200,9 +205,14 @@ enum PRHookEngine {
             let oldTokens = PromptState.active(pr: old, myLogin: myLogin)
             if !oldTokens.contains("ready-to-merge"),
                PromptState.active(pr: pr, myLogin: myLogin).contains("ready-to-merge") { add(.readyToMerge) }
-            let newComment = pr.commentCount > old.commentCount && !pr.lastCommentIsBot && !pr.lastCommentIsViewer
-            let newReview = pr.reviewCount > old.reviewCount && !pr.lastReviewIsBot && !pr.lastReviewIsViewer
-            if newComment || newReview { add(.newComment) }
+            let comment = pr.commentCount > old.commentCount && !pr.lastCommentIsBot
+            let review = pr.reviewCount > old.reviewCount && !pr.lastReviewIsBot
+            if comment || review {
+                // Someone else's comment or review fires it for every hook; one that is only yours fires
+                // it for a hook with `self: true`.
+                let others = (comment && !pr.lastCommentIsViewer) || (review && !pr.lastReviewIsViewer)
+                out.append(HookEvent(trigger: .newComment, pr: pr, byViewer: !others))
+            }
             if pr.tabs.contains(.forMe), old.reviewRequestSource(myLogin: myLogin) == .none,
            pr.reviewRequestSource(myLogin: myLogin) != .none { add(.reviewRequested) }
             if old.isDraft, !pr.isDraft { add(.readyForReview) }
@@ -327,8 +337,10 @@ enum PRHookEngine {
             // Every comment added since the last poll (as far as the fetched tail reaches), not just
             // the newest: Bob's comment still counts when you or a bot replied before the next poll.
             let added = issue.comments.suffix(issue.commentCount - old.commentCount)
-            guard added.contains(where: { !PRSnapshot.loginsMatch($0.author, myLogin) && !$0.isBot }) else { continue }
-            out.append(IssueHookEvent(trigger: .newComment, issue: issue))
+            let human = added.filter { !$0.isBot }
+            guard !human.isEmpty else { continue }
+            let others = human.contains { !PRSnapshot.loginsMatch($0.author, myLogin) }
+            out.append(IssueHookEvent(trigger: .newComment, issue: issue, byViewer: !others))
         }
         out += closed.filter { previous[$0.nodeId] != nil }.map { IssueHookEvent(trigger: .closed, issue: $0) }
         return out
@@ -349,6 +361,7 @@ enum PRHookEngine {
     /// hook that has one never fires rather than firing more often than written.
     static func matches(_ t: PromptTemplate, issueEvent event: IssueHookEvent, myLogin: String) -> Bool {
         guard t.hookEnabled, t.subject.covers(.issues), parseIssueTriggers(t.on).triggers.contains(event.trigger) else { return false }
+        guard !event.byViewer || t.hookSelf else { return false }
         let scopes = CommentEngine.parseScope(t.hookScope)
         guard scopes.isEmpty || scopes.contains(where: { CommentEngine.patternMatches($0, repo: event.issue.repoFullName) })
         else { return false }
@@ -397,6 +410,7 @@ enum PRHookEngine {
     /// Whether `template` fires for `event`: trigger, repo scope, role, then the `when:` guard.
     static func matches(_ t: PromptTemplate, event: HookEvent, myLogin: String) -> Bool {
         guard t.hookEnabled, parseTriggers(t.on).triggers.contains(event.trigger) else { return false }
+        guard !event.byViewer || t.hookSelf else { return false }
         return passesFilters(t, pr: event.pr, myLogin: myLogin)
     }
 
@@ -462,6 +476,30 @@ enum PRHookEngine {
     }
 }
 
+/// How many times each hook has started for each PR or issue, for `max-runs:`. A run is counted when the
+/// hook launches (a cancelled countdown does not count). Pure value type; the runner saves it.
+struct HookRunLedger: Codable, Equatable {
+    struct Entry: Codable, Equatable { var count: Int; var last: Date }
+    private(set) var entries: [String: Entry] = [:]
+    static let maxEntries = 500
+
+    /// One count per hook and PR/issue, across every trigger (a check hook and a comment hook on the same
+    /// PR are different hooks, so they count apart; the same hook's triggers count together).
+    static func key(_ hook: String, target nodeId: String) -> String { "\(hook)|\(nodeId)" }
+
+    func runs(_ key: String) -> Int { entries[key]?.count ?? 0 }
+    /// `max <= 0` means no cap.
+    func allows(_ key: String, max: Int) -> Bool { max <= 0 || runs(key) < max }
+
+    mutating func record(_ key: String, now: Date) {
+        entries[key] = Entry(count: runs(key) + 1, last: now)
+        if entries.count > Self.maxEntries {
+            let drop = entries.sorted { $0.value.last < $1.value.last }.prefix(entries.count - Self.maxEntries).map(\.key)
+            for k in drop { entries.removeValue(forKey: k) }
+        }
+    }
+}
+
 extension PRHookEngine {
     /// The commented-out frontmatter a New Hook starts with: the activation lines, then every
     /// option and trigger, so the file explains itself without the README. Lines start with `#`,
@@ -500,6 +538,8 @@ extension PRHookEngine {
         ] + lines(all) + issueBlock + checkBlock + [
             "# scope: owner/repo, owner/*, or * (default: every repo)",
             "# role:  authored (default) | reviewing | any",
+            "# self:  true lets YOUR OWN comments and reviews start it (default: off; pair with max-runs)",
+            "# max-runs: N starts it at most N times per PR or issue (default: no cap)",
             "# when:  optional state guard, e.g. !conflict (see README.txt)",
         ]).joined(separator: "\n") + "\n"
     }
@@ -643,6 +683,9 @@ extension PRHookEngine {
         if !unknown.isEmpty { out.append("Unknown trigger: \(unknown.joined(separator: ", ")).") }
         if checks, checkHookMissingName(t) { out.append("Name the check, or use * for any check.") }
         if let message = scopeProblem(t.hookScope) { out.append(message) }
+        if t.hookSelf, t.hookMaxRuns == 0 {
+            out.append("“self” lets your own comments start this hook, so an agent that comments back can start itself again. Set max-runs (3 is a good start).")
+        }
         let guardWords = PromptState.parse(t.when).unknown
         if !guardWords.isEmpty {
             out.append("“\(guardWords.joined(separator: ", "))” isn't a state. Try: "
@@ -657,7 +700,8 @@ extension PRHookEngine {
         guard !tickedTriggers(t.on).isEmpty else { return "Pick at least one trigger to arm this hook." }
         let start = countdownSeconds == 0 ? "starts immediately" : "shows a \(countdownSeconds) s banner, then starts"
         let minutes = Int(Throttle().cooldown / 60)
-        return "\(describe(t)): \(start) \(harnessLabel). At most once per PR every \(minutes) min."
+        let cap = t.hookMaxRuns > 0 ? " and \(t.hookMaxRuns) time\(t.hookMaxRuns == 1 ? "" : "s") in all" : ""
+        return "\(describe(t)): \(start) \(harnessLabel). At most once per PR every \(minutes) min\(cap)."
     }
 
     /// A new hook as the sheet opens it: off, your own PRs, every repo not yet chosen, no trigger ticked.
@@ -687,7 +731,8 @@ enum PRHookChecks {
                 author: author, requestedReviewers: [], mergeable: mergeable)
         }
         func triggers(_ a: PRSnapshot, _ b: PRSnapshot) -> Set<HookTrigger> {
-            Set(PRHookEngine.events(previous: [a.nodeId: a], next: [b], myLogin: "me").map(\.trigger))
+            // Events a default hook (no `self:`) can fire on: the viewer-only ones are checked separately below.
+            Set(PRHookEngine.events(previous: [a.nodeId: a], next: [b], myLogin: "me").filter { !$0.byViewer }.map(\.trigger))
         }
         assert(PRHookEngine.events(previous: [:], next: [pr()], myLogin: "me").isEmpty, "empty previous is a baseline, not an event")
         var asked = pr("n2", author: "them"); asked.tabs = [.forMe]; asked.requestedReviewers = ["me"]
@@ -711,6 +756,22 @@ enum PRHookChecks {
         var theirs = pr(); theirs.commentCount = 1
         assert(triggers(pr(), mine).isEmpty, "your own comment fires no new-comment")
         assert(triggers(pr(), theirs) == [.newComment], "someone else's comment does")
+        // `self:` — the viewer's own comment is still an event, marked, and only a hook with `self: true` fires on it.
+        let ownEvents = PRHookEngine.events(previous: [pr().nodeId: pr()], next: [mine], myLogin: "me")
+        assert(ownEvents.map(\.trigger) == [.newComment] && ownEvents.first?.byViewer == true, "own comment is a byViewer event")
+        var mixed = mine; mixed.reviewCount = 1; mixed.lastReviewIsViewer = false
+        assert(PRHookEngine.events(previous: [pr().nodeId: pr()], next: [mixed], myLogin: "me").first?.byViewer == false,
+               "a review from someone else makes the event theirs")
+        var selfHook = PromptTemplate(fileName: "s.md", name: "s", harness: "claude", checkout: false, body: "x")
+        selfHook.on = "new-comment"
+        assert(!PRHookEngine.matches(selfHook, event: ownEvents[0], myLogin: "me"), "own comment: no match without self")
+        selfHook.hookSelf = true
+        assert(PRHookEngine.matches(selfHook, event: ownEvents[0], myLogin: "me"), "own comment: matches with self: true")
+        var botOwn = mine; botOwn.lastCommentIsBot = true
+        assert(PRHookEngine.events(previous: [pr().nodeId: pr()], next: [botOwn], myLogin: "me").isEmpty, "bots stay ignored even with self")
+        selfHook.hookSelf = false
+        let theirsEvent = PRHookEngine.events(previous: [pr().nodeId: pr()], next: [theirs], myLogin: "me")[0]
+        assert(PRHookEngine.matches(selfHook, event: theirsEvent, myLogin: "me"), "someone else's comment fires without self")
 
         let t = PRHookEngine.parseTriggers("ci-failed, Approved, nope")
         assert(t.triggers == [.ciFailed, .approved] && t.unknown == ["nope"], "parseTriggers")
@@ -771,7 +832,7 @@ enum IssueHookChecks {
         func triggers(_ prev: [IssueSnapshot], _ next: [IssueSnapshot], _ tr: [IssueTransition] = [],
                       closed: [IssueSnapshot] = []) -> [IssueHookTrigger] {
             PRHookEngine.issueEvents(previous: Dictionary(uniqueKeysWithValues: prev.map { ($0.nodeId, $0) }),
-                                     next: next, transitions: tr, closed: closed, myLogin: me).map(\.trigger)
+                                     next: next, transitions: tr, closed: closed, myLogin: me).filter { !$0.byViewer }.map(\.trigger)
         }
 
         let a = issue()
@@ -783,6 +844,17 @@ enum IssueHookChecks {
         assert(triggers([a], [a]).isEmpty, "an unchanged issue fires nothing")
         assert(triggers([a], [issue(comments: [reply("bob")])]) == [.newComment], "someone else's comment")
         assert(triggers([a], [issue(comments: [reply("Mads")])]).isEmpty, "your own comment fires nothing")
+        let ownIssue = PRHookEngine.issueEvents(previous: ["i1": a], next: [issue(comments: [reply("Mads")])], transitions: [], closed: [], myLogin: me)
+        assert(ownIssue.map(\.trigger) == [.newComment] && ownIssue[0].byViewer, "your own issue comment is a byViewer event")
+        let mixedIssue = PRHookEngine.issueEvents(previous: ["i1": a], next: [issue(comments: [reply("bob"), reply("mads")])], transitions: [], closed: [], myLogin: me)
+        assert(mixedIssue.count == 1 && !mixedIssue[0].byViewer, "a comment from someone else makes the event theirs")
+        var selfIssueHook = PromptTemplate(fileName: "si.md", name: "si", harness: "claude", checkout: false, body: "{{issue.url}}")
+        selfIssueHook.subject = .issues; selfIssueHook.on = "new-comment"; selfIssueHook.hookRole = "any"
+        assert(!PRHookEngine.matches(selfIssueHook, issueEvent: ownIssue[0], myLogin: me), "own issue comment: no match without self")
+        selfIssueHook.hookSelf = true
+        assert(PRHookEngine.matches(selfIssueHook, issueEvent: ownIssue[0], myLogin: me), "own issue comment: matches with self: true")
+        assert(PRHookEngine.issueEvents(previous: ["i1": a], next: [issue(comments: [reply("mads", bot: true)])], transitions: [], closed: [], myLogin: me).isEmpty,
+               "a bot comment stays ignored with self")
         assert(triggers([a], [issue(comments: [reply("github-actions", bot: true)])]).isEmpty, "a bot comment fires nothing")
         assert(triggers([a], [issue(comments: [reply("bob"), reply("mads")])]) == [.newComment],
                "someone's comment counts even when yours came after it in the same poll")
@@ -1123,6 +1195,48 @@ enum HookEditorChecks {
         let saved = PromptEngine.parse(fileName: fresh.fileName, text: PromptEngine.serialize(fresh))!
         assert(!saved.hookEnabled && PRHookEngine.isListedHook(saved), "the saved file is still off and listed")
         print("HOOK EDITOR new-hook-off OK")
+    }
+}
+
+enum HookSelfChecks {
+    static func run() {
+        var ledger = HookRunLedger()
+        let key = HookRunLedger.key("h.md", target: "n1")
+        assert(ledger.allows(key, max: 0), "no cap always allows")
+        assert(ledger.allows(key, max: 2) && ledger.runs(key) == 0, "fresh target allowed")
+        ledger.record(key, now: Date(timeIntervalSince1970: 1))
+        assert(ledger.allows(key, max: 2), "one of two used")
+        ledger.record(key, now: Date(timeIntervalSince1970: 2))
+        assert(!ledger.allows(key, max: 2) && ledger.runs(key) == 2, "the cap holds")
+        assert(ledger.allows(HookRunLedger.key("h.md", target: "n2"), max: 2), "another PR counts apart")
+        assert(ledger.allows(HookRunLedger.key("other.md", target: "n1"), max: 2), "another hook counts apart")
+        assert(ledger.allows(key, max: 3), "raising the cap frees the hook")
+        var big = HookRunLedger()
+        for i in 0..<(HookRunLedger.maxEntries + 10) { big.record("k\(i)", now: Date(timeIntervalSince1970: Double(i))) }
+        assert(big.entries.count == HookRunLedger.maxEntries && big.entries["k0"] == nil && big.entries["k509"] != nil,
+               "the ledger drops its oldest entries")
+        let round = try? JSONDecoder().decode(HookRunLedger.self, from: JSONEncoder().encode(ledger))
+        assert(round == ledger, "the ledger round-trips through JSON")
+
+        var t = PromptTemplate(fileName: "h.md", name: "h", harness: "claude", checkout: false, body: "x")
+        t.on = "new-comment"; t.hookSelf = true; t.hookMaxRuns = 3
+        let text = PromptEngine.serialize(t)
+        let back = PromptEngine.parse(fileName: "h.md", text: text)
+        assert(back?.hookSelf == true && back?.hookMaxRuns == 3, "self and max-runs round-trip")
+        let plain = PromptEngine.parse(fileName: "p.md", text: PromptEngine.serialize(PromptTemplate(fileName: "p.md", name: "p", harness: "claude", checkout: false, body: "x")))
+        assert(plain?.hookSelf == false && plain?.hookMaxRuns == 0, "absent keys mean off and no cap")
+        let bad = PromptEngine.parse(fileName: "b.md", text: "---\nname: b\nself: maybe\nmax-runs: -4\n---\nx\n")
+        assert(bad?.hookSelf == false && bad?.hookMaxRuns == 0, "a bad self or a negative cap reads as off")
+        let patched = PromptEngine.patch(existing: "---\nname: h\n# keep me\nself: true\nmax-runs: 9\n---\nx\n", with: { var q = t; q.hookSelf = false; q.hookMaxRuns = 0; return q }())
+        assert(!patched.contains("self:") && !patched.contains("max-runs:") && patched.contains("# keep me"), "turning them off removes the lines, keeps comments")
+        assert(PRHookEngine.problems(t, issues: true, checks: false).isEmpty, "self with a cap is fine")
+        t.hookMaxRuns = 0
+        assert(PRHookEngine.problems(t, issues: true, checks: false).contains { $0.contains("max-runs") }, "self without a cap warns")
+        t.hookSelf = false
+        assert(PRHookEngine.problems(t, issues: true, checks: false).isEmpty, "no self, no warning")
+        t.hookMaxRuns = 1
+        assert(PRHookEngine.consentLine(t, harnessLabel: "Claude", countdownSeconds: 10).contains("1 time in all"), "consent line states the cap")
+        print("HOOK SELF CHECKS OK")
     }
 }
 #endif

@@ -100,7 +100,7 @@ telemetry silently does nothing (correct for dev builds without the token).
 | `mainline.setting.changed`         | counter   | `setting.name`, `setting.enabled`                        |
 | `mainline.attention_policy.changed`| counter   | `attention.event`, `attention.level`                     |
 | `mainline.agent.runs`              | counter   | `agent.origin` (`prompt_template`, `prompt_custom`, `hook`), `agent.subject` (`pr`, `issue`, `check`), `agent.scope` (`single`, `stack`, `group`), `agent.result`, `error.type` (failure only) |
-| `mainline.hook.decisions`          | counter   | `hook.decision` (`matched`, `no_match`, `throttled`, `held`, `skipped`, `cancelled`), `hook.subject`, `hook.trigger`, `hook.reason` (`paused`, `rate_limited`, `flag_off`, `muted`, `notifications_off`) |
+| `mainline.hook.decisions`          | counter   | `hook.decision` (`matched`, `no_match`, `throttled`, `held`, `skipped`, `cancelled`), `hook.subject`, `hook.trigger`, `hook.reason` (`paused`, `rate_limited`, `flag_off`, `muted`, `notifications_off`, `max_runs`) |
 | `mainline.comment.posts`           | counter   | `comment.source` (`template`, `typed`), `comment.result` (`success`, `failure`, `writes_off`, `empty`) |
 
 Agent runs, hook decisions and comment posts carry fixed vocabularies only: never template

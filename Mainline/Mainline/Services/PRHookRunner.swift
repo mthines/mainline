@@ -18,6 +18,7 @@ extension PRManager {
                            matched: live.map { event in hooks.contains { PRHookEngine.matches($0, event: event, myLogin: me) } })
         guard !launches.isEmpty, await canCountDown(subject: "pr", count: launches.count) else { return }
         for (hook, event) in launches {
+            guard underRunCap(hook, target: event.pr.nodeId, subject: "pr", trigger: event.trigger.rawValue) else { continue }
             guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
                 TelemetryService.shared.recordHookDecision(subject: "pr", trigger: event.trigger.rawValue, decision: "throttled")
                 continue
@@ -41,6 +42,7 @@ extension PRManager {
                            matched: events.map { event in hooks.contains { PRHookEngine.matches($0, checkEvent: event, myLogin: me) } })
         guard !launches.isEmpty, await canCountDown(subject: "check", count: launches.count) else { return }
         for (hook, event) in launches {
+            guard underRunCap(hook, target: event.pr.nodeId, subject: "check", trigger: event.trigger.rawValue) else { continue }
             guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
                 TelemetryService.shared.recordHookDecision(subject: "check", trigger: event.trigger.rawValue, decision: "throttled")
                 continue
@@ -69,6 +71,7 @@ extension PRManager {
                            matched: live.map { event in hooks.contains { PRHookEngine.matches($0, issueEvent: event, myLogin: me) } })
         guard !launches.isEmpty, await canCountDown(subject: "issue", count: launches.count) else { return }
         for (hook, event) in launches {
+            guard underRunCap(hook, target: event.issue.nodeId, subject: "issue", trigger: event.trigger.rawValue) else { continue }
             guard hookThrottle.admit(key: PRHookEngine.Throttle.key(hook.fileName, event), now: Date()) else {
                 TelemetryService.shared.recordHookDecision(subject: "issue", trigger: event.trigger.rawValue, decision: "throttled")
                 continue
@@ -103,6 +106,23 @@ extension PRManager {
         if settings.hooksPaused { recordHookSkip(subject, reason: "paused", count: count); return true }
         if RateLimitMonitor.shared.active != nil { recordHookSkip(subject, reason: "rate_limited", count: count); return true }
         return false
+    }
+
+    /// `max-runs:` — false (and counted as `skipped` / `max_runs`) once this hook has started `maxRuns` times for
+    /// this PR or issue. Checked before the throttle so a capped hook does not use a throttle slot.
+    private func underRunCap(_ hook: PromptTemplate, target: String, subject: String, trigger: String) -> Bool {
+        guard hookRuns.allows(HookRunLedger.key(hook.fileName, target: target), max: hook.hookMaxRuns) else {
+            TelemetryService.shared.recordHookDecision(subject: subject, trigger: trigger, decision: "skipped", reason: "max_runs")
+            return false
+        }
+        return true
+    }
+
+    /// Counts one start (the countdown is over and the launch is going ahead) toward `max-runs:`.
+    private func countRun(_ hook: PromptTemplate, target: String) {
+        guard hook.hookMaxRuns > 0 else { return }
+        hookRuns.record(HookRunLedger.key(hook.fileName, target: target), now: Date())
+        hookRuns.save()
     }
 
     private func recordHookSkip(_ subject: String, reason: String, count: Int) {
@@ -149,6 +169,7 @@ extension PRManager {
 
     private func launchHook(_ hook: PromptTemplate, pr: PRSnapshot, id: String, subject: String, label: String) {
         guard !settings.hooksPaused else { recordHookSkip(subject, reason: "paused", count: 1); return }
+        countRun(hook, target: pr.nodeId)
         let config = promptStore.config
         let template = PromptEngine.effective(hook, config: config)
         do {
@@ -172,6 +193,7 @@ extension PRManager {
     private func launchIssueHook(_ hook: PromptTemplate, event: IssueHookEvent, id: String, label: String) {
         guard !settings.hooksPaused else { recordHookSkip("issue", reason: "paused", count: 1); return }
         guard FeatureFlagRegistry.issueHooksEnabled else { recordHookSkip("issue", reason: "flag_off", count: 1); return }
+        countRun(hook, target: event.issue.nodeId)
         let config = promptStore.config
         let template = PromptEngine.effective(hook, config: config)
         let issue = event.issue
@@ -191,5 +213,25 @@ extension PRManager {
                                                    errorType: PromptError.telemetryType(of: error))
             notifications.postHook(id: id, title: "Hook failed: \(label)", body: error.localizedDescription, url: issue.url, cancellable: false)
         }
+    }
+}
+
+extension HookRunLedger {
+    static var fileURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/mainline/hook-runs.json")
+    }
+
+    /// An unreadable or missing file is an empty ledger: the cap then starts over rather than blocking hooks.
+    static func load() -> HookRunLedger {
+        guard let data = try? Data(contentsOf: fileURL),
+              let ledger = try? JSONDecoder().decode(HookRunLedger.self, from: data) else { return HookRunLedger() }
+        return ledger
+    }
+
+    func save() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try? FileManager.default.createDirectory(at: Self.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? encoder.encode(self) { try? data.write(to: Self.fileURL, options: .atomic) }
     }
 }

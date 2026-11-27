@@ -156,6 +156,8 @@ final class PRManager: ObservableObject {
     // MARK: - PR hooks (templates with `on:`)
 
     var hookThrottle = PRHookEngine.Throttle()
+    /// Starts per hook and PR/issue, for `max-runs:`; persisted in `~/.config/mainline/hook-runs.json`.
+    var hookRuns = HookRunLedger.load()
     /// Hooks waiting out their countdown, by hook-run id (the notification's identifier).
     var pendingHooks: [String: Task<Void, Never>] = [:]
     /// Every PR id the live store has held (open PRs), so a Done-set PR is only news if we saw it open.

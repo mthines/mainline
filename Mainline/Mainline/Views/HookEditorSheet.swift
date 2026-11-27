@@ -285,6 +285,18 @@ struct HookEditorSheet: View {
                     Text("Widens “\(draft.subject == .issues ? "Which issues" : "Which PRs")” above to every \(draft.subject == .issues ? "issue" : "PR") you can see, yours or not. Off is the safe default.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                if isHook {
+                    Toggle("Also start on my own comments and reviews", isOn: $draft.hookSelf)
+                    Text("Off by default: an agent that comments back as you would start itself again. Pair it with a run limit.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Stepper(value: Binding(get: { draft.hookMaxRuns }, set: { draft.hookMaxRuns = max(0, $0) }), in: 0...50) {
+                        Text(draft.hookMaxRuns == 0
+                             ? "Run limit per \(draft.subject == .issues ? "issue" : "PR"): none"
+                             : "Run limit per \(draft.subject == .issues ? "issue" : "PR"): \(draft.hookMaxRuns)")
+                    }
+                    Text("Counted across launches and kept until you raise or remove it. A start you cancel does not count.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 TextField("Only when", text: $draft.when, prompt: Text("e.g. conflict + !draft"))
                     .textFieldStyle(.roundedBorder)
                 Text("`,` = or, `+` = and, `!` = not. \(isHook ? "Leave empty to start on every matching event." : "Leave empty and it is never suggested.")")

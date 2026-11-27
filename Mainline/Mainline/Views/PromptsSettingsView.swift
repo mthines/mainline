@@ -200,6 +200,8 @@ struct PromptsSettingsView: View {
                         HStack(spacing: 6) {
                             chip(store.config.harnesses[hook.harness]?.label ?? hook.harness)
                             if hook.hookScope.trimmingCharacters(in: .whitespaces).isEmpty { chip("all repos", warn: true) }
+                            if hook.hookSelf { chip(hook.hookMaxRuns > 0 ? "own comments · max \(hook.hookMaxRuns)" : "own comments · no cap", warn: hook.hookMaxRuns == 0) }
+                            else if hook.hookMaxRuns > 0 { chip("max \(hook.hookMaxRuns) runs") }
                         }
                         if !unknown.isEmpty {
                             Label("Can't run: unknown trigger \(unknown.joined(separator: ", "))", systemImage: "exclamationmark.triangle")

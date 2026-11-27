@@ -94,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         FinishedQuery.runSelfChecks()
         PromptTemplateChecks.run()
         PRHookChecks.run()
+        HookSelfChecks.run()
         IssueHookChecks.run()
         CheckHookChecks.run()
         HookEditorChecks.run()
