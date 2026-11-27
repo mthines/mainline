@@ -47,7 +47,7 @@ enum PromptTerminal: String, CaseIterable, Identifiable {
 // MARK: - Store
 
 /// Owns `~/.config/mainline/`: `config.json` (harnesses, repo paths, checkout step)
-/// and `prompts/*.md` (one template per file). The files are the single source of
+/// `prompts/*.md` and `hooks/*.md` (one template or hook per file). The files are the single source of
 /// truth — Settings edits them through `save`/`delete`, and edits made in an editor
 /// are picked up by a cheap 2-second signature check.
 @MainActor
@@ -129,7 +129,7 @@ final class PromptTemplateStore: ObservableObject {
     /// The file a template is stored in, whichever folder holds it.
     private func fileURL(for fileName: String) -> URL? {
         let fm = FileManager.default
-        return [hooksDirectory, promptsDirectory]
+        return [promptsDirectory, hooksDirectory]
             .map { $0.appendingPathComponent(fileName) }
             .first { fm.fileExists(atPath: $0.path) }
     }

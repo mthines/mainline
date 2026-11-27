@@ -289,7 +289,7 @@ struct PromptsSettingsView: View {
                     store.openInEditor(store.newHook())
                 } label: { Label("New Hook", systemImage: "plus") }
                 Spacer()
-                Button("Open Folder") { store.revealPromptsFolder() }
+                Button("Open Folder") { store.revealHooksFolder() }
             }
             Text("Triggers: " + HookTrigger.allCases.map(\.rawValue).joined(separator: ", "))
                 .font(.caption).foregroundStyle(.secondary)
