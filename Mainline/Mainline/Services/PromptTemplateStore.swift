@@ -47,7 +47,7 @@ enum PromptTerminal: String, CaseIterable, Identifiable {
 // MARK: - Store
 
 /// Owns `~/.config/mainline/`: `config.json` (harnesses, repo paths, checkout step)
-/// and `prompts/*.md` (one template per file). The files are the single source of
+/// `prompts/*.md` and `hooks/*.md` (one template or hook per file). The files are the single source of
 /// truth — Settings edits them through `save`/`delete`, and edits made in an editor
 /// are picked up by a cheap 2-second signature check.
 @MainActor
@@ -62,6 +62,8 @@ final class PromptTemplateStore: ObservableObject {
 
     let directory: URL
     var promptsDirectory: URL { directory.appendingPathComponent("prompts", isDirectory: true) }
+    /// Hooks live here; a template without `on:` stays in `prompts/`. Both folders load as one list.
+    var hooksDirectory: URL { directory.appendingPathComponent("hooks", isDirectory: true) }
     var configURL: URL { directory.appendingPathComponent("config.json") }
 
     private var watchTask: Task<Void, Never>?
@@ -78,6 +80,7 @@ final class PromptTemplateStore: ObservableObject {
     func start() {
         guard watchTask == nil else { return }
         seedIfNeeded()
+        migrateHooksIfNeeded()
         reload()
         watchTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -107,6 +110,36 @@ final class PromptTemplateStore: ObservableObject {
         }
     }
 
+    /// One-time move of the hook files that already sit in `prompts/` into `hooks/`. It runs only while
+    /// `hooks/` does not exist, so a hook the user later drops back into `prompts/` stays where they put it
+    /// (both folders load either way).
+    private func migrateHooksIfNeeded() {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: hooksDirectory.path) else { return }
+        try? fm.createDirectory(at: hooksDirectory, withIntermediateDirectories: true)
+        let files = (try? fm.contentsOfDirectory(at: promptsDirectory, includingPropertiesForKeys: nil)) ?? []
+        for url in files where url.pathExtension.lowercased() == "md" {
+            guard let text = try? String(contentsOf: url, encoding: .utf8),
+                  let t = PromptEngine.parse(fileName: url.lastPathComponent, text: text),
+                  PRHookEngine.isListedHook(t) else { continue }
+            try? fm.moveItem(at: url, to: hooksDirectory.appendingPathComponent(url.lastPathComponent))
+        }
+    }
+
+    /// The file a template is stored in, whichever folder holds it.
+    private func fileURL(for fileName: String) -> URL? {
+        let fm = FileManager.default
+        return [promptsDirectory, hooksDirectory]
+            .map { $0.appendingPathComponent(fileName) }
+            .first { fm.fileExists(atPath: $0.path) }
+    }
+
+    private func markdownFiles(in dir: URL) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension.lowercased() == "md" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
     private func writeConfig(_ config: PromptConfig) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -118,7 +151,9 @@ final class PromptTemplateStore: ObservableObject {
     private func signature() -> String {
         let fm = FileManager.default
         var parts: [String] = []
-        let urls = [configURL] + ((try? fm.contentsOfDirectory(at: promptsDirectory, includingPropertiesForKeys: nil)) ?? [])
+        let urls = [configURL]
+            + ((try? fm.contentsOfDirectory(at: promptsDirectory, includingPropertiesForKeys: nil)) ?? [])
+            + ((try? fm.contentsOfDirectory(at: hooksDirectory, includingPropertiesForKeys: nil)) ?? [])
         for url in urls.sorted(by: { $0.path < $1.path }) {
             let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             parts.append("\(url.lastPathComponent)@\(date?.timeIntervalSince1970 ?? 0)")
@@ -143,14 +178,14 @@ final class PromptTemplateStore: ObservableObject {
             }
         }
 
-        let fm = FileManager.default
-        let files = ((try? fm.contentsOfDirectory(at: promptsDirectory, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension.lowercased() == "md" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        // A file name is a template's identity, so one that exists in both folders loads once (`prompts/` wins).
+        var seen = Set<String>()
+        let files = (markdownFiles(in: promptsDirectory) + markdownFiles(in: hooksDirectory))
+            .filter { seen.insert($0.lastPathComponent).inserted }
         let loaded = files.compactMap { url -> PromptTemplate? in
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
             return PromptEngine.parse(fileName: url.lastPathComponent, text: text)
-        }
+        }.sorted { $0.fileName < $1.fileName }
         if loaded != templates { templates = loaded; revision &+= 1 }
     }
 
@@ -168,23 +203,38 @@ final class PromptTemplateStore: ObservableObject {
         )
     }
 
-    func save(_ template: PromptTemplate) {
-        try? FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
-        let url = promptsDirectory.appendingPathComponent(template.fileName)
+    /// Saves `template` and returns it with the file name it ended up under: a new template or hook still
+    /// named `new-hook.md` / `new-template.md` moves to a file named after what the user called it.
+    @discardableResult
+    func save(_ template: PromptTemplate) -> PromptTemplate {
+        var t = template
+        let existingURL = fileURL(for: t.fileName)
+        // New files: a hook goes to `hooks/`, everything else to `prompts/`. An existing file stays where it is.
+        let dir = existingURL?.deletingLastPathComponent()
+            ?? (PRHookEngine.isListedHook(t) ? hooksDirectory : promptsDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // An existing file is PATCHED, not regenerated: hand-written `#` comments and keys this app does
         // not edit survive a save from Settings. A new file is written whole.
         let text: String
-        if let existing = try? String(contentsOf: url, encoding: .utf8) {
-            text = PromptEngine.patch(existing: existing, with: template)
+        if let existingURL, let existing = try? String(contentsOf: existingURL, encoding: .utf8) {
+            text = PromptEngine.patch(existing: existing, with: t)
         } else {
-            text = PromptEngine.serialize(template)
+            text = PromptEngine.serialize(t)
         }
-        try? text.write(to: url, atomically: true, encoding: .utf8)
+        var target = dir.appendingPathComponent(t.fileName)
+        if let renamed = PromptEngine.renamedFileName(current: t.fileName, name: t.name,
+                                                      existing: Set(templates.map(\.fileName)).subtracting([t.fileName])) {
+            target = dir.appendingPathComponent(renamed)
+            t.fileName = renamed
+        }
+        guard (try? text.write(to: target, atomically: true, encoding: .utf8)) != nil else { reload(); return template }
+        if let existingURL, existingURL != target { try? FileManager.default.removeItem(at: existingURL) }
         reload()
+        return t
     }
 
     func delete(_ template: PromptTemplate) {
-        try? FileManager.default.removeItem(at: promptsDirectory.appendingPathComponent(template.fileName))
+        if let url = fileURL(for: template.fileName) { try? FileManager.default.removeItem(at: url) }
         reload()
     }
 
@@ -234,6 +284,11 @@ final class PromptTemplateStore: ObservableObject {
         reload()
     }
 
+    func revealHooksFolder() {
+        try? FileManager.default.createDirectory(at: hooksDirectory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(hooksDirectory)
+    }
+
     func revealPromptsFolder() {
         try? FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
         NSWorkspace.shared.open(promptsDirectory)
@@ -241,7 +296,7 @@ final class PromptTemplateStore: ObservableObject {
 
     /// Opens a template's file in the user's default editor for `.md`.
     func openInEditor(_ template: PromptTemplate) {
-        NSWorkspace.shared.open(promptsDirectory.appendingPathComponent(template.fileName))
+        if let url = fileURL(for: template.fileName) { NSWorkspace.shared.open(url) }
     }
 
     /// An INACTIVE starter hook (its `on:` line is commented out), saved and returned so the caller can open it.
@@ -255,8 +310,8 @@ final class PromptTemplateStore: ObservableObject {
             of: "checkout: false\n",
             with: "checkout: false\n" + PRHookEngine.starterFrontmatter(
                 issues: FeatureFlagRegistry.issueHooksEnabled, checks: FeatureFlagRegistry.checkHooksEnabled))
-        try? FileManager.default.createDirectory(at: promptsDirectory, withIntermediateDirectories: true)
-        try? text.write(to: promptsDirectory.appendingPathComponent(t.fileName), atomically: true, encoding: .utf8)
+        try? FileManager.default.createDirectory(at: hooksDirectory, withIntermediateDirectories: true)
+        try? text.write(to: hooksDirectory.appendingPathComponent(t.fileName), atomically: true, encoding: .utf8)
         reload()
         return t
     }

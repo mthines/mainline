@@ -734,16 +734,37 @@ enum PromptEngine {
         return lines[...end].joined(separator: "\n") + "\n" + bodyBlock(t)
     }
 
-    /// `Review PR!` → `review-pr.md`, de-duplicated against `existing`.
-    static func fileName(forName name: String, existing: Set<String>) -> String {
-        let slug = name.lowercased()
+    /// `Review PR!` → `review-pr`.
+    static func slug(_ name: String) -> String {
+        name.lowercased()
             .map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
             .split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
-        let base = slug.isEmpty ? "template" : slug
+    }
+
+    /// `Review PR!` → `review-pr.md`, de-duplicated against `existing`.
+    static func fileName(forName name: String, existing: Set<String>) -> String {
+        let s = slug(name)
+        let base = s.isEmpty ? "template" : s
         var candidate = "\(base).md"
         var n = 2
         while existing.contains(candidate) { candidate = "\(base)-\(n).md"; n += 1 }
         return candidate
+    }
+
+    /// The file a freshly created template or hook should move to once the user has named it, or nil to
+    /// keep `current`. Only a file still carrying its placeholder name (`new-hook.md`, `new-hook-3.md`,
+    /// `new-template.md`) is renamed: a file the user named, or one they renamed on disk, is never touched.
+    /// `existing` is every OTHER file name, so the result cannot overwrite one.
+    static func renamedFileName(current: String, name: String, existing: Set<String>) -> String? {
+        let stem = current.hasSuffix(".md") ? String(current.dropLast(3)) : current
+        var base = stem
+        if let dash = stem.lastIndex(of: "-"), Int(stem[stem.index(after: dash)...]) != nil {
+            base = String(stem[..<dash])
+        }
+        guard base == "new-hook" || base == "new-template" else { return nil }
+        let wanted = slug(name)
+        guard !wanted.isEmpty, wanted != base else { return nil }
+        return fileName(forName: name, existing: existing)
     }
 
     // MARK: Validation
@@ -1261,6 +1282,13 @@ enum PromptTemplateChecks {
         // Telemetry vocabulary stays bounded: a PromptError maps to a fixed slug, anything else to one fallback.
         assert(PromptError.telemetryType(of: PromptError.unknownHarness("secret-harness")) == "unknown_harness", "telemetry error slug")
         assert(PromptError.telemetryType(of: CommentError.empty) == "launch_error", "telemetry error fallback")
+        // A file keeps its placeholder name until the user names it; then it follows the name.
+        assert(PromptEngine.renamedFileName(current: "new-hook-3.md", name: "Issues test", existing: []) == "issues-test.md", "placeholder hook file follows its name")
+        assert(PromptEngine.renamedFileName(current: "new-hook.md", name: "Issues test", existing: ["issues-test.md"]) == "issues-test-2.md", "rename never overwrites")
+        assert(PromptEngine.renamedFileName(current: "new-hook-3.md", name: "New hook", existing: []) == nil, "unchanged name keeps the file")
+        assert(PromptEngine.renamedFileName(current: "review-pr.md", name: "Something else", existing: []) == nil, "a file the user named is never renamed")
+        assert(PromptEngine.renamedFileName(current: "new-hook.md", name: "!!!", existing: []) == nil, "an unsluggable name keeps the file")
+        assert(PromptEngine.renamedFileName(current: "new-template-2.md", name: "Triage", existing: []) == "triage.md", "template placeholder too")
         let tpl0 = PromptTemplate(fileName: "q.md", name: "q", harness: "claude", checkout: false, body: "x")
 
         // Parse: frontmatter, comments, fallback name.
