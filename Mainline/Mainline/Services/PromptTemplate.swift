@@ -59,6 +59,12 @@ struct PromptTemplate: Identifiable, Equatable {
     /// `enabled: false` switches a hook off without removing its triggers: it stays in Settings, never
     /// fires. Absent = on, so every existing hook keeps working.
     var hookEnabled: Bool = true
+    /// `self: true` lets the viewer's OWN comments and reviews start this hook. Off by default: an agent
+    /// that comments back as you would otherwise start itself again. Pair it with `max-runs`.
+    var hookSelf: Bool = false
+    /// `max-runs: N` caps how many times this hook starts for one PR or issue, counted across launches.
+    /// 0 = no cap (the 30-minute cooldown and the hourly cap still apply).
+    var hookMaxRuns: Int = 0
 
     var id: String { fileName }
 
@@ -631,7 +637,9 @@ enum PromptEngine {
             hookRole: meta["role"] ?? "",
             hookCheck: meta["check"] ?? "",
             subject: PromptSubject.parse(meta["for"]),
-            hookEnabled: !["false", "no", "0", "off"].contains((meta["enabled"] ?? "").lowercased())
+            hookEnabled: !["false", "no", "0", "off"].contains((meta["enabled"] ?? "").lowercased()),
+            hookSelf: ["true", "yes", "1", "on"].contains((meta["self"] ?? "").lowercased()),
+            hookMaxRuns: max(0, Int((meta["max-runs"] ?? "").trimmingCharacters(in: .whitespaces)) ?? 0)
         )
     }
 
@@ -674,7 +682,7 @@ enum PromptEngine {
         name: \(t.name)
         harness: \(t.harnessKeys.joined(separator: ", "))
         checkout: \(t.checkout ? "true" : "false")
-        \(t.subject == .prs ? "" : "for: \(t.subject.rawValue)\n")\(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")\(t.hookCheck.isEmpty ? "" : "check: \(t.hookCheck)\n")\(t.hookEnabled ? "" : "enabled: false\n")---
+        \(t.subject == .prs ? "" : "for: \(t.subject.rawValue)\n")\(t.when.isEmpty ? "" : "when: \(t.when)\n")\(t.priority == 0 ? "" : "priority: \(t.priority)\n")\(t.on.isEmpty ? "" : "on: \(t.on)\n")\(t.hookScope.isEmpty ? "" : "scope: \(t.hookScope)\n")\(t.hookRole.isEmpty ? "" : "role: \(t.hookRole)\n")\(t.hookCheck.isEmpty ? "" : "check: \(t.hookCheck)\n")\(t.hookEnabled ? "" : "enabled: false\n")\(t.hookSelf ? "self: true\n" : "")\(t.hookMaxRuns > 0 ? "max-runs: \(t.hookMaxRuns)\n" : "")---
         \(bodyBlock(t))
         """
     }
@@ -682,7 +690,7 @@ enum PromptEngine {
     // MARK: Patching an existing file
 
     /// The frontmatter keys Settings edits. Every other key and every `#` comment in a file is left alone.
-    static let ownedKeys = ["name", "harness", "checkout", "for", "when", "priority", "on", "scope", "role", "check", "enabled"]
+    static let ownedKeys = ["name", "harness", "checkout", "for", "when", "priority", "on", "scope", "role", "check", "enabled", "self", "max-runs"]
 
     /// Sets (`set`) or drops (`remove`) frontmatter keys in `text` line by line, so comments, blank lines,
     /// unknown keys and their order survive. A key already present keeps its line when the value is
@@ -727,6 +735,7 @@ enum PromptEngine {
         opt("when", t.when); opt("on", t.on); opt("scope", t.hookScope); opt("role", t.hookRole); opt("check", t.hookCheck)
         opt("priority", t.priority == 0 ? "" : String(t.priority))
         opt("enabled", t.hookEnabled ? "" : "false")
+        opt("self", t.hookSelf ? "true" : ""); opt("max-runs", t.hookMaxRuns > 0 ? String(t.hookMaxRuns) : "")
         let headerPatched = patchFrontmatter(existing, set: set, remove: drop)
         // Replace everything after the closing `---` with the template's prompt.
         let lines = headerPatched.components(separatedBy: "\n")
@@ -1082,6 +1091,8 @@ enum PromptStarters {
         role: authored                   # authored (default) | reviewing | any
         when: !conflict                  # optional extra state guard, as above
 
+    `self: true` lets your own comments and reviews start a hook (default: they never do);
+    `max-runs: N` starts it at most N times per PR or issue.
     Triggers: \(HookTrigger.allCases.map(\.rawValue).joined(separator: ", ")). A hook never fires for a PR's first
     sighting, at most once per PR + trigger per 30 minutes, and at most 10 launches an hour.
     `role` defaults to authored so an agent never starts on a stranger's PR unless you say so.
