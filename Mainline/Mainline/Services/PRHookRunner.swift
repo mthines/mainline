@@ -6,7 +6,9 @@ extension PRManager {
     func handleHookEvents(_ events: [HookEvent]) async {
         guard !events.isEmpty else { return }
         let hooks = promptStore.templates.filter(PRHookEngine.isHook)
-        guard !hooks.isEmpty, !isHookGateClosed(events.count, subject: "pr") else { return }   // no hooks: nothing to count
+        // Your own comments are events only for a hook with `self: true`; without one they are not counted at all.
+        let events = events.filter { !$0.byViewer || hooks.contains(where: \.hookSelf) }
+        guard !events.isEmpty, !hooks.isEmpty, !isHookGateClosed(events.count, subject: "pr") else { return }   // no hooks: nothing to count
         let muted = settings.notifMutedNodeIds   // postponed PRs fire nothing
         let me = settings.githubUsername
         let live = events.filter { !muted.contains($0.pr.nodeId) }
@@ -61,7 +63,8 @@ extension PRManager {
         guard !events.isEmpty else { return }
         guard FeatureFlagRegistry.issueHooksEnabled else { recordHookSkip("issue", reason: "flag_off", count: events.count); return }
         let hooks = promptStore.templates.filter(PRHookEngine.isIssueHook)
-        guard !hooks.isEmpty, !isHookGateClosed(events.count, subject: "issue") else { return }
+        let events = events.filter { !$0.byViewer || hooks.contains(where: \.hookSelf) }
+        guard !events.isEmpty, !hooks.isEmpty, !isHookGateClosed(events.count, subject: "issue") else { return }
         let muted = Set(settings.mutedIssueIds)
         let me = settings.githubUsername
         let live = events.filter { !muted.contains($0.issue.nodeId) }
@@ -119,10 +122,19 @@ extension PRManager {
     }
 
     /// Counts one start (the countdown is over and the launch is going ahead) toward `max-runs:`.
-    private func countRun(_ hook: PromptTemplate, target: String) {
-        guard hook.hookMaxRuns > 0 else { return }
-        hookRuns.record(HookRunLedger.key(hook.fileName, target: target), now: Date())
+    /// Returns false (and counts a `max_runs` skip) when the cap was reached since this launch was scheduled: several
+    /// events for one PR in one poll, or a countdown still pending from an earlier poll, are all admitted before any
+    /// of them starts.
+    private func countRun(_ hook: PromptTemplate, target: String, subject: String) -> Bool {
+        guard hook.hookMaxRuns > 0 else { return true }
+        let key = HookRunLedger.key(hook.fileName, target: target)
+        guard hookRuns.allows(key, max: hook.hookMaxRuns) else {
+            recordHookSkip(subject, reason: "max_runs", count: 1)
+            return false
+        }
+        hookRuns.record(key, now: Date())
         hookRuns.save()
+        return true
     }
 
     private func recordHookSkip(_ subject: String, reason: String, count: Int) {
@@ -169,7 +181,7 @@ extension PRManager {
 
     private func launchHook(_ hook: PromptTemplate, pr: PRSnapshot, id: String, subject: String, label: String) {
         guard !settings.hooksPaused else { recordHookSkip(subject, reason: "paused", count: 1); return }
-        countRun(hook, target: pr.nodeId)
+        guard countRun(hook, target: pr.nodeId, subject: subject) else { return }
         let config = promptStore.config
         let template = PromptEngine.effective(hook, config: config)
         do {
@@ -193,7 +205,7 @@ extension PRManager {
     private func launchIssueHook(_ hook: PromptTemplate, event: IssueHookEvent, id: String, label: String) {
         guard !settings.hooksPaused else { recordHookSkip("issue", reason: "paused", count: 1); return }
         guard FeatureFlagRegistry.issueHooksEnabled else { recordHookSkip("issue", reason: "flag_off", count: 1); return }
-        countRun(hook, target: event.issue.nodeId)
+        guard countRun(hook, target: event.issue.nodeId, subject: "issue") else { return }
         let config = promptStore.config
         let template = PromptEngine.effective(hook, config: config)
         let issue = event.issue

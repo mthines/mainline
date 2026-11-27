@@ -107,7 +107,7 @@ Agent runs, hook decisions and comment posts carry fixed vocabularies only: neve
 names, harness keys, check names, repos, titles or comment text. To answer "why did my hook not
 start": `mainline.hook.decisions` shows whether the event arrived, matched, was throttled, held or
 skipped; `mainline.agent.runs{agent.result="failure"}` shows launch failures by `error.type`.
-Having no hooks configured records nothing (it would dominate the counter). Quiet focus-discovered PRs are dropped by the poller before the runner and leave no decision. A hook whose events never reach the runner (flag off at the poller, issue hooks not yet armed on
+Having no hooks configured records nothing (it would dominate the counter). Your own comments and reviews are events only when some hook sets `self: true`; without one they are not counted. `max_runs` is recorded when a hook has reached its `max-runs` for that PR or issue, at scheduling and again when its countdown ends. Quiet focus-discovered PRs are dropped by the poller before the runner and leave no decision. A hook whose events never reach the runner (flag off at the poller, issue hooks not yet armed on
 the first poll) leaves no decision.
 
 ### Logs
