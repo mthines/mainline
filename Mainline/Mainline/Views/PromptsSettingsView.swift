@@ -225,9 +225,9 @@ struct PromptsSettingsView: View {
                                         isHookMode: target.isHookMode) { sheet = nil }
                     }
                 Spacer()
-                Button("Open Folder") { store.revealPromptsFolder() }
+                Button("Open Folder") { store.revealHooksFolder() }
             }
-            Text("Hooks are files in \(store.promptsDirectory.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). Edits from either side show up within 2 seconds.")
+            Text("Hooks are files in \(store.hooksDirectory.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). Edits from either side show up within 2 seconds.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .buttonStyle(.borderless)

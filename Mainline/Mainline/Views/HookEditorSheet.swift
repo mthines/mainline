@@ -363,18 +363,20 @@ struct HookEditorSheet: View {
         }
     }
 
-    private func save() {
+    /// Saves and returns the template under the file name it ended up with (it can be renamed).
+    @discardableResult
+    private func save() -> PromptTemplate {
         var toSave = draft
         toSave.name = toSave.name.trimmingCharacters(in: .whitespaces)
         if toSave.name.isEmpty { toSave.name = "Untitled" }
         toSave.harnessBodies = toSave.harnessBodies.filter { toSave.harnessKeys.contains($0.key) }
-        store.save(toSave)
+        return store.save(toSave)
     }
 
     private var footer: some View {
         HStack {
             if !isNew { Button("Delete", role: .destructive) { confirmDelete = true } }
-            Button("Open in Editor") { save(); store.openInEditor(draft); onClose() }
+            Button("Open in Editor") { store.openInEditor(save()); onClose() }
                 .help("Saves, then opens the file in your editor")
             Spacer()
             Button("Cancel") { onClose() }.keyboardShortcut(.cancelAction)
